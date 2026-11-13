@@ -85,6 +85,8 @@ func TestRejects(t *testing.T) {
 		`{"type":"integer","value":"1.5"}`, // not an integer
 		`{"type":"integer","value":"99999999999999999999"}`,
 		`{"type":"integer"}`,                    // missing value
+		`{"type":"text","value":null}`,          // null isn't a text value
+		`{"type":"float","value":null}`,         // nor a float
 		`{"type":"text","value":5}`,             // text must be a string
 		`{"type":"blob","value":"AA"}`,          // blob takes base64
 		`{"type":"blob","base64":"!!"}`,         // bad base64

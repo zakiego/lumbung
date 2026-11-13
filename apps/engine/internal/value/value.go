@@ -199,7 +199,7 @@ func (v *Value) unmarshalTyped(data []byte) error {
 		return fmt.Errorf("value: %w", err)
 	}
 	needValue := func() error {
-		if len(w.Value) == 0 {
+		if len(w.Value) == 0 || string(w.Value) == "null" {
 			return fmt.Errorf("value: %s needs a value", w.Type)
 		}
 		if w.Base64 != nil {
