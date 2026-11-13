@@ -54,4 +54,70 @@ CREATE TABLE snapshot_schedules (
   created_at    TEXT NOT NULL
 ) STRICT;
 `,
+
+	// 3: tokens, audit log, stats, slow queries and idempotency keys.
+	`
+CREATE TABLE tokens (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  secret_hash  BLOB NOT NULL,
+  scope        TEXT NOT NULL CHECK (scope IN ('instance', 'database')),
+  database_id  TEXT REFERENCES databases(id),
+  branch_id    TEXT,
+  access       TEXT NOT NULL CHECK (access IN ('read', 'write', 'admin')),
+  service      INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL,
+  expires_at   TEXT,
+  last_used_at TEXT,
+  revoked_at   TEXT,
+  CHECK ((scope = 'instance') = (database_id IS NULL)),
+  CHECK (branch_id IS NULL OR database_id IS NOT NULL)
+) STRICT;
+
+CREATE TABLE audit (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  at         TEXT NOT NULL,
+  token_id   TEXT NOT NULL DEFAULT '',
+  actor      TEXT NOT NULL DEFAULT '',
+  action     TEXT NOT NULL,
+  target     TEXT NOT NULL DEFAULT '',
+  result     TEXT NOT NULL CHECK (result IN ('ok', 'error')),
+  code       TEXT NOT NULL DEFAULT '',
+  request_id TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX audit_at ON audit(at);
+
+CREATE TABLE stats_minute (
+  branch_id     TEXT NOT NULL,
+  minute        TEXT NOT NULL,
+  queries       INTEGER NOT NULL,
+  rows_read     INTEGER NOT NULL,
+  rows_written  INTEGER NOT NULL,
+  errors        INTEGER NOT NULL,
+  duration_hist TEXT NOT NULL,
+  PRIMARY KEY (branch_id, minute)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE slow_queries (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  branch_id   TEXT NOT NULL,
+  at          TEXT NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  sql         TEXT NOT NULL,
+  error_code  TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX slow_queries_branch ON slow_queries(branch_id, id);
+
+CREATE TABLE idempotency (
+  token_id     TEXT NOT NULL,
+  key          TEXT NOT NULL,
+  method       TEXT NOT NULL,
+  path         TEXT NOT NULL,
+  request_hash BLOB NOT NULL,
+  status       INTEGER NOT NULL,
+  body         BLOB NOT NULL,
+  created_at   TEXT NOT NULL,
+  PRIMARY KEY (token_id, key)
+) STRICT;
+`,
 }

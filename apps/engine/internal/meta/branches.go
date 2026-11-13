@@ -132,10 +132,25 @@ func (s *Store) TouchBranch(ctx context.Context, branchID string) error {
 	return err
 }
 
-// DeleteBranch removes a branch record. Its snapshots stay.
+// DeleteBranch removes a branch record, revokes tokens limited to it and
+// drops its stats. Its snapshots stay.
 func (s *Store) DeleteBranch(ctx context.Context, branchID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM branches WHERE id = ?`, branchID)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, q := range []string{
+		`UPDATE tokens SET revoked_at = '` + now() + `' WHERE branch_id = ? AND revoked_at IS NULL`,
+		`DELETE FROM stats_minute WHERE branch_id = ?`,
+		`DELETE FROM slow_queries WHERE branch_id = ?`,
+		`DELETE FROM branches WHERE id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, branchID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // SetDefaultBranch makes a branch the database's default and protects it.
@@ -284,6 +299,9 @@ func (s *Store) PurgeDatabase(ctx context.Context, dbID string) (bool, error) {
 		return false, nil
 	}
 	for _, q := range []string{
+		`DELETE FROM tokens WHERE database_id = ?`,
+		`DELETE FROM stats_minute WHERE branch_id IN (SELECT id FROM branches WHERE database_id = ?)`,
+		`DELETE FROM slow_queries WHERE branch_id IN (SELECT id FROM branches WHERE database_id = ?)`,
 		`DELETE FROM snapshot_schedules WHERE database_id = ?`,
 		`DELETE FROM snapshots WHERE database_id = ?`,
 		`DELETE FROM branches WHERE database_id = ?`,

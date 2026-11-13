@@ -15,6 +15,7 @@ import (
 	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
 	"github.com/zakiego/lumbung/apps/engine/internal/config"
 	"github.com/zakiego/lumbung/apps/engine/internal/ids"
+	"github.com/zakiego/lumbung/apps/engine/internal/meta"
 )
 
 // Dumps write tables in name order; a child that sorts before its parent,
@@ -205,4 +206,29 @@ func TestOrphansRemovedAtStart(t *testing.T) {
 		t.Error("a file not named like an id was removed")
 	}
 	mustQuery(t, e2, "a", Read, "SELECT 1")
+}
+
+// Purging a database also removes its tokens and stats, which reference it.
+func TestPurgeRemovesTokensAndStats(t *testing.T) {
+	e := newEngine(t, nil)
+	d := mustCreate(t, e, "a")
+	if _, err := e.meta.CreateToken(bg, meta.Token{ID: "tok_aaaaaaaaaaaaaaaaaaaa", Name: "t", SecretHash: []byte{1},
+		Scope: "database", DatabaseID: d.ID, Access: "read"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.meta.AddStats(bg, []meta.StatsBucket{{BranchID: d.DefaultBranchID, Minute: time.Now(), Queries: 1, Durations: []int64{1}}}, time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.DeleteDatabase(bg, "a"); err != nil {
+		t.Fatal(err)
+	}
+	e.purgeTrash(bg, time.Now().Add(e.cfg.TrashRetention+time.Hour))
+	if _, err := e.meta.GetToken(bg, "tok_aaaaaaaaaaaaaaaaaaaa"); err == nil {
+		t.Fatal("token of a purged database kept")
+	}
+	if rows, _ := e.meta.ListStats(bg, d.DefaultBranchID, time.Now().Add(-time.Hour)); len(rows) != 0 {
+		t.Fatal("stats of a purged database kept")
+	}
+	_, err := e.RestoreDatabase(bg, d.ID, "")
+	wantCode(t, err, apierr.DatabaseNotFound, "restore after purge")
 }
