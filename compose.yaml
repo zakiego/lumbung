@@ -1,0 +1,33 @@
+# Lumbung on one machine: the engine (and, from milestone 8, the dashboard)
+# with one data volume, reachable only from this machine. Put a reverse proxy
+# with TLS in front to reach it from elsewhere (see the Self-hosting docs).
+#
+#   docker compose up -d --build
+#   docker compose exec engine lumbung --help
+name: lumbung
+
+services:
+  engine:
+    build:
+      context: apps/engine
+      args:
+        VERSION: ${LUMBUNG_VERSION:-dev}
+    image: lumbung-engine:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4870:4870"
+    environment:
+      LUMBUNG_DATA_DIR: /data
+      LUMBUNG_ADDR: 0.0.0.0:4870
+    volumes:
+      - data:/data
+    healthcheck:
+      test: ["CMD", "lumbungd", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    stop_grace_period: 40s
+
+volumes:
+  data:
