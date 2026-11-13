@@ -30,4 +30,22 @@ scripts/         CI helpers, worktree setup, wording check, docs tests
 
 ## Commands
 
-Filled in by milestone 0.
+Run from the repo root. pnpm drives everything, including the Go module (`apps/engine/package.json` wraps the `go` commands), and root scripts run one package at a time.
+
+```bash
+pnpm install                          # TS dependencies (Go fetches its own on first build)
+pnpm dev:engine                       # lumbungd on 127.0.0.1:4870
+pnpm dev:site                         # landing and docs on localhost:4872
+pnpm test                             # every package: Go tests with -race, TS tests
+pnpm typecheck                        # go vet, tsc, astro check
+pnpm lint                             # go vet + staticcheck
+pnpm build                            # engine binaries in apps/engine/bin, site in apps/site/dist
+pnpm check:wording                    # the wording rule (CI runs it with its self-test)
+pnpm --filter @lumbung/engine vulncheck   # govulncheck
+```
+
+Inside `apps/engine` the plain Go commands work too: `go test -race ./...`, `go tool staticcheck ./...`, `go tool govulncheck ./...`. `go.mod` pins Go 1.27.4 (ADR 0002); an older local Go downloads it on first use.
+
+Dev ports: engine 4870, dashboard 4871, site 4872.
+
+T3 worktrees: `scripts/setup-worktree.sh` copies gitignored env files from the main checkout and installs pnpm and Go dependencies. `scripts/clean-worktree.sh` deletes dependencies and build output in a settled worktree and refuses to run in the main checkout. Actions in `t3.json` only take effect after importing them in Settings > Projects > Actions (already done for this project).
