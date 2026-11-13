@@ -1,0 +1,89 @@
+/* The landing page's styles. Only the landing layout imports this file, so
+   Starlight's docs pages never load Tailwind's reset. */
+@import "tailwindcss" source("..");
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-secondary-text: var(--secondary-text);
+  --color-faint: var(--faint);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-brand: var(--brand);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-destructive: var(--destructive);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-code: var(--code);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.5);
+  --radius-2xl: calc(var(--radius) * 2);
+}
+
+/* Marketing stays dark. Neutrals do the work; indigo is a small accent. */
+:root {
+  color-scheme: dark;
+  --radius: 0.5rem;
+  --background: #08090a;
+  --foreground: #f7f8f8;
+  --card: #0f1011;
+  --card-foreground: #f7f8f8;
+  --popover: #0f1011;
+  --popover-foreground: #f7f8f8;
+  --primary: #e5e5e6;
+  --primary-foreground: #08090a;
+  --secondary: rgba(255, 255, 255, 0.05);
+  --secondary-foreground: #f7f8f8;
+  --secondary-text: #d0d6e0;
+  --muted: #141516;
+  --muted-foreground: #8a8f98;
+  --faint: #62666d;
+  --accent: #191a1b;
+  --accent-foreground: #f7f8f8;
+  --brand: #7170ff;
+  --success: #27a644;
+  --warning: #f0bf00;
+  --destructive: #eb5757;
+  --code: #1c1c1f;
+  --border: #23252a;
+  --input: #2a2b30;
+  --ring: #5e6ad2;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv01", "ss03";
+  }
+  ::selection {
+    background: color-mix(in lch, #5e6ad2, black 10%);
+    color: #fff;
+  }
+}
