@@ -2,6 +2,7 @@
 # Starts a dev server on a port that is stable per checkout.
 #
 #   bash scripts/dev.sh engine   lumbungd
+#   bash scripts/dev.sh dashboard  TanStack Start dev server
 #   bash scripts/dev.sh site     Astro dev server
 #
 # The main checkout uses the documented ports (engine 4870, site 4872). A
@@ -30,7 +31,13 @@ engine)
   # Build, then exec the binary, so a stop signal reaches lumbungd itself
   # (go run doesn't forward it).
   go build -o bin/lumbungd ./cmd/lumbungd
-  exec ./bin/lumbungd -addr "127.0.0.1:$port"
+  LUMBUNG_ADDR="127.0.0.1:$port" exec ./bin/lumbungd
+  ;;
+dashboard)
+  port=$((base + 1))
+  echo "dashboard: http://localhost:$port"
+  cd "$root/apps/dashboard"
+  exec ./node_modules/.bin/vite dev --port "$port" --strictPort
   ;;
 site)
   port=$((base + 2))
@@ -39,7 +46,7 @@ site)
   exec ./node_modules/.bin/astro dev --port "$port"
   ;;
 *)
-  echo "usage: bash scripts/dev.sh engine|site" >&2
+  echo "usage: bash scripts/dev.sh engine|dashboard|site" >&2
   exit 2
   ;;
 esac
