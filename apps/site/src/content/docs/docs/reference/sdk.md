@@ -36,17 +36,18 @@ const { rows } = await db.query("SELECT id, email FROM users WHERE id = ?", [1])
 
 ## Queries
 
+<!-- docs-test: continue -->
 ```ts
 // Positional parameters
-await db.query("INSERT INTO users (email) VALUES (?)", ["ana@example.com"])
+await db.query("INSERT INTO users (email) VALUES (?)", ["budi@example.com"])
 
 // Named parameters (:name, @name or $name)
-await db.query("SELECT * FROM users WHERE email = :email", { email: "ana@example.com" })
+await db.query("SELECT * FROM users WHERE email = :email", { email: "budi@example.com" })
 
 // One transaction: all or nothing
 await db.batch([
-  { sql: "INSERT INTO users (email) VALUES (?)", args: ["budi@example.com"] },
-  "UPDATE counters SET n = n + 1",
+  { sql: "INSERT INTO users (email) VALUES (?)", args: ["cici@example.com"] },
+  "UPDATE users SET name = 'Cici' WHERE email = 'cici@example.com'",
 ])
 
 // A read-only connection, even with a write token. Also makes it safe to retry.
@@ -54,7 +55,7 @@ await db.query("SELECT count(*) AS n FROM users", [], { readOnly: true })
 
 // A schema migration: foreign keys are checked once at the end, so a table
 // rebuild doesn't fire ON DELETE CASCADE.
-await db.batch(migrationStatements, { migration: true })
+await db.batch(["ALTER TABLE users ADD COLUMN bio TEXT"], { migration: true })
 ```
 
 A `Result` has:
@@ -84,11 +85,12 @@ Integers travel as decimal strings, so a `bigint` keeps every bit. A whole JS nu
 
 Every failure is a `LumbungError` with a stable `code` (also a success response whose body isn't valid JSON, as `invalid_response`) from the [error codes](/docs/reference/error-codes/), the HTTP `status`, SQLite's message in `detail`, and the `requestId` to find it in the server log. Network failures have code `network_error` and status 0.
 
+<!-- docs-test: continue -->
 ```ts
 import { LumbungError } from "@lumbung/client"
 
 try {
-  await db.query("INSERT INTO users (email) VALUES (?)", ["ana@example.com"])
+  await db.query("INSERT INTO users (email) VALUES (?)", ["budi@example.com"])
 } catch (err) {
   if (err instanceof LumbungError && err.code === "constraint_violation") {
     // already there
@@ -103,14 +105,18 @@ Only requests that can't change data are retried: GET requests, and queries or b
 ## Management
 
 ```ts
-const admin = createClient({ url, token })
+import { createClient } from "@lumbung/client"
 
-await admin.databases.create("app")
-await admin.branches.create("app", "pr-42", { expiresInDays: 7 })
-const diff = await admin.branches.diff("app", "pr-42", "main")
-const snap = await admin.snapshots.create("app", "main", { label: "before deploy" })
-await admin.snapshots.restore("app", snap.id, "restored")
-const { token } = await admin.tokens.create({ name: "ci", database: "app", access: "write" })
+// No database option: management calls name the database themselves.
+const admin = createClient({ url: "http://127.0.0.1:4870", token: process.env.LUMBUNG_TOKEN! })
+
+await admin.databases.create("shop")
+await admin.branches.create("shop", "pr-42", { expiresInDays: 7 })
+const diff = await admin.branches.diff("shop", "pr-42", "main")
+const snap = await admin.snapshots.create("shop", "main", { label: "before deploy" })
+await admin.snapshots.restore("shop", snap.id, "restored")
+const ci = await admin.tokens.create({ name: "ci", database: "shop", access: "write" })
+console.log(diff.changes.length, ci.token.slice(0, 4))
 ```
 
 | Group | Methods |

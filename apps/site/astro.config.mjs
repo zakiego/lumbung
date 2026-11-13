@@ -15,11 +15,23 @@ export default defineConfig({
       sidebar: [
         {
           label: "Start",
-          items: [{ label: "What is Lumbung", slug: "docs" }],
+          items: [
+            { label: "What is Lumbung", slug: "docs" },
+            { label: "Quickstart", slug: "docs/quickstart" },
+            { label: "Install", slug: "docs/install" },
+          ],
         },
         { label: "Concepts", items: [{ autogenerate: { directory: "docs/concepts" } }] },
         { label: "Guides", items: [{ autogenerate: { directory: "docs/guides" } }] },
         { label: "Reference", items: [{ autogenerate: { directory: "docs/reference" } }] },
+        { label: "Self-hosting", items: [{ autogenerate: { directory: "docs/self-hosting" } }] },
+        {
+          label: "Help",
+          items: [
+            { label: "Troubleshooting", slug: "docs/troubleshooting" },
+            { label: "Changelog", slug: "docs/changelog" },
+          ],
+        },
       ],
     }),
   ],

@@ -7,6 +7,15 @@ sidebar:
 
 `lumbung migrate apply` runs every `.sql` file in a folder, in name order, that hasn't run on the branch yet. Each file runs in its own transaction, so a failing file changes nothing and the ones before it stay applied. `migrate status` only reads, so a read-only token can check what's pending.
 
+A migration is a plain SQL file. Name files so they sort in the order they should run:
+
+```sh
+mkdir -p migrations
+cat > migrations/0001_add_bio.sql <<'SQL'
+ALTER TABLE users ADD COLUMN bio TEXT;
+SQL
+```
+
 ```sh
 lumbung migrate status --db app --dir migrations
 lumbung migrate apply  --db app --dir migrations

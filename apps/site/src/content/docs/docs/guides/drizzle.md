@@ -5,6 +5,8 @@ sidebar:
   order: 4
 ---
 
+<!-- docs-test: empty-app -->
+
 `@lumbung/client/drizzle` runs Drizzle on a Lumbung branch through Drizzle's `sqlite-proxy` driver. The full example lives in `examples/drizzle` in the repository, and CI runs it against a real engine.
 
 ## 1. Install
@@ -54,7 +56,8 @@ import * as schema from "./schema.ts"
 
 const db = drizzle({ url: "http://127.0.0.1:4870", token: process.env.LUMBUNG_TOKEN!, database: "app" }, { schema })
 
-await db.insert(schema.users).values({ email: "ana@example.com", name: "Ana" })
+// onConflictDoNothing keeps this safe to run twice.
+await db.insert(schema.users).values({ email: "ana@example.com", name: "Ana" }).onConflictDoNothing()
 const ana = await db.select().from(schema.users).where(eq(schema.users.email, "ana@example.com")).get()
 ```
 
@@ -64,12 +67,15 @@ const ana = await db.select().from(schema.users).where(eq(schema.users.email, "a
 
 Drizzle wraps driver errors in its own `DrizzleQueryError`. The `LumbungError`, with its stable `code`, is the `cause`:
 
+<!-- docs-test: continue -->
 ```ts
 try {
   await db.insert(schema.users).values({ email: "ana@example.com", name: "Again" })
 } catch (err) {
   if ((err as { cause?: { code?: string } }).cause?.code === "constraint_violation") {
     // duplicate email
+  } else {
+    throw err
   }
 }
 ```
@@ -78,6 +84,10 @@ try {
 
 Pass `branch` to work on a branch, for example to try a migration first:
 
+<!-- docs-test: continue -->
 ```ts
-const preview = drizzle({ url, token, database: "app", branch: "pr-42" }, { schema })
+const preview = drizzle(
+  { url: "http://127.0.0.1:4870", token: process.env.LUMBUNG_TOKEN!, database: "app", branch: "pr-42" },
+  { schema },
+)
 ```
