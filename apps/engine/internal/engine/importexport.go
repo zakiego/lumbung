@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlitex"
+	"github.com/zakiego/lumbung/apps/engine/internal/sqlsplit"
 )
 
 // ImportFormat is what an import uploads.
@@ -234,14 +234,14 @@ func (e *Engine) stageSQL(ctx context.Context, r io.Reader, staged string, limit
 		_ = conn.ExecTrusted("ROLLBACK")
 		return err
 	}
-	split := newSplitter(io.LimitReader(r, limit+1))
+	split := sqlsplit.NewReader(io.LimitReader(r, limit+1))
 	var pending strings.Builder
 	for {
-		chunk, err := split.next()
+		chunk, err := split.Next()
 		if err != nil && !errors.Is(err, io.EOF) {
 			return fail(err)
 		}
-		if split.read > limit {
+		if split.Read > limit {
 			return fail(apierr.Newf(apierr.ImportTooLarge, "the upload is larger than %d bytes", limit))
 		}
 		pending.WriteString(chunk)
@@ -300,58 +300,6 @@ func runDumpStatement(conn *sqlitex.Conn, text string, last bool) (bool, error) 
 		return false, apierr.New(apierr.InvalidImport, "the SQL dump couldn't be split into statements")
 	}
 	return true, nil
-}
-
-// splitter cuts SQL text after each semicolon that sits outside quotes,
-// identifiers and comments. A cut may still fall inside a trigger body; the
-// caller detects that and joins chunks.
-type splitter struct {
-	r    *bufio.Reader
-	read int64
-}
-
-func newSplitter(r io.Reader) *splitter { return &splitter{r: bufio.NewReaderSize(r, 64<<10)} }
-
-func (s *splitter) next() (string, error) {
-	var b strings.Builder
-	var quote rune // ', ", ` or ] while inside one
-	lineComment, blockComment := false, false
-	var prev rune
-	for {
-		c, size, err := s.r.ReadRune()
-		if err != nil {
-			return b.String(), err
-		}
-		s.read += int64(size)
-		b.WriteRune(c)
-		switch {
-		case lineComment:
-			if c == '\n' {
-				lineComment = false
-			}
-		case blockComment:
-			if prev == '*' && c == '/' {
-				blockComment = false
-				c = 0
-			}
-		case quote != 0:
-			if c == quote {
-				quote = 0
-			}
-		case c == '\'' || c == '"' || c == '`':
-			quote = c
-		case c == '[':
-			quote = ']'
-		case prev == '-' && c == '-':
-			lineComment = true
-		case prev == '/' && c == '*':
-			blockComment = true
-			c = 0
-		case c == ';':
-			return b.String(), nil
-		}
-		prev = c
-	}
 }
 
 func importErr(err error) error {
