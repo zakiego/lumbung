@@ -51,6 +51,7 @@ type Engine struct {
 
 	closeOnce sync.Once
 	closeErr  error
+	unlock    func() error // releases the data directory lock
 
 	// freeBytes reports free disk space; replaced in tests.
 	freeBytes func(path string) (int64, error)
@@ -68,7 +69,18 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*Engine, er
 	if err := layout.Ensure(); err != nil {
 		return nil, err
 	}
+	unlock, err := layout.Lock()
+	if err != nil {
+		return nil, err
+	}
+	opened := false
+	defer func() {
+		if !opened {
+			_ = unlock()
+		}
+	}()
 	e := &Engine{
+		unlock:    unlock,
 		cfg:       cfg,
 		layout:    layout,
 		log:       log,
@@ -94,6 +106,7 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*Engine, er
 	}
 	e.removeStaleTemp()
 	go e.janitor()
+	opened = true
 	return e, nil
 }
 
@@ -120,6 +133,7 @@ func (e *Engine) close() error {
 	if e.meta != nil {
 		errs = append(errs, e.meta.Close())
 	}
+	errs = append(errs, e.unlock())
 	return errors.Join(errs...)
 }
 
@@ -137,13 +151,17 @@ func (e *Engine) Ready(ctx context.Context) error {
 // Layout returns the data directory layout.
 func (e *Engine) Layout() storage.Layout { return e.layout }
 
-func (e *Engine) limits() sqlitex.Limits {
+func (e *Engine) limits() sqlitex.Limits { return Limits(e.cfg) }
+
+// Limits are the limits user connections run with, for tools outside the
+// engine (backups) that open branch files.
+func Limits(cfg config.Config) sqlitex.Limits {
 	return sqlitex.Limits{
-		MaxValueBytes:  int(e.cfg.MaxValueBytes),
-		MaxSQLBytes:    int(e.cfg.MaxSQLBytes),
-		MaxParams:      e.cfg.MaxParams,
-		MaxMemoryBytes: e.cfg.ConnMaxMemory,
-		BusyTimeout:    e.cfg.BusyTimeout,
+		MaxValueBytes:  int(cfg.MaxValueBytes),
+		MaxSQLBytes:    int(cfg.MaxSQLBytes),
+		MaxParams:      cfg.MaxParams,
+		MaxMemoryBytes: cfg.ConnMaxMemory,
+		BusyTimeout:    cfg.BusyTimeout,
 	}
 }
 
