@@ -1,0 +1,120 @@
+package engine
+
+import (
+	"context"
+	"sync"
+	"time"
+)
+
+// gate serializes work on one branch: requests share it, and operations that
+// replace or remove the branch's file (reset, delete, import, deleting the
+// database) hold it alone. A waiting exclusive holder blocks new requests, so
+// it can't starve.
+//
+// Unlike sync.RWMutex it honors a context, so a request waiting behind a long
+// reset gives up at its statement timeout.
+type gate struct {
+	mu      sync.Mutex
+	readers int
+	writer  bool
+	waiting int // exclusive holders waiting
+	changed chan struct{}
+}
+
+func newGate() *gate { return &gate{changed: make(chan struct{})} }
+
+// notify wakes every waiter. Call with mu held.
+func (g *gate) notify() {
+	close(g.changed)
+	g.changed = make(chan struct{})
+}
+
+func (g *gate) wait(ctx context.Context, ch chan struct{}) error {
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// share takes the gate for a request.
+func (g *gate) share(ctx context.Context) error {
+	for {
+		g.mu.Lock()
+		if !g.writer && g.waiting == 0 {
+			g.readers++
+			g.mu.Unlock()
+			return nil
+		}
+		ch := g.changed
+		g.mu.Unlock()
+		if err := g.wait(ctx, ch); err != nil {
+			return err
+		}
+	}
+}
+
+func (g *gate) unshare() {
+	g.mu.Lock()
+	g.readers--
+	g.notify()
+	g.mu.Unlock()
+}
+
+// exclusive takes the gate alone, waiting for requests in flight to finish.
+func (g *gate) exclusive(ctx context.Context) error {
+	g.mu.Lock()
+	g.waiting++
+	g.mu.Unlock()
+	for {
+		g.mu.Lock()
+		if !g.writer && g.readers == 0 {
+			g.writer = true
+			g.waiting--
+			g.mu.Unlock()
+			return nil
+		}
+		ch := g.changed
+		g.mu.Unlock()
+		if err := g.wait(ctx, ch); err != nil {
+			g.mu.Lock()
+			g.waiting--
+			g.notify()
+			g.mu.Unlock()
+			return err
+		}
+	}
+}
+
+func (g *gate) release() {
+	g.mu.Lock()
+	g.writer = false
+	g.notify()
+	g.mu.Unlock()
+}
+
+// gates hands out one gate per branch id. Gates are tiny and never freed:
+// a long-running instance holds one per branch it has ever served.
+type gates struct {
+	mu sync.Mutex
+	m  map[string]*gate
+}
+
+func (gs *gates) get(branchID string) *gate {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	if gs.m == nil {
+		gs.m = map[string]*gate{}
+	}
+	g, ok := gs.m[branchID]
+	if !ok {
+		g = newGate()
+		gs.m[branchID] = g
+	}
+	return g
+}
+
+// maintenanceTimeout bounds how long a reset, delete or import waits for
+// requests in flight on the branch.
+const maintenanceTimeout = 2 * time.Minute

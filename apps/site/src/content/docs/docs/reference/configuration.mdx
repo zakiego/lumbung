@@ -32,6 +32,9 @@ Durations use Go syntax (`500ms`, `30s`, `5m`). Sizes are bytes, or a number wit
 | `LUMBUNG_MIN_FREE_DISK` | bytes | `2GiB` | Creating a database, branch, snapshot or import is refused with HTTP 507 when the disk has less free space than this. |
 | `LUMBUNG_MAX_DATABASES` | integer | `100` | Most databases on the instance, counting ones in the trash. |
 | `LUMBUNG_MAX_BRANCHES` | integer | `50` | Most branches in one database. |
+| `LUMBUNG_TRASH_RETENTION` | duration | `168h` | How long a deleted database stays in the trash, restorable, before its files are removed. |
+| `LUMBUNG_MAX_IMPORT_BYTES` | bytes | `1GiB` | Largest `.db` file or SQL dump an import accepts. The branch size limit also applies. |
+| `LUMBUNG_IMPORT_TIMEOUT` | duration | `10m` | Longest an import may run, in place of the statement timeout. |
 | `LUMBUNG_READERS_PER_BRANCH` | integer | `4` | Read-only connections kept per open branch, next to its one writer. |
 | `LUMBUNG_MAX_OPEN_BRANCHES` | integer | `64` | Most branches with open connections at once. The least recently used idle branch is closed to make room. |
 | `LUMBUNG_IDLE_CONN_TIMEOUT` | duration | `5m` | A branch unused this long has its connections closed. |

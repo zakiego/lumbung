@@ -27,7 +27,7 @@ func New(root string) (Layout, error) {
 
 // Ensure creates the directory tree with owner-only permissions.
 func (l Layout) Ensure() error {
-	for _, d := range []string{l.Root, l.DBsDir(), l.SnapshotsDir(), l.TrashDir(), l.SecretsDir()} {
+	for _, d := range []string{l.Root, l.DBsDir(), l.SnapshotsDir(), l.TrashDir(), l.SecretsDir(), l.TmpDir()} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("storage: create %s: %w", d, err)
 		}
@@ -40,6 +40,21 @@ func (l Layout) DBsDir() string       { return filepath.Join(l.Root, "dbs") }
 func (l Layout) SnapshotsDir() string { return filepath.Join(l.Root, "snapshots") }
 func (l Layout) TrashDir() string     { return filepath.Join(l.Root, "trash") }
 func (l Layout) SecretsDir() string   { return filepath.Join(l.Root, "secrets") }
+
+// TmpDir holds files being prepared (exports); it is emptied at start.
+func (l Layout) TmpDir() string { return filepath.Join(l.Root, "tmp") }
+
+// SnapshotDir is the folder holding a database's snapshots.
+func (l Layout) SnapshotDir(dbID string) string {
+	mustID(dbID, ids.Database)
+	return filepath.Join(l.SnapshotsDir(), dbID)
+}
+
+// TrashEntry is where a deleted database's folders wait for purge.
+func (l Layout) TrashEntry(dbID string) string {
+	mustID(dbID, ids.Database)
+	return filepath.Join(l.TrashDir(), dbID)
+}
 
 // DatabaseDir is the folder holding a database's branch files.
 func (l Layout) DatabaseDir(dbID string) string {

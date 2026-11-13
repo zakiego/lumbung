@@ -41,6 +41,12 @@ Errors come back as `application/problem+json` with a stable `code`. Match on `c
 | `branch_not_found` | 404 Not Found | No branch with that name or id in this database. |
 | `name_taken` | 409 Conflict | Another database or branch already has that name. |
 | `limit_reached` | 409 Conflict | The instance already has the most databases, or the database the most branches, allowed. |
+| `snapshot_not_found` | 404 Not Found | No snapshot with that id in this database. |
+| `branch_protected` | 409 Conflict | The branch is protected, so it can't be deleted, reset or overwritten by an import. The default branch is always protected. |
+| `parent_gone` | 409 Conflict | The branch can't be reset because the branch or snapshot it was made from no longer exists. |
+| `branch_not_empty` | 409 Conflict | An import into a branch that already has tables needs `mode=replace`. |
+| `invalid_import` | 400 Bad Request | The uploaded file isn't a valid SQLite database or SQL dump, or fails its integrity check. |
+| `import_too_large` | 413 Request Entity Too Large | The upload is larger than the import limit or the branch size limit. |
 | `busy` | 503 Service Unavailable | The branch stayed locked longer than the busy timeout. Retry. |
 | `unavailable` | 503 Service Unavailable | The engine can't serve: for example meta.db is newer than this binary. |
 | `internal` | 500 Internal Server Error | Something failed inside the engine. The log has details. |

@@ -50,6 +50,7 @@ type Conn struct {
 	vfsName  string
 	readOnly bool
 	trusted  bool
+	ignoreTx bool
 }
 
 // ErrReadOnlyCreate is returned when a read-only connection is asked to
@@ -165,6 +166,9 @@ func (c *Conn) harden(opts Options) error {
 		if c.trusted {
 			return sqlite3.AUTH_OK
 		}
+		if c.ignoreTx && action == sqlite3.AUTH_TRANSACTION {
+			return sqlite3.AUTH_IGNORE
+		}
 		return authorize(action, arg3, arg4, schema, inner)
 	})
 }
@@ -181,6 +185,11 @@ func (c *Conn) pragmaText(sql string) (string, error) {
 	}
 	return out, stmt.Err()
 }
+
+// IgnoreTransactions makes BEGIN, COMMIT, END and ROLLBACK in user SQL
+// silent no-ops instead of errors, for running a SQL dump inside a
+// transaction the engine opened. SAVEPOINT stays denied.
+func (c *Conn) IgnoreTransactions(on bool) { c.ignoreTx = on }
 
 // ReadOnly reports whether the connection was opened read-only.
 func (c *Conn) ReadOnly() bool { return c.readOnly }

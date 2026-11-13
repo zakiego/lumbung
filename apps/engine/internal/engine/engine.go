@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -34,6 +35,8 @@ type Engine struct {
 
 	poolsMu sync.Mutex
 	pools   map[string]*branchPool // by branch id
+
+	gates gates // per-branch maintenance gates
 
 	usageMu  sync.Mutex
 	sizes    map[string]int64 // bytes on disk by branch id
@@ -79,6 +82,7 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*Engine, er
 		_ = e.meta.Close()
 		return nil, err
 	}
+	e.removeStaleTemp()
 	go e.janitor()
 	return e, nil
 }
@@ -191,7 +195,38 @@ func (e *Engine) janitor() {
 		case <-e.stop:
 			return
 		case <-tick.C:
-			e.closeIdle(time.Now().Add(-e.cfg.IdleConnTimeout))
+			e.tick(time.Now())
+		}
+	}
+}
+
+// tick runs the periodic work: idle connections, expired branches,
+// scheduled snapshots and the trash.
+func (e *Engine) tick(now time.Time) {
+	e.closeIdle(now.Add(-e.cfg.IdleConnTimeout))
+	if e.refused != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	e.deleteExpiredBranches(ctx)
+	e.runSchedules(ctx, now)
+	e.purgeTrash(ctx, now)
+}
+
+// removeStaleTemp deletes files a crash left mid-copy: the tmp folder's
+// contents and *.tmp-* files next to branches and snapshots. They were never
+// recorded in meta.db, so nothing refers to them.
+func (e *Engine) removeStaleTemp() {
+	if entries, err := os.ReadDir(e.layout.TmpDir()); err == nil {
+		for _, en := range entries {
+			_ = os.RemoveAll(filepath.Join(e.layout.TmpDir(), en.Name()))
+		}
+	}
+	for _, root := range []string{e.layout.DBsDir(), e.layout.SnapshotsDir()} {
+		matches, _ := filepath.Glob(filepath.Join(root, "*", "*.tmp-*"))
+		for _, m := range matches {
+			_ = os.Remove(m)
 		}
 	}
 }
@@ -236,6 +271,13 @@ func (e *Engine) recordSize(branchID string, n int64) {
 	defer e.usageMu.Unlock()
 	e.total += n - e.sizes[branchID]
 	e.sizes[branchID] = n
+}
+
+func (e *Engine) forgetSize(branchID string) {
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	e.total -= e.sizes[branchID]
+	delete(e.sizes, branchID)
 }
 
 // TotalBytes is the space all live branches take.

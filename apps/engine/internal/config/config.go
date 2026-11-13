@@ -31,6 +31,10 @@ type Config struct {
 	MaxDatabases     int
 	MaxBranches      int
 
+	TrashRetention time.Duration
+	MaxImportBytes int64
+	ImportTimeout  time.Duration
+
 	ReadersPerBranch int
 	MaxOpenBranches  int
 	IdleConnTimeout  time.Duration
@@ -112,6 +116,10 @@ var Settings = []Setting{
 	{"LUMBUNG_MIN_FREE_DISK", KindBytes, "2GiB", "Creating a database, branch, snapshot or import is refused with HTTP 507 when the disk has less free space than this.", bytesOf(func(c *Config) *int64 { return &c.MinFreeDiskBytes })},
 	{"LUMBUNG_MAX_DATABASES", KindInt, "100", "Most databases on the instance, counting ones in the trash.", integer(func(c *Config) *int { return &c.MaxDatabases })},
 	{"LUMBUNG_MAX_BRANCHES", KindInt, "50", "Most branches in one database.", integer(func(c *Config) *int { return &c.MaxBranches })},
+
+	{"LUMBUNG_TRASH_RETENTION", KindDuration, "168h", "How long a deleted database stays in the trash, restorable, before its files are removed.", dur(func(c *Config) *time.Duration { return &c.TrashRetention })},
+	{"LUMBUNG_MAX_IMPORT_BYTES", KindBytes, "1GiB", "Largest `.db` file or SQL dump an import accepts. The branch size limit also applies.", bytesOf(func(c *Config) *int64 { return &c.MaxImportBytes })},
+	{"LUMBUNG_IMPORT_TIMEOUT", KindDuration, "10m", "Longest an import may run, in place of the statement timeout.", dur(func(c *Config) *time.Duration { return &c.ImportTimeout })},
 
 	{"LUMBUNG_READERS_PER_BRANCH", KindInt, "4", "Read-only connections kept per open branch, next to its one writer.", integer(func(c *Config) *int { return &c.ReadersPerBranch })},
 	{"LUMBUNG_MAX_OPEN_BRANCHES", KindInt, "64", "Most branches with open connections at once. The least recently used idle branch is closed to make room.", integer(func(c *Config) *int { return &c.MaxOpenBranches })},

@@ -90,12 +90,23 @@ func (e *Engine) session(ctx context.Context, t Target, access Access, timeout t
 	if access != Read && access != Write {
 		return apierr.New(apierr.BadRequest, "unknown access")
 	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	tg, err := e.resolve(ctx, t.Database, t.Branch)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	// Share the branch's gate so a reset, delete or import can't swap the
+	// file mid-request, then look the branch up again: it may have been
+	// deleted, or its database trashed, while this request waited.
+	g := e.gates.get(tg.branch.ID)
+	if err := g.share(ctx); err != nil {
+		return apierr.New(apierr.Busy, "timed out waiting for maintenance on the branch")
+	}
+	defer g.unshare()
+	if tg, err = e.resolve(ctx, tg.db.ID, tg.branch.ID); err != nil {
+		return err
+	}
 
 	p := e.acquirePool(tg.branch.ID, tg.path)
 	defer e.releasePool(p)
