@@ -38,7 +38,7 @@ lumbungd backup --to ./backups --keep 7
 ls backups
 ```
 
-Run it on the machine that holds the data folder (it reads `LUMBUNG_DATA_DIR`), from cron or a systemd timer, then copy the folder off the machine. `--all-branches` includes every branch, not only defaults. `--keep 7` deletes all but the newest seven backups.
+Run it on the machine that holds the data folder (it reads `LUMBUNG_DATA_DIR`), from cron or a systemd timer, then copy the folder off the machine. `--all-branches` includes every branch, not only defaults. `--keep 7` deletes all but the newest seven backups of that kind. A `--meta-only` backup is named `<time>-meta` and counted on its own, so it never pushes a full backup out.
 
 ## Restore a backup
 
@@ -48,6 +48,6 @@ Restore into a new, empty data folder with the engine stopped, then start the en
 lumbungd restore --from ./backups --to ./restored-data
 ```
 
-`--from` takes one backup, or a folder of them, in which case the newest is used. Every file is checked against the manifest first. Branches that weren't in the backup, snapshots and databases in the trash are dropped from the restored `meta.db`, so nothing points at a missing file. The service token comes back with it.
+`--from` takes one backup, or a folder of them, in which case the newest full backup is used. Every file is checked against the manifest first. Branches that weren't in the backup, snapshots and databases in the trash are dropped from the restored `meta.db`, so nothing points at a missing file. A generated service token comes back with it; one set through `LUMBUNG_SERVICE_TOKEN` comes from the environment as before.
 
 Test a restore before you need one: restore into a scratch folder, start a second engine on it with another `LUMBUNG_ADDR`, and query it. [Backups](/docs/self-hosting/backups/) covers running this under Docker.

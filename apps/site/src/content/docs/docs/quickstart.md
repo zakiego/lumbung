@@ -22,11 +22,12 @@ The engine listens on `http://127.0.0.1:4870`, only on this machine. On first st
 
 <!-- docs-test: skip builds from source and reads the token inside the container -->
 ```sh
-go install ./apps/engine/cmd/lumbung
-docker compose exec engine lumbungd service-token | lumbung login --url http://127.0.0.1:4870
+(cd apps/engine && go install ./cmd/lumbung)
+export LUMBUNG_TOKEN=$(docker compose exec -T engine lumbungd service-token)
+echo "$LUMBUNG_TOKEN" | lumbung login --url http://127.0.0.1:4870
 ```
 
-`lumbung login` saves the URL and token in your config folder, readable only by you.
+`lumbung login` saves the URL and token in your config folder, readable only by you. `LUMBUNG_TOKEN` keeps the token in this shell for the curl example below.
 
 ## 3. Create a database and query it
 
@@ -46,7 +47,7 @@ curl -s http://127.0.0.1:4870/v1/databases/app/query \
   -d '{"sql": "SELECT id, email FROM users WHERE email = ?", "args": ["ana@example.com"]}'
 ```
 
-`LUMBUNG_TOKEN` is the token you logged in with. Values come back typed, for example `{"type": "integer", "value": "1"}`; see [Value encoding](/docs/reference/value-encoding/).
+Values come back typed, for example `{"type": "integer", "value": "1"}`; see [Value encoding](/docs/reference/value-encoding/).
 
 ## 4. Try a branch
 

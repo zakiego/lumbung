@@ -38,8 +38,35 @@ Branch files are plain SQLite and don't change between versions.
 
 If a new version migrated `meta.db`, an older binary refuses to serve it: `/health` answers 503 with `unavailable`, and every request fails the same way, so a bad rollback is visible at once instead of quietly misreading newer records. To roll back:
 
-1. Stop the engine.
-2. Put back the `meta.db` from the backup you took in step 1 (`lumbungd restore` into a new folder, or copy the file over with the engine stopped).
-3. Start the older version.
+1. Stop the engine:
 
-Anything created between the upgrade and the rollback (databases, branches, tokens) isn't in the old `meta.db`. Their files stay on disk, and the engine removes ones it doesn't know at start.
+   <!-- docs-test: skip needs Docker Compose -->
+   ```sh
+   docker compose stop engine
+   ```
+
+2. Check out the older version and build it:
+
+   <!-- docs-test: skip builds an image -->
+   ```sh
+   git checkout v0.1.0
+   docker compose build engine
+   ```
+
+3. Put back `meta.db` from the backup you took before upgrading. `restore --meta-only` takes the newest meta-only backup in the folder, refuses to run while lumbungd is running, and keeps the current `meta.db` next to it as `meta.db.before-restore-<time>`:
+
+   <!-- docs-test: skip needs Docker Compose -->
+   ```sh
+   docker compose run --rm engine lumbungd restore --meta-only --from /data/backups
+   ```
+
+4. Start it:
+
+   <!-- docs-test: skip needs Docker Compose -->
+   ```sh
+   docker compose up -d
+   ```
+
+Anything created between the upgrade and the rollback (databases, branches, tokens) isn't in the old `meta.db`. Their files stay on disk, and the engine removes ones it doesn't know at start. Records whose files were deleted since the backup are dropped by the restore.
+
+Don't copy `meta.db` over by hand: a leftover `meta.db-wal` from the newer version would be replayed onto the old file.

@@ -9,7 +9,7 @@ Lumbung's [security model](/docs/concepts/security-model/) keeps databases apart
 
 ## Network
 
-- Listen on `127.0.0.1` (the default) and put a reverse proxy with TLS in front. Never send tokens over plain HTTP across a network.
+- Keep the engine reachable only from this machine (the compose file publishes it on `127.0.0.1`) and put a reverse proxy with TLS in front. Never send tokens over plain HTTP across a network.
 - Set `LUMBUNG_CLIENT_IP_HEADER` and `LUMBUNG_TRUSTED_PROXIES` so failed logins are limited per real client. See [Reverse proxy and TLS](/docs/self-hosting/reverse-proxy/).
 
 ## Tokens

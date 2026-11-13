@@ -1,6 +1,6 @@
 ---
 title: Backups
-description: Nightly backups with lumbungd backup under Docker or systemd, keeping copies off the machine, and testing a restore.
+description: Nightly backups with lumbungd backup, keeping copies off the machine, and testing a restore.
 sidebar:
   order: 3
 ---
