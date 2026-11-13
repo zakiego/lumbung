@@ -36,7 +36,7 @@ Run from the repo root. pnpm drives everything, including the Go module (`apps/e
 pnpm install                          # TS dependencies (Go fetches its own on first build)
 pnpm dev:engine                       # lumbungd on 127.0.0.1:4870 (scripts/dev.sh)
 pnpm dev:site                         # landing and docs on localhost:4872
-pnpm test                             # every package: Go tests with -race, TS tests
+pnpm test                             # every package: Go tests with -race, TS tests (SDK tests build and start a real lumbungd)
 pnpm typecheck                        # go vet and astro check (tsc as TS packages land)
 pnpm lint                             # gofmt, go vet, staticcheck
 pnpm build                            # engine binaries in apps/engine/bin, site in apps/site/dist
@@ -44,9 +44,10 @@ pnpm check:wording                    # the wording rule (CI runs it with its se
 pnpm --filter @lumbung/engine vulncheck   # govulncheck
 pnpm --filter @lumbung/engine openapi:gen # regenerate apps/engine/openapi.json from the handlers
 pnpm --filter @lumbung/engine docs:gen    # regenerate the configuration, error code and REST API reference pages
+pnpm --filter @lumbung/engine sdk:gen     # regenerate packages/client/src/generated.ts from openapi.json
 ```
 
-After changing an API handler, a setting or an error code, run `openapi:gen` then `docs:gen` and commit the results: CI fails when either differs from a fresh generation. API tests compare error bodies with `apps/engine/internal/api/testdata/golden`; rewrite them with `go test ./internal/api/ -update` only when a change to an error is intended.
+After changing an API handler, a setting or an error code, run `openapi:gen`, then `docs:gen` and `sdk:gen`, and commit the results: CI fails when either differs from a fresh generation. API tests compare error bodies with `apps/engine/internal/api/testdata/golden`; rewrite them with `go test ./internal/api/ -update` only when a change to an error is intended.
 
 Inside `apps/engine` the plain Go commands work too: `go test -race ./...`, `go tool staticcheck ./...`, `go tool govulncheck ./...`. `go.mod` pins Go 1.27.4 (ADR 0002); an older local Go downloads it on first use.
 

@@ -62,10 +62,11 @@ jobs:
         run: |
           pnpm --filter @lumbung/engine openapi:gen
           git diff --exit-code -- apps/engine/openapi.json
-      - name: Generated docs match the code
+      - name: Generated docs and SDK types match the code
         run: |
           pnpm --filter @lumbung/engine docs:gen
-          git diff --exit-code -- apps/site/src/content/docs/docs/reference
+          pnpm --filter @lumbung/engine sdk:gen
+          git diff --exit-code -- apps/site/src/content/docs/docs/reference packages/client/src/generated.ts
 
   fuzz:
     runs-on: ubuntu-latest
@@ -86,6 +87,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # SDK and CLI tests run against a real lumbungd built from this commit.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/engine/go.mod
+          cache-dependency-path: apps/engine/go.sum
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
