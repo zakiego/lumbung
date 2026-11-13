@@ -13,6 +13,8 @@
     "typecheck": "pnpm -r --workspace-concurrency=1 typecheck",
     "test": "pnpm -r --workspace-concurrency=1 test",
     "lint": "pnpm -r --workspace-concurrency=1 --if-present lint",
-    "check:wording": "bash scripts/check-wording.sh"
+    "check:wording": "bash scripts/check-wording.sh",
+    "docs:test": "node scripts/docs-test/run.ts",
+    "check:links": "node scripts/check-links.mjs"
   }
 }
