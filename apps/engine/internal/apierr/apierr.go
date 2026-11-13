@@ -58,6 +58,12 @@ const (
 	BranchNotFound        = "branch_not_found"
 	NameTaken             = "name_taken"
 	LimitReached          = "limit_reached"
+	SnapshotNotFound      = "snapshot_not_found"
+	BranchProtected       = "branch_protected"
+	ParentGone            = "parent_gone"
+	BranchNotEmpty        = "branch_not_empty"
+	InvalidImport         = "invalid_import"
+	ImportTooLarge        = "import_too_large"
 	Busy                  = "busy"
 	Unavailable           = "unavailable"
 	Internal              = "internal"
@@ -85,6 +91,12 @@ var Codes = []CodeInfo{
 	{BranchNotFound, http.StatusNotFound, "No branch with that name or id in this database."},
 	{NameTaken, http.StatusConflict, "Another database or branch already has that name."},
 	{LimitReached, http.StatusConflict, "The instance already has the most databases, or the database the most branches, allowed."},
+	{SnapshotNotFound, http.StatusNotFound, "No snapshot with that id in this database."},
+	{BranchProtected, http.StatusConflict, "The branch is protected, so it can't be deleted, reset or overwritten by an import. The default branch is always protected."},
+	{ParentGone, http.StatusConflict, "The branch can't be reset because the branch or snapshot it was made from no longer exists."},
+	{BranchNotEmpty, http.StatusConflict, "An import into a branch that already has tables needs `mode=replace`."},
+	{InvalidImport, http.StatusBadRequest, "The uploaded file isn't a valid SQLite database or SQL dump, or fails its integrity check."},
+	{ImportTooLarge, http.StatusRequestEntityTooLarge, "The upload is larger than the import limit or the branch size limit."},
 	{Busy, http.StatusServiceUnavailable, "The branch stayed locked longer than the busy timeout. Retry."},
 	{Unavailable, http.StatusServiceUnavailable, "The engine can't serve: for example meta.db is newer than this binary."},
 	{Internal, http.StatusInternalServerError, "Something failed inside the engine. The log has details."},
