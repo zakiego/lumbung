@@ -55,12 +55,21 @@ export async function startEngine(bin: string, env: Record<string, string> = {})
     url,
     token,
     dataDir,
+    // Resolves even when lumbungd already exited, and kills it if it hasn't
+    // shut down 40s after SIGTERM, so a stuck engine never hangs a test run.
     stop: () =>
       new Promise<void>((done) => {
-        child.once("exit", () => {
+        const finish = () => {
+          clearTimeout(timer)
           rmSync(dataDir, { recursive: true, force: true })
           done()
-        })
+        }
+        const timer = setTimeout(() => child.kill("SIGKILL"), 40_000)
+        if (child.exitCode !== null || child.signalCode !== null) {
+          finish()
+          return
+        }
+        child.once("exit", finish)
         child.kill("SIGTERM")
       }),
   }

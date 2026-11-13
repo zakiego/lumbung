@@ -100,6 +100,10 @@ function build(): string {
   if (!process.env.LUMBUNG_BIN_DIR) {
     execFileSync("go", ["build", "-o", bin + "/", "./cmd/lumbungd", "./cmd/lumbung"], { cwd: join(root, "apps/engine"), stdio: "inherit" })
   }
+  // Samples call curl -s, which exits 0 on a 401 or 404. This shim makes an
+  // HTTP error fail the sample, while the page still shows plain curl.
+  const real = execFileSync("bash", ["-c", "command -v curl"], { encoding: "utf8" }).trim()
+  writeFileSync(join(bin, "curl"), `#!/usr/bin/env bash\nexec ${JSON.stringify(real)} --fail-with-body "$@"\n`, { mode: 0o755 })
   return bin
 }
 
