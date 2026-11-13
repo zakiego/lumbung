@@ -187,6 +187,8 @@ GET                  /v1/openapi.json
 GET                  /health
 ```
 
+Added while building milestone 3, because the dashboard and the retention rules need them: `GET /v1/trash` (the trash list), `DELETE /v1/databases/{db}/snapshots/{snapshot}` (manual snapshots are never removed by retention, so they need a delete), and `GET PUT DELETE /v1/databases/{db}/branches/{branch}/snapshot-schedule` (scheduled snapshots). A query or batch body may set `"read_only": true` to use a read-only connection with a write token, which MCP's `query` tool relies on.
+
 Rules:
 
 - `query` runs one statement with bound parameters. `batch` runs a list of statements in one transaction, all or nothing. Interactive transactions arrive with the libSQL protocol milestone.

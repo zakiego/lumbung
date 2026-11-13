@@ -42,7 +42,11 @@ pnpm lint                             # gofmt, go vet, staticcheck
 pnpm build                            # engine binaries in apps/engine/bin, site in apps/site/dist
 pnpm check:wording                    # the wording rule (CI runs it with its self-test)
 pnpm --filter @lumbung/engine vulncheck   # govulncheck
+pnpm --filter @lumbung/engine openapi:gen # regenerate apps/engine/openapi.json from the handlers
+pnpm --filter @lumbung/engine docs:gen    # regenerate the configuration, error code and REST API reference pages
 ```
+
+After changing an API handler, a setting or an error code, run `openapi:gen` then `docs:gen` and commit the results: CI fails when either differs from a fresh generation. API tests compare error bodies with `apps/engine/internal/api/testdata/golden`; rewrite them with `go test ./internal/api/ -update` only when a change to an error is intended.
 
 Inside `apps/engine` the plain Go commands work too: `go test -race ./...`, `go tool staticcheck ./...`, `go tool govulncheck ./...`. `go.mod` pins Go 1.27.4 (ADR 0002); an older local Go downloads it on first use.
 
