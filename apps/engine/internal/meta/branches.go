@@ -313,3 +313,57 @@ func (s *Store) PurgeDatabase(ctx context.Context, dbID string) (bool, error) {
 	}
 	return true, tx.Commit()
 }
+
+// DropMissing removes records whose files a restore didn't bring back:
+// databases in the trash, branches not in have (keyed by branch id), every
+// snapshot, and what hangs off them. It runs on a freshly restored meta.db.
+func (s *Store) DropMissing(ctx context.Context, have map[string]bool) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, `SELECT b.id FROM branches b JOIN databases d ON d.id = b.database_id WHERE d.deleted_at IS NULL`)
+	if err != nil {
+		return err
+	}
+	var missing []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		if !have[id] {
+			missing = append(missing, id)
+		}
+	}
+	rows.Close()
+	for _, id := range missing {
+		for _, q := range []string{
+			`DELETE FROM snapshot_schedules WHERE branch_id = ?`,
+			`DELETE FROM tokens WHERE branch_id = ?`,
+			`DELETE FROM stats_minute WHERE branch_id = ?`,
+			`DELETE FROM slow_queries WHERE branch_id = ?`,
+			`DELETE FROM branches WHERE id = ?`,
+		} {
+			if _, err := tx.ExecContext(ctx, q, id); err != nil {
+				return err
+			}
+		}
+	}
+	for _, q := range []string{
+		`DELETE FROM snapshots`,
+		`DELETE FROM tokens WHERE database_id IN (SELECT id FROM databases WHERE deleted_at IS NOT NULL)`,
+		`DELETE FROM snapshot_schedules WHERE database_id IN (SELECT id FROM databases WHERE deleted_at IS NOT NULL)`,
+		`DELETE FROM stats_minute WHERE branch_id IN (SELECT b.id FROM branches b JOIN databases d ON d.id = b.database_id WHERE d.deleted_at IS NOT NULL)`,
+		`DELETE FROM slow_queries WHERE branch_id IN (SELECT b.id FROM branches b JOIN databases d ON d.id = b.database_id WHERE d.deleted_at IS NOT NULL)`,
+		`DELETE FROM branches WHERE database_id IN (SELECT id FROM databases WHERE deleted_at IS NOT NULL)`,
+		`DELETE FROM databases WHERE deleted_at IS NOT NULL`,
+	} {
+		if _, err := tx.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
