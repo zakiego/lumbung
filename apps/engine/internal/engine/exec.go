@@ -46,6 +46,9 @@ type Result struct {
 	Rows            [][]value.Value `json:"rows"`
 	RowsAffected    int64           `json:"rows_affected"`
 	LastInsertRowID int64           `json:"last_insert_rowid"`
+	// Truncated is set by QueryCapped when rows were left out to stay under
+	// its caps. The REST API never truncates; it fails with result_too_large.
+	Truncated bool `json:"-"`
 }
 
 // Target names a branch. An empty Branch means the database's default.
@@ -61,6 +64,23 @@ func (e *Engine) Query(ctx context.Context, t Target, access Access, stmt Statem
 		return nil, err
 	}
 	return res[0], nil
+}
+
+// QueryCapped runs one read-only statement and keeps at most maxRows rows
+// and about maxBytes of values (each also bounded by the engine's own caps),
+// marking the result Truncated instead of failing. It is for callers that
+// show a preview, such as MCP, where a model's context is the limit.
+func (e *Engine) QueryCapped(ctx context.Context, t Target, stmt Statement, maxRows int, maxBytes int64) (*Result, error) {
+	budget := &resultBudget{rows: min(maxRows, e.cfg.MaxResultRows), bytes: min(maxBytes, e.cfg.MaxResultBytes), truncate: true}
+	var res *Result
+	err := e.session(ctx, t, Read, e.cfg.StatementTimeout, func(conn *sqlitex.Conn, _ target) error {
+		out, err := runAllWith(conn, []Statement{stmt}, budget)
+		if err == nil {
+			res = out[0]
+		}
+		return err
+	})
+	return res, err
 }
 
 // Batch runs statements in order in one transaction: all of them take
@@ -328,7 +348,10 @@ func trustedInt(conn *sqlitex.Conn, sql string) (int64, error) {
 // runAll runs statements, counting result rows and bytes against the caps
 // across the whole request.
 func (e *Engine) runAll(conn *sqlitex.Conn, stmts []Statement) ([]*Result, error) {
-	budget := &resultBudget{rows: e.cfg.MaxResultRows, bytes: e.cfg.MaxResultBytes}
+	return runAllWith(conn, stmts, &resultBudget{rows: e.cfg.MaxResultRows, bytes: e.cfg.MaxResultBytes})
+}
+
+func runAllWith(conn *sqlitex.Conn, stmts []Statement, budget *resultBudget) ([]*Result, error) {
 	out := make([]*Result, 0, len(stmts))
 	for i := range stmts {
 		res, err := runOne(conn, stmts[i], budget)
@@ -341,9 +364,10 @@ func (e *Engine) runAll(conn *sqlitex.Conn, stmts []Statement) ([]*Result, error
 }
 
 type resultBudget struct {
-	rows  int   // per statement
-	bytes int64 // per request
-	used  int64
+	rows     int   // per statement
+	bytes    int64 // per request
+	used     int64
+	truncate bool // stop at the cap and mark the result, instead of failing
 }
 
 func runOne(conn *sqlitex.Conn, st Statement, budget *resultBudget) (*Result, error) {
@@ -374,17 +398,27 @@ func runOne(conn *sqlitex.Conn, st Statement, budget *resultBudget) (*Result, er
 	}
 	for stmt.Step() {
 		if len(res.Rows) >= budget.rows {
+			if budget.truncate {
+				res.Truncated = true
+				break
+			}
 			return nil, apierr.Newf(apierr.ResultTooLarge, "the statement returns more than %d rows", budget.rows)
 		}
 		row := make([]value.Value, n)
+		var size int64
 		for i := 0; i < n; i++ {
-			v, size := column(stmt, i)
+			v, sz := column(stmt, i)
 			row[i] = v
-			budget.used += size
+			size += sz
 		}
-		if budget.used > budget.bytes {
+		if budget.used+size > budget.bytes {
+			if budget.truncate {
+				res.Truncated = true
+				break
+			}
 			return nil, apierr.Newf(apierr.ResultTooLarge, "the result is larger than %d bytes", budget.bytes)
 		}
+		budget.used += size
 		res.Rows = append(res.Rows, row)
 	}
 	if err := stmt.Err(); err != nil {
