@@ -51,6 +51,10 @@ await db.batch([
 
 // A read-only connection, even with a write token. Also makes it safe to retry.
 await db.query("SELECT count(*) AS n FROM users", [], { readOnly: true })
+
+// A schema migration: foreign keys are checked once at the end, so a table
+// rebuild doesn't fire ON DELETE CASCADE.
+await db.batch(migrationStatements, { migration: true })
 ```
 
 A `Result` has:
@@ -70,15 +74,15 @@ A `Result` has:
 |---|---|---|
 | NULL | `null` | `null`, `undefined` |
 | INTEGER | `number` (or `bigint` / `string` per `intMode`) | `number` (safe integers), `bigint`, `boolean` (1/0) |
-| REAL | `number` | `number` with a fraction, `Infinity` |
+| REAL | `number` | `number` with a fraction, `-0`, `Infinity`, or whole numbers too big for 64-bit integers (`1e21`) |
 | TEXT | `string` | `string`, `Date` (as an ISO string) |
 | BLOB | `Uint8Array` | `Uint8Array`, `ArrayBuffer` |
 
-Integers travel as decimal strings, so a `bigint` keeps every bit. See [Value encoding](/docs/reference/value-encoding/).
+Integers travel as decimal strings, so a `bigint` keeps every bit. A whole JS number between 2^53 and 2^63 is refused with a `RangeError`: as a number it may already have been rounded, so pass a `bigint` for an exact integer. See [Value encoding](/docs/reference/value-encoding/).
 
 ## Errors
 
-Every failure is a `LumbungError` with a stable `code` from the [error codes](/docs/reference/error-codes/), the HTTP `status`, SQLite's message in `detail`, and the `requestId` to find it in the server log. Network failures have code `network_error` and status 0.
+Every failure is a `LumbungError` with a stable `code` (also a success response whose body isn't valid JSON, as `invalid_response`) from the [error codes](/docs/reference/error-codes/), the HTTP `status`, SQLite's message in `detail`, and the `requestId` to find it in the server log. Network failures have code `network_error` and status 0.
 
 ```ts
 import { LumbungError } from "@lumbung/client"
