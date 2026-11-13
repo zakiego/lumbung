@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "astro dev --port 4872",
+    "dev": "bash ../../scripts/dev.sh site",
     "build": "astro build",
     "preview": "astro preview --port 4872",
     "typecheck": "astro check"

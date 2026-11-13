@@ -2,11 +2,40 @@
   "$schema": "https://t3.codes/schema/t3.json",
   "worktreeSubmodules": "none",
   "scripts": [
-    { "name": "Setup Worktree", "command": "bash scripts/setup-worktree.sh", "icon": "configure", "runOnWorktreeCreate": true, "async": false },
-    { "name": "Clean Worktree", "command": "bash scripts/clean-worktree.sh", "icon": "configure", "runOnSettle": true },
-    { "name": "Dev Engine", "command": "pnpm dev:engine", "icon": "play", "stopOnSettle": true, "previewUrl": "http://127.0.0.1:4870/health" },
-    { "name": "Dev Site", "command": "pnpm dev:site", "icon": "play", "stopOnSettle": true, "previewUrl": "http://localhost:4872" },
-    { "name": "Test", "command": "pnpm test", "icon": "test" },
-    { "name": "Typecheck", "command": "pnpm typecheck", "icon": "lint" }
+    {
+      "name": "Setup Worktree",
+      "command": "bash scripts/setup-worktree.sh",
+      "icon": "configure",
+      "runOnWorktreeCreate": true,
+      "async": false
+    },
+    {
+      "name": "Clean Worktree",
+      "command": "bash scripts/clean-worktree.sh",
+      "icon": "configure",
+      "runOnSettle": true
+    },
+    {
+      "name": "Dev Engine",
+      "command": "pnpm dev:engine",
+      "icon": "play",
+      "stopOnSettle": true
+    },
+    {
+      "name": "Dev Site",
+      "command": "pnpm dev:site",
+      "icon": "play",
+      "stopOnSettle": true
+    },
+    {
+      "name": "Test",
+      "command": "pnpm test",
+      "icon": "test"
+    },
+    {
+      "name": "Typecheck",
+      "command": "pnpm typecheck",
+      "icon": "lint"
+    }
   ]
 }
