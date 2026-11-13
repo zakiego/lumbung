@@ -54,13 +54,14 @@ sidebar:
 	b.WriteString("The engine serves MCP over streamable HTTP at `/mcp`, with the same bearer tokens and scopes as the REST API. See [Use from an AI agent](/docs/guides/ai-agents/) to connect a client.\n\n")
 	b.WriteString("| Tool | Read-only | Destructive | What it does |\n|---|---|---|---|\n")
 	for _, t := range tools {
-		ro, de := "yes", "no"
+		// MCP's defaults for a tool without annotations: not read-only, and
+		// destructive.
+		ro, de := "no", "yes"
 		if a := t.Annotations; a != nil {
-			if !a.ReadOnlyHint {
-				ro = "no"
-				if a.DestructiveHint == nil || *a.DestructiveHint {
-					de = "yes"
-				}
+			if a.ReadOnlyHint {
+				ro, de = "yes", "no"
+			} else if a.DestructiveHint != nil && !*a.DestructiveHint {
+				de = "no"
 			}
 		}
 		fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n", t.Name, ro, de, cell(t.Description))

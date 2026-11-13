@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/zakiego/lumbung/apps/engine/internal/config"
 )
 
 type bearer struct {
@@ -172,10 +175,17 @@ func TestMCPTools(t *testing.T) {
 	}
 
 	// Management through MCP is audited.
+	// Only successful entries count: the failed delete above is audited too.
 	audit := e.ok(e.do(e.admin, "GET", "/v1/audit", "/v1/audit", nil), 200).json(t)
 	actions := map[string]bool{}
 	for _, raw := range audit["data"].([]any) {
-		actions[raw.(map[string]any)["action"].(string)] = true
+		entry := raw.(map[string]any)
+		if entry["result"] == "ok" {
+			actions[entry["action"].(string)] = true
+		}
+		if id, _ := entry["request_id"].(string); id == "" || id == "mcp" {
+			t.Errorf("audit entry without its own request id: %v", entry)
+		}
 	}
 	for _, a := range []string{"database.create", "branch.create", "branch.reset", "branch.delete", "snapshot.create"} {
 		if !actions[a] {
@@ -236,5 +246,146 @@ func TestMCPNeedsAToken(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("bad token: %d", res.StatusCode)
+	}
+}
+
+func TestMCPLargeIntegerArgs(t *testing.T) {
+	e := newEnv(t, nil)
+	e.createDB("a")
+	e.ok(e.sql(e.admin, "a", "CREATE TABLE t(id INTEGER PRIMARY KEY)"), 200)
+	e.ok(e.sql(e.admin, "a", "INSERT INTO t VALUES (9007199254740992), (9007199254740993)"), 200)
+	s := e.mcp(e.admin)
+
+	// As a JSON number it would round to the other row, so it's refused.
+	_, msg := call(t, s, "execute", map[string]any{"database": "a", "sql": "DELETE FROM t WHERE id = ?", "args": []any{9007199254740993}})
+	if !strings.Contains(msg, "invalid_params") {
+		t.Fatalf("large integer arg: %q", msg)
+	}
+	// As a string it matches exactly.
+	out, msg := call(t, s, "execute", map[string]any{"database": "a", "sql": "DELETE FROM t WHERE id = ?", "args": []any{"9007199254740993"}})
+	if msg != "" || out["rows_affected"].(float64) != 1 {
+		t.Fatalf("string arg: %v %q", out, msg)
+	}
+	out, _ = call(t, s, "query", map[string]any{"database": "a", "sql": "SELECT id FROM t"})
+	if rows := out["rows"].([]any); len(rows) != 1 || rows[0].([]any)[0].(float64) != 9007199254740992 {
+		t.Fatalf("left: %v", out)
+	}
+}
+
+func TestMCPCapsWideResults(t *testing.T) {
+	e := newEnv(t, nil)
+	e.createDB("a")
+	e.ok(e.sql(e.admin, "a", "CREATE TABLE docs(id INTEGER PRIMARY KEY, body TEXT)"), 200)
+	e.ok(e.sql(e.admin, "a", "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 50) INSERT INTO docs SELECT i, printf('%.*c', 40000, 'x') FROM n"), 200)
+	s := e.mcp(e.admin)
+
+	// Each cell shows 2000 characters, so many 40 KB rows still fit.
+	out, msg := call(t, s, "query", map[string]any{"database": "a", "sql": "SELECT * FROM docs"})
+	if msg != "" {
+		t.Fatal(msg)
+	}
+	if n := len(out["rows"].([]any)); n < 20 || out["truncated"] != true {
+		t.Fatalf("wide rows: %d rows, truncated %v", n, out["truncated"])
+	}
+	cell := out["rows"].([]any)[0].([]any)[1].(string)
+	if !strings.HasSuffix(cell, "(40000 characters)") {
+		t.Fatalf("cell not shortened: %q", cell[len(cell)-30:])
+	}
+
+	// RETURNING rows from a write are capped too, and the note says the
+	// write applied in full.
+	out, msg = call(t, s, "execute", map[string]any{"database": "a", "sql": "UPDATE docs SET body = body || 'y' RETURNING *"})
+	if msg != "" {
+		t.Fatal(msg)
+	}
+	if out["truncated"] != true || out["rows_affected"].(float64) != 50 || !strings.Contains(out["note"].(string), "applied to all 50 rows") {
+		t.Fatalf("execute: rows %d, %v %v %v", len(out["rows"].([]any)), out["truncated"], out["rows_affected"], out["note"])
+	}
+	if b, _ := json.Marshal(out["rows"]); len(b) > 64<<10 {
+		t.Fatalf("execute rows are %d bytes", len(b))
+	}
+}
+
+func TestMCPSchemaTable(t *testing.T) {
+	e := newEnv(t, nil)
+	e.createDB("a")
+	e.ok(e.sql(e.admin, "a", "CREATE TABLE t(x)"), 200)
+	e.ok(e.sql(e.admin, "a", "CREATE TABLE u(y)"), 200)
+	e.ok(e.sql(e.admin, "a", "CREATE INDEX u_y ON u(y)"), 200)
+	s := e.mcp(e.admin)
+	out, msg := call(t, s, "get_schema", map[string]any{"database": "a", "table": "u"})
+	if msg != "" {
+		t.Fatal(msg)
+	}
+	if len(out["tables"].([]any)) != 1 || len(out["indexes"].([]any)) != 1 {
+		t.Fatalf("one table: %v", out)
+	}
+	if _, msg := call(t, s, "get_schema", map[string]any{"database": "a", "table": "nope"}); !strings.Contains(msg, "not_found") {
+		t.Fatalf("missing table: %q", msg)
+	}
+
+	// A schema too large for the cap comes back as names.
+	var ddl strings.Builder
+	for i := range 300 {
+		ddl.WriteString("CREATE TABLE wide_" + strconv.Itoa(i) + "(a TEXT, b TEXT, c TEXT, d TEXT, e TEXT, f TEXT, g TEXT, h TEXT);")
+	}
+	e.ok(e.do(e.admin, "POST", pBatch, "/v1/databases/a/batch", map[string]any{"statements": splitDDL(ddl.String())}), 200)
+	out, msg = call(t, s, "get_schema", map[string]any{"database": "a"})
+	if msg != "" {
+		t.Fatal(msg)
+	}
+	if out["names_only"] != true || out["truncated"] != true || len(out["tables"].([]any)) != 200 {
+		t.Fatalf("large schema: names_only %v truncated %v tables %d", out["names_only"], out["truncated"], len(out["tables"].([]any)))
+	}
+}
+
+func splitDDL(sql string) []map[string]any {
+	var out []map[string]any
+	for _, s := range strings.Split(sql, ";") {
+		if strings.TrimSpace(s) != "" {
+			out = append(out, map[string]any{"sql": s})
+		}
+	}
+	return out
+}
+
+func TestMCPManagementScopes(t *testing.T) {
+	e := newEnv(t, nil)
+	e.createDB("a")
+	admin := e.mcp(e.admin)
+	if _, msg := call(t, admin, "create_branch", map[string]any{"database": "a", "name": "dev"}); msg != "" {
+		t.Fatal(msg)
+	}
+	write, _ := e.token(map[string]any{"name": "w", "database": "a", "access": "write"})
+	if _, msg := call(t, e.mcp(write), "delete_branch", map[string]any{"database": "a", "branch": "dev"}); !strings.Contains(msg, "forbidden") {
+		t.Fatalf("delete_branch with a write token: %q", msg)
+	}
+	branchWrite, _ := e.token(map[string]any{"name": "bw", "database": "a", "branch": "dev", "access": "write"})
+	if _, msg := call(t, e.mcp(branchWrite), "reset_branch", map[string]any{"database": "a", "branch": "dev"}); !strings.Contains(msg, "forbidden") {
+		t.Fatalf("reset_branch with a branch write token: %q", msg)
+	}
+}
+
+func TestMCPFailedAuthLockout(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) { c.AuthFailuresPerMin = 2 })
+	bad := "Bearer lmb_aaaaaaaaaaaaaaaaaaaa_" + strings.Repeat("b", 40)
+	var last *http.Response
+	for range 4 {
+		req, _ := http.NewRequest("POST", e.http.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("Authorization", bad)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		last = res
+	}
+	if last.StatusCode != http.StatusTooManyRequests || last.Header.Get("Retry-After") == "" {
+		t.Fatalf("lockout: %d, Retry-After %q", last.StatusCode, last.Header.Get("Retry-After"))
+	}
+	if !strings.HasPrefix(last.Header.Get("Content-Type"), "application/problem+json") {
+		t.Fatalf("lockout content type %q", last.Header.Get("Content-Type"))
 	}
 }

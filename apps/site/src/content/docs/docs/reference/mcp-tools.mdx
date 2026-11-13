@@ -16,9 +16,9 @@ The engine serves MCP over streamable HTTP at `/mcp`, with the same bearer token
 | `create_snapshot` | no | no | Take a snapshot of a branch. Restoring one later makes a new branch; it never overwrites. |
 | `delete_branch` | no | yes | Delete a branch and its data. Protected branches and the default branch can't be deleted. This can't be undone. |
 | `diff_branches` | yes | no | Compare the schema (tables, columns, indexes, views, triggers) of a branch against another branch. Data isn't compared. |
-| `execute` | no | yes | Run one SQL statement that changes data or schema (INSERT, UPDATE, DELETE, CREATE, ALTER, DROP) in its own transaction. Needs a write token. Prefer testing schema changes on a branch first. |
+| `execute` | no | yes | Run one SQL statement that changes data or schema (INSERT, UPDATE, DELETE, CREATE, ALTER, DROP) in its own transaction. Needs a write token. Prefer testing schema changes on a branch first. Rows from RETURNING are shown up to 1000 rows and about 64 KB. |
 | `get_database` | yes | no | Get one database: its id, default branch, branch count and size. |
-| `get_schema` | yes | no | Get a branch's schema: tables with their columns, indexes, views and triggers, with the CREATE statements. |
+| `get_schema` | yes | no | Get a branch's schema: tables with their columns, indexes, views and triggers, with the CREATE statements. Pass table to get one table with its indexes and triggers. A schema over about 64 KB comes back as names only. |
 | `list_branches` | yes | no | List a database's branches, marking the default and protected ones. |
 | `list_databases` | yes | no | List the databases this token can see, with their default branch and size. |
 | `list_snapshots` | yes | no | List a branch's snapshots, newest first. |
@@ -75,7 +75,7 @@ Compare the schema (tables, columns, indexes, views, triggers) of a branch again
 
 ## execute
 
-Run one SQL statement that changes data or schema (INSERT, UPDATE, DELETE, CREATE, ALTER, DROP) in its own transaction. Needs a write token. Prefer testing schema changes on a branch first.
+Run one SQL statement that changes data or schema (INSERT, UPDATE, DELETE, CREATE, ALTER, DROP) in its own transaction. Needs a write token. Prefer testing schema changes on a branch first. Rows from RETURNING are shown up to 1000 rows and about 64 KB.
 
 | Input | Type | Description |
 |---|---|---|
@@ -94,12 +94,13 @@ Get one database: its id, default branch, branch count and size.
 
 ## get_schema
 
-Get a branch's schema: tables with their columns, indexes, views and triggers, with the CREATE statements.
+Get a branch's schema: tables with their columns, indexes, views and triggers, with the CREATE statements. Pass table to get one table with its indexes and triggers. A schema over about 64 KB comes back as names only.
 
 | Input | Type | Description |
 |---|---|---|
-| `branch` | string | branch name or id; defaults to the database's default branch |
+| `branch` | string | branch name or id; defaults to the default branch |
 | `database` (required) | string | database name or id |
+| `table` | string | only this table, with its indexes and triggers |
 
 ## list_branches
 

@@ -48,7 +48,9 @@ Any client that reads an `mcpServers` config:
 
 - `query` always runs on a read-only connection, whatever the token allows. Writes go through `execute`, which needs a write token.
 - Every statement follows the same [security model](/docs/concepts/security-model/) as the REST API: no ATTACH, no VACUUM INTO, no extension loading, no reaching outside the branch.
-- Results are capped for a model's context: at most 100 rows by default (`max_rows` up to 1,000) and about 64 KB, with long text and blobs shortened. A cut result says so and suggests narrowing the query.
+- Results are capped for a model's context: at most 100 rows by default (`max_rows` up to 1,000) and about 64 KB, measured after long text (2,000 characters shown) and blobs (48 bytes shown) are shortened. A cut result says so and suggests narrowing the query. Rows returned by a write are capped the same way, and the write still applies to every row.
+- Lists (databases, branches, schema changes) stop at 200 items. `get_schema` takes a `table` to show one table, and a schema over about 64 KB comes back as names only.
+- Tool arguments are JSON numbers, which can't hold every integer past 2^53. Pass those as strings, like `"9007199254740993"`; SQLite still compares them as numbers in an INTEGER column.
 - Each tool is annotated as read-only, additive or destructive, so clients can ask before running `execute`, `delete_branch` or `reset_branch`.
 - Management actions taken through MCP (creating databases, branches and snapshots, resetting and deleting branches) are in the audit log under the agent's token.
 
