@@ -4,6 +4,7 @@
 //	lumbungd                         serve (settings come from LUMBUNG_* environment variables)
 //	lumbungd backup --to DIR         copy meta.db and branches to a timestamped folder
 //	lumbungd restore --from DIR --to DATA_DIR
+//	lumbungd restore --meta-only --from DIR   roll meta.db back, lumbungd stopped
 //	lumbungd healthcheck             exit 0 when the running engine answers /health
 //	lumbungd service-token           print the generated service token
 //	lumbungd openapi                 print the OpenAPI document
@@ -13,6 +14,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -27,6 +29,7 @@ import (
 
 	"github.com/zakiego/lumbung/apps/engine/internal/backup"
 	"github.com/zakiego/lumbung/apps/engine/internal/config"
+	"github.com/zakiego/lumbung/apps/engine/internal/engine"
 	"github.com/zakiego/lumbung/apps/engine/internal/server"
 	"github.com/zakiego/lumbung/apps/engine/internal/version"
 )
@@ -35,6 +38,7 @@ const usage = `Usage:
   lumbungd                         serve (settings come from LUMBUNG_* environment variables)
   lumbungd backup --to DIR         copy meta.db and branches to a timestamped folder
   lumbungd restore --from DIR --to DATA_DIR
+  lumbungd restore --meta-only --from DIR   roll meta.db back, with lumbungd stopped
   lumbungd healthcheck             exit 0 when the running engine answers /health
   lumbungd service-token           print the generated service token
   lumbungd openapi                 print the OpenAPI document
@@ -116,10 +120,10 @@ func runBackup(args []string) error {
 	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
 	to := fs.String("to", "", "folder for backups (required); each backup is a timestamped subfolder")
 	all := fs.Bool("all-branches", false, "copy every branch, not only each database's default branch")
-	metaOnly := fs.Bool("meta-only", false, "copy only meta.db, as before an upgrade")
-	keep := fs.Int("keep", 0, "keep the newest N backups in --to and delete older ones (0 keeps all)")
+	metaOnly := fs.Bool("meta-only", false, "copy only meta.db, as before an upgrade (named <time>-meta)")
+	keep := fs.Int("keep", 0, "keep the newest N backups of this kind in --to and delete older ones (0 keeps all)")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOK(err)
 	}
 	if *to == "" {
 		return fmt.Errorf("backup: --to is required")
@@ -130,44 +134,70 @@ func runBackup(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	dir, err := backup.Run(ctx, backup.Options{DataDir: cfg.DataDir, To: *to, AllBranches: *all, MetaOnly: *metaOnly, Keep: *keep})
-	if err != nil {
+	dir, m, err := backup.Run(ctx, backup.Options{DataDir: cfg.DataDir, To: *to, AllBranches: *all, MetaOnly: *metaOnly, Keep: *keep, Limits: engine.Limits(cfg)})
+	if dir == "" && err != nil {
 		return err
 	}
-	m, err := backup.Verify(dir)
-	if err != nil {
-		return err
+	out := map[string]any{"backup": dir, "files": len(m.Files), "bytes": m.Bytes()}
+	if len(m.Skipped) > 0 {
+		out["skipped"] = m.Skipped
 	}
-	var bytes int64
-	for _, f := range m.Files {
-		bytes += f.Bytes
+	if encErr := json.NewEncoder(os.Stdout).Encode(out); encErr != nil {
+		return encErr
 	}
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{"backup": dir, "files": len(m.Files), "bytes": bytes})
+	return err
 }
 
 func runRestore(args []string) error {
 	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
 	from := fs.String("from", "", "a backup folder, or a folder of backups to take the newest from (required)")
-	to := fs.String("to", "", "an empty data folder to restore into (required)")
+	to := fs.String("to", "", "the data folder to restore into: an empty one, or with --meta-only the existing one (default LUMBUNG_DATA_DIR)")
+	metaOnly := fs.Bool("meta-only", false, "roll meta.db in an existing data folder back to a backup, with lumbungd stopped")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOK(err)
 	}
-	if *from == "" || *to == "" {
-		return fmt.Errorf("restore: --from and --to are required")
+	if *from == "" {
+		return fmt.Errorf("restore: --from is required")
+	}
+	if *to == "" {
+		if !*metaOnly {
+			return fmt.Errorf("restore: --to is required: an empty folder to restore into")
+		}
+		cfg, err := config.Load(os.Getenv)
+		if err != nil {
+			return err
+		}
+		*to = cfg.DataDir
 	}
 	src := *from
-	if _, err := os.Stat(src + "/manifest.json"); err != nil {
-		latest, lerr := backup.Latest(src)
+	if _, err := os.Stat(filepath.Join(src, "manifest.json")); err != nil {
+		latest, lerr := backup.Latest(src, *metaOnly)
 		if lerr != nil {
-			return fmt.Errorf("restore: %s holds no backup: %w", src, lerr)
+			return fmt.Errorf("restore: %s holds no backup of that kind: %w", src, lerr)
 		}
 		src = latest
+	}
+	if *metaOnly {
+		m, aside, err := backup.RestoreMeta(context.Background(), src, *to, time.Now())
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"restored": src, "into": *to, "meta_only": true, "previous": aside, "created_at": m.CreatedAt})
 	}
 	m, err := backup.Restore(context.Background(), src, *to)
 	if err != nil {
 		return err
 	}
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{"restored": src, "into": *to, "files": len(m.Files), "created_at": m.CreatedAt})
+}
+
+// helpOK turns -h into a clean exit: the flag package already printed the
+// usage.
+func helpOK(err error) error {
+	if errors.Is(err, flag.ErrHelp) {
+		return nil
+	}
+	return err
 }
 
 // printServiceToken prints the service token lumbungd generated in the data

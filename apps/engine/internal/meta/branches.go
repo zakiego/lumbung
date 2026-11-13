@@ -314,55 +314,107 @@ func (s *Store) PurgeDatabase(ctx context.Context, dbID string) (bool, error) {
 	return true, tx.Commit()
 }
 
-// DropMissing removes records whose files a restore didn't bring back:
-// databases in the trash, branches not in have (keyed by branch id), every
-// snapshot, and what hangs off them. It runs on a freshly restored meta.db.
-func (s *Store) DropMissing(ctx context.Context, have map[string]bool) error {
+// Present says which files a restored data folder holds, by id.
+type Present struct {
+	Branches  map[string]bool // live branches with their file
+	Snapshots map[string]bool // snapshots with their file
+	Trash     map[string]bool // deleted databases whose trash folder is there
+}
+
+// DropMissing makes a restored meta.db match the files next to it. It
+// removes branches, snapshots and trashed databases whose files aren't
+// present, with what hangs off them, and whole databases whose default
+// branch is gone, so no record ever points at a missing file.
+func (s *Store) DropMissing(ctx context.Context, p Present) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	rows, err := tx.QueryContext(ctx, `SELECT b.id FROM branches b JOIN databases d ON d.id = b.database_id WHERE d.deleted_at IS NULL`)
+	ids := func(q string) ([]string, error) {
+		rows, err := tx.QueryContext(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return nil, err
+			}
+			out = append(out, id)
+		}
+		return out, rows.Err()
+	}
+	exec := func(q string, args ...any) error {
+		_, err := tx.ExecContext(ctx, q, args...)
+		return err
+	}
+
+	snaps, err := ids(`SELECT id FROM snapshots`)
 	if err != nil {
 		return err
 	}
-	var missing []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		if !have[id] {
-			missing = append(missing, id)
+	for _, id := range snaps {
+		if !p.Snapshots[id] {
+			if err := exec(`DELETE FROM snapshots WHERE id = ?`, id); err != nil {
+				return err
+			}
 		}
 	}
-	rows.Close()
-	for _, id := range missing {
+
+	live, err := ids(`SELECT b.id FROM branches b JOIN databases d ON d.id = b.database_id WHERE d.deleted_at IS NULL`)
+	if err != nil {
+		return err
+	}
+	for _, id := range live {
+		if p.Branches[id] {
+			continue
+		}
 		for _, q := range []string{
 			`DELETE FROM snapshot_schedules WHERE branch_id = ?`,
 			`DELETE FROM tokens WHERE branch_id = ?`,
 			`DELETE FROM stats_minute WHERE branch_id = ?`,
 			`DELETE FROM slow_queries WHERE branch_id = ?`,
+			`UPDATE branches SET parent_id = NULL WHERE parent_id = ?`,
 			`DELETE FROM branches WHERE id = ?`,
 		} {
-			if _, err := tx.ExecContext(ctx, q, id); err != nil {
+			if err := exec(q, id); err != nil {
 				return err
 			}
 		}
 	}
-	for _, q := range []string{
-		`DELETE FROM snapshots`,
-		`DELETE FROM tokens WHERE database_id IN (SELECT id FROM databases WHERE deleted_at IS NOT NULL)`,
-		`DELETE FROM snapshot_schedules WHERE database_id IN (SELECT id FROM databases WHERE deleted_at IS NOT NULL)`,
-		`DELETE FROM stats_minute WHERE branch_id IN (SELECT b.id FROM branches b JOIN databases d ON d.id = b.database_id WHERE d.deleted_at IS NOT NULL)`,
-		`DELETE FROM slow_queries WHERE branch_id IN (SELECT b.id FROM branches b JOIN databases d ON d.id = b.database_id WHERE d.deleted_at IS NOT NULL)`,
-		`DELETE FROM branches WHERE database_id IN (SELECT id FROM databases WHERE deleted_at IS NOT NULL)`,
-		`DELETE FROM databases WHERE deleted_at IS NOT NULL`,
-	} {
-		if _, err := tx.ExecContext(ctx, q); err != nil {
-			return err
+
+	// Databases that can't be served: trashed ones without their folder, and
+	// live ones whose default branch is gone.
+	dead, err := ids(`SELECT id FROM databases WHERE deleted_at IS NULL AND default_branch_id NOT IN (SELECT id FROM branches)`)
+	if err != nil {
+		return err
+	}
+	trashed, err := ids(`SELECT id FROM databases WHERE deleted_at IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+	for _, id := range trashed {
+		if !p.Trash[id] {
+			dead = append(dead, id)
+		}
+	}
+	for _, id := range dead {
+		for _, q := range []string{
+			`DELETE FROM snapshots WHERE database_id = ?`,
+			`DELETE FROM snapshot_schedules WHERE database_id = ?`,
+			`DELETE FROM tokens WHERE database_id = ?`,
+			`DELETE FROM stats_minute WHERE branch_id IN (SELECT id FROM branches WHERE database_id = ?)`,
+			`DELETE FROM slow_queries WHERE branch_id IN (SELECT id FROM branches WHERE database_id = ?)`,
+			`UPDATE branches SET parent_id = NULL WHERE database_id = ?`,
+			`DELETE FROM branches WHERE database_id = ?`,
+			`DELETE FROM databases WHERE id = ?`,
+		} {
+			if err := exec(q, id); err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit()

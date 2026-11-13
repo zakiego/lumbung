@@ -2,8 +2,10 @@ package backup
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -78,7 +80,7 @@ func TestBackupAndRestore(t *testing.T) {
 	}()
 	time.Sleep(20 * time.Millisecond)
 	out := t.TempDir()
-	dir, err := Run(bg, Options{DataDir: src, To: out})
+	dir, _, err := Run(bg, Options{DataDir: src, To: out})
 	cancel()
 	wg.Wait()
 	if err != nil {
@@ -126,7 +128,7 @@ func TestBackupAndRestore(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		clock = clock.Add(time.Hour)
 		now := clock
-		if _, err := Run(bg, Options{DataDir: src, To: out, AllBranches: true, Keep: 2, Now: func() time.Time { return now }}); err != nil {
+		if _, _, err := Run(bg, Options{DataDir: src, To: out, AllBranches: true, Keep: 2, Now: func() time.Time { return now }}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -134,7 +136,7 @@ func TestBackupAndRestore(t *testing.T) {
 	if len(all) != 2 {
 		t.Fatalf("retention kept %d backups", len(all))
 	}
-	latest, _ := Latest(out)
+	latest, _ := Latest(out, false)
 	lm, err := Verify(latest)
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +145,7 @@ func TestBackupAndRestore(t *testing.T) {
 		t.Fatalf("all-branches backup: %+v", lm.Files)
 	}
 	metaDir := filepath.Join(t.TempDir(), "meta")
-	mo, err := Run(bg, Options{DataDir: src, To: metaDir, MetaOnly: true})
+	mo, _, err := Run(bg, Options{DataDir: src, To: metaDir, MetaOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +170,7 @@ func TestRelativePaths(t *testing.T) {
 	}
 	q(t, e, "app", "", engine.Write, "CREATE TABLE t(x)")
 	t.Chdir(t.TempDir())
-	dir, err := Run(bg, Options{DataDir: src, To: "backups"})
+	dir, _, err := Run(bg, Options{DataDir: src, To: "backups"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,4 +190,112 @@ func mustGetwd(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return wd
+}
+
+func TestMetaOnlyBackupsStayApart(t *testing.T) {
+	src := t.TempDir()
+	e := open(t, src)
+	if _, err := e.CreateDatabase(bg, "app"); err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	clock := time.Date(2026, 11, 14, 1, 0, 0, 0, time.UTC)
+	run := func(metaOnly bool) string {
+		clock = clock.Add(time.Minute)
+		now := clock
+		dir, _, err := Run(bg, Options{DataDir: src, To: out, MetaOnly: metaOnly, Keep: 1, Now: func() time.Time { return now }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	full := run(false)
+	run(true)
+	metaDir := run(true)
+	// Keep counts each kind on its own: the full backup survives two
+	// meta-only runs, and the newest full backup is still what restore takes.
+	if latest, _ := Latest(out, false); latest != full {
+		t.Fatalf("latest full backup %q, want %q", latest, full)
+	}
+	if latest, _ := Latest(out, true); latest != metaDir {
+		t.Fatalf("latest meta-only backup %q, want %q", latest, metaDir)
+	}
+	if all, _ := list(out, true); len(all) != 1 {
+		t.Fatalf("kept %d meta-only backups", len(all))
+	}
+	// A meta-only backup can't be restored as a whole data folder.
+	if _, err := Restore(bg, metaDir, filepath.Join(t.TempDir(), "x")); err == nil || !strings.Contains(err.Error(), "--meta-only") {
+		t.Fatalf("restore of a meta-only backup: %v", err)
+	}
+}
+
+func TestRestoreMeta(t *testing.T) {
+	src := t.TempDir()
+	e := open(t, src)
+	if _, err := e.CreateDatabase(bg, "app"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CreateBranch(bg, "app", "dev", engine.BranchSource{}, engine.NewBranchOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	dir, _, err := Run(bg, Options{DataDir: src, To: t.TempDir(), MetaOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// After the backup: dev is deleted (its file goes), next is created.
+	dev, err := e.GetBranch(bg, "app", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.DeleteBranch(bg, dev.DatabaseID, dev.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CreateBranch(bg, "app", "next", engine.BranchSource{}, engine.NewBranchOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Refused while the engine holds the folder.
+	if _, _, err := RestoreMeta(bg, dir, src, time.Now()); err == nil || !strings.Contains(err.Error(), "stop it first") {
+		t.Fatalf("restore while running: %v", err)
+	}
+	if err := e.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, aside, err := RestoreMeta(bg, dir, src, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(aside); err != nil {
+		t.Fatalf("previous meta.db not kept: %v", err)
+	}
+	r := open(t, src)
+	if err := r.Ready(bg); err != nil {
+		t.Fatal(err)
+	}
+	// main is back and works; dev's record went with its file; next, made
+	// after the backup, isn't known.
+	q(t, r, "app", "", engine.Write, "CREATE TABLE t(x)")
+	if _, err := r.GetBranch(bg, "app", "dev"); err == nil {
+		t.Fatal("a branch whose file is gone survived the restore")
+	}
+	if _, err := r.GetBranch(bg, "app", "next"); err == nil {
+		t.Fatal("a branch made after the backup appeared")
+	}
+}
+
+func TestVerifyRefusesUnexpectedPaths(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"../x", "dbs/../../x", "x", "dbs/db_aaaaaaaaaaaaaaaaaaaa/../meta.db"} {
+		m := Manifest{Version: 1, Files: []File{{Path: p}}}
+		b, _ := json.Marshal(m)
+		if err := os.WriteFile(filepath.Join(dir, "manifest.json"), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Verify(dir); err == nil || !strings.Contains(err.Error(), "unexpected file") {
+			t.Errorf("%q: %v", p, err)
+		}
+	}
 }
