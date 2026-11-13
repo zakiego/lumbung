@@ -26,6 +26,7 @@ lumbung token create --name agent --db app --branch agent-sandbox --access write
 
 Claude Code:
 
+<!-- docs-test: skip needs the Claude Code CLI, which CI does not have -->
 ```sh
 claude mcp add --transport http lumbung http://127.0.0.1:4870/mcp --header "Authorization: Bearer <token>"
 ```
