@@ -499,7 +499,7 @@ Response `200`:
 | Field | Type | Description |
 |---|---|---|
 | `columns` (required) | ColumnOut[] |  |
-| `last_insert_rowid` (required) | integer | The rowid of the last row this statement inserted, or 0. |
+| `last_insert_rowid` (required) | string | The rowid of the last row this statement inserted, or "0". A decimal string, since rowids can pass 2^53. |
 | `rows` (required) | value[][] | Rows as arrays in column order. |
 | `rows_affected` (required) | integer | Rows changed by an INSERT, UPDATE or DELETE, not counting triggers. |
 
@@ -527,7 +527,7 @@ Response `200`:
 | Field | Type | Description |
 |---|---|---|
 | `columns` (required) | ColumnOut[] |  |
-| `last_insert_rowid` (required) | integer | The rowid of the last row this statement inserted, or 0. |
+| `last_insert_rowid` (required) | string | The rowid of the last row this statement inserted, or "0". A decimal string, since rowids can pass 2^53. |
 | `rows` (required) | value[][] | Rows as arrays in column order. |
 | `rows_affected` (required) | integer | Rows changed by an INSERT, UPDATE or DELETE, not counting triggers. |
 

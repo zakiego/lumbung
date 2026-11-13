@@ -34,11 +34,11 @@ A result lists its columns once, then each row as an array in column order. Two 
   "columns": [{"name": "a", "decltype": ""}, {"name": "a", "decltype": ""}],
   "rows": [[{"type": "integer", "value": "1"}, {"type": "integer", "value": "2"}]],
   "rows_affected": 0,
-  "last_insert_rowid": 0
+  "last_insert_rowid": "0"
 }
 ```
 
-`decltype` is the column's declared type in the table, or empty for an expression.
+`decltype` is the column's declared type in the table, or empty for an expression. `last_insert_rowid` is a decimal string for the same reason integers are: rowids can pass 2^53.
 
 ## Parameters
 

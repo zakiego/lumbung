@@ -1071,9 +1071,9 @@
             "type": "array"
           },
           "last_insert_rowid": {
-            "description": "The rowid of the last row this statement inserted, or 0.",
-            "format": "int64",
-            "type": "integer"
+            "description": "The rowid of the last row this statement inserted, or \"0\". A decimal string, since rowids can pass 2^53.",
+            "pattern": "^-?[0-9]+$",
+            "type": "string"
           },
           "rows": {
             "description": "Rows as arrays in column order.",

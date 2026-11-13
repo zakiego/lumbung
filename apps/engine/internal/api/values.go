@@ -1,6 +1,8 @@
 package api
 
 import (
+	"strconv"
+
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/zakiego/lumbung/apps/engine/internal/engine"
@@ -85,12 +87,12 @@ type ResultOut struct {
 	Columns         []ColumnOut `json:"columns"`
 	Rows            [][]Value   `json:"rows" doc:"Rows as arrays in column order."`
 	RowsAffected    int64       `json:"rows_affected" doc:"Rows changed by an INSERT, UPDATE or DELETE, not counting triggers."`
-	LastInsertRowID int64       `json:"last_insert_rowid" doc:"The rowid of the last row this statement inserted, or 0."`
+	LastInsertRowID string      `json:"last_insert_rowid" pattern:"^-?[0-9]+$" doc:"The rowid of the last row this statement inserted, or \"0\". A decimal string, since rowids can pass 2^53."`
 }
 
 func resultOut(r *engine.Result) ResultOut {
 	out := ResultOut{Columns: make([]ColumnOut, len(r.Columns)), Rows: make([][]Value, len(r.Rows)),
-		RowsAffected: r.RowsAffected, LastInsertRowID: r.LastInsertRowID}
+		RowsAffected: r.RowsAffected, LastInsertRowID: strconv.FormatInt(r.LastInsertRowID, 10)}
 	for i, c := range r.Columns {
 		out.Columns[i] = ColumnOut{Name: c.Name, DeclType: c.DeclType}
 	}

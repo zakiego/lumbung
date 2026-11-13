@@ -93,7 +93,7 @@ func TestDatabasesAndQueries(t *testing.T) {
 	e.ok(e.sql(e.admin, "app", "CREATE TABLE t(id INTEGER PRIMARY KEY, n INTEGER, r REAL, s TEXT, b BLOB)"), 200)
 	r := e.ok(e.sql(e.admin, "app", "INSERT INTO t (n, r, s, b) VALUES (?, ?, ?, ?)",
 		map[string]any{"type": "integer", "value": "9007199254740993"}, 1.5, "hi", map[string]any{"type": "blob", "base64": "AAE="}), 200).json(t)
-	if r["rows_affected"].(float64) != 1 || r["last_insert_rowid"].(float64) != 1 {
+	if r["rows_affected"].(float64) != 1 || r["last_insert_rowid"] != "1" {
 		t.Fatalf("insert: %v", r)
 	}
 	r = e.ok(e.sql(e.admin, "app", "SELECT n, r, s, b FROM t"), 200).json(t)
