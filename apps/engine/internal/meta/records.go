@@ -77,7 +77,9 @@ func isUnique(err error) bool {
 }
 
 // CreateDatabase records a new database and its default branch, named main.
-func (s *Store) CreateDatabase(ctx context.Context, name, dbID, branchID string) (Database, Branch, error) {
+// It fails with limit_reached when maxDatabases already exist, counted in
+// the same transaction so concurrent creates can't pass the cap.
+func (s *Store) CreateDatabase(ctx context.Context, name, dbID, branchID string, maxDatabases int) (Database, Branch, error) {
 	if !ids.ValidName(name) {
 		return Database{}, Branch{}, apierr.Newf(apierr.InvalidName, "invalid database name %q", name)
 	}
@@ -87,6 +89,13 @@ func (s *Store) CreateDatabase(ctx context.Context, name, dbID, branchID string)
 		return Database{}, Branch{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM databases`).Scan(&n); err != nil {
+		return Database{}, Branch{}, err
+	}
+	if n >= maxDatabases {
+		return Database{}, Branch{}, apierr.Newf(apierr.LimitReached, "the instance has the most databases allowed (%d)", maxDatabases)
+	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO databases (id, name, default_branch_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
 		dbID, name, branchID, ts, ts); err != nil {

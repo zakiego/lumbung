@@ -32,7 +32,9 @@ When a request hits a limit, nothing partial comes back and anything it wrote is
 | Databases | 100 | `LUMBUNG_MAX_DATABASES` | `limit_reached` |
 | Branches per database | 50 | `LUMBUNG_MAX_BRANCHES` | `limit_reached` |
 
-A full branch still serves reads and deletes, so you can make room.
+A full branch, or any branch on an instance at its quota, still serves reads and deletes, and writes that reuse the space deletes freed. SQLite doesn't shrink a file when rows are deleted, so freed space is reused rather than returned.
+
+The branch limit counts the database's pages. The write-ahead log next to it is checkpointed and truncated once it passes a quarter of the branch limit (at most 1 MiB), so it stays small. The instance quota counts both, and a write may only claim half the free room in new pages, since each new page is written to the log first.
 
 ## Connections
 

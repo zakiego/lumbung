@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,16 @@ func fileHash(t *testing.T, path string) [32]byte {
 		t.Fatal(err)
 	}
 	return sha256.Sum256(b)
+}
+
+// wantNoLoadExtension asserts load_extension failed because the function
+// doesn't exist in this build: it isn't compiled into the driver.
+func wantNoLoadExtension(t *testing.T, err error, what string) {
+	t.Helper()
+	wantCode(t, err, apierr.SQLError, what)
+	if d := apierr.As(err).Detail; !strings.Contains(d, "no such function: load_extension") {
+		t.Fatalf("%s: got %q, want no such function", what, d)
+	}
 }
 
 func bothAccess(f func(a Access, name string)) {
@@ -125,17 +136,13 @@ func TestIsolationLoadExtension(t *testing.T) {
 			"SELECT load_extension('/tmp/x.so', 'sqlite3_extension_init')",
 		} {
 			_, err := query(e, "a", a, sql)
-			if err == nil {
-				t.Fatalf("%s %s: succeeded", name, sql)
-			}
-			if c := apierr.As(err).Code; c != apierr.StatementDenied && c != apierr.SQLError {
-				t.Fatalf("%s %s: got %s", name, sql, c)
-			}
+			wantNoLoadExtension(t, err, name+" "+sql)
 		}
 	})
 	// As API: the engine never exposes extension loading, and every user
 	// connection has it switched off.
-	p := e.pool(d.DefaultBranchID, e.Layout().BranchFile(d.ID, d.DefaultBranchID))
+	p := e.acquirePool(d.DefaultBranchID, e.Layout().BranchFile(d.ID, d.DefaultBranchID))
+	defer e.releasePool(p)
 	w, err := p.acquireWriter(context.Background(), false)
 	if err != nil {
 		t.Fatal(err)
@@ -276,6 +283,9 @@ func TestIsolationResultCap(t *testing.T) {
 		wantCode(t, err, apierr.ResultTooLarge, name+" 11 rows")
 		_, err = query(e, "a", a, "SELECT randomblob(3000) UNION ALL SELECT randomblob(3000)")
 		wantCode(t, err, apierr.ResultTooLarge, name+" bytes")
+		// NULLs aren't free: each value costs at least the memory it takes.
+		_, err = query(e, "a", a, "SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL FROM generate_series(1, 10)")
+		wantCode(t, err, apierr.ResultTooLarge, name+" wide NULL rows")
 	})
 	// The byte cap counts across a batch.
 	_, err := e.Batch(context.Background(), Target{Database: "a"}, Read, []Statement{
@@ -336,10 +346,14 @@ func TestIsolationDiskFill(t *testing.T) {
 		if pages*size > 512<<10 {
 			t.Fatalf("branch grew to %d bytes past its 512KiB limit", pages*size)
 		}
+		// On disk, with the WAL: the log is truncated once it passes a
+		// quarter of the limit, so it adds at most that plus one write.
+		if got := fileBytes(e.Layout().BranchFile(d.ID, d.DefaultBranchID)); got > 512<<10+128<<10+64<<10 {
+			t.Fatalf("branch takes %d bytes on disk with its WAL", got)
+		}
 		// Reads and deletes still work on a full branch.
 		mustQuery(t, e, "a", Read, "SELECT count(*) FROM t")
 		mustQuery(t, e, "a", Write, "DELETE FROM t")
-		_ = d
 	})
 	t.Run("instance quota", func(t *testing.T) {
 		e := newEngine(t, func(c *config.Config) { c.MaxBranchBytes = 64 << 20; c.MaxInstanceBytes = 1 << 20 })
@@ -355,6 +369,40 @@ func TestIsolationDiskFill(t *testing.T) {
 		_, err = query(e, "b", Write, "INSERT INTO t VALUES (randomblob(32768))")
 		wantCode(t, err, apierr.InstanceQuotaExceeded, "writing another database at quota")
 		mustQuery(t, e, "b", Read, "SELECT count(*) FROM t")
+		if total := e.TotalBytes(); total > 1<<20+256<<10 {
+			t.Fatalf("instance grew to %d bytes past its 1MiB quota", total)
+		}
+		// At the quota, deletes still run, and so do writes that reuse the
+		// pages they freed.
+		mustQuery(t, e, "a", Write, "DELETE FROM t WHERE rowid IN (SELECT rowid FROM t LIMIT 2)")
+		mustQuery(t, e, "a", Write, "INSERT INTO t VALUES (randomblob(32768))")
+	})
+	t.Run("concurrent writers share the quota", func(t *testing.T) {
+		e := newEngine(t, func(c *config.Config) { c.MaxBranchBytes = 64 << 20; c.MaxInstanceBytes = 2 << 20 })
+		names := []string{"a", "b", "c", "d"}
+		for _, n := range names {
+			mustCreate(t, e, n)
+			mustQuery(t, e, n, Write, "CREATE TABLE t(x)")
+		}
+		var wg sync.WaitGroup
+		for _, n := range names {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := 0; i < 100; i++ {
+					if _, err := query(e, n, Write, "INSERT INTO t SELECT randomblob(16384) FROM generate_series(1, 8)"); err != nil {
+						if apierr.As(err).Code != apierr.InstanceQuotaExceeded {
+							t.Errorf("%s: %v", n, err)
+						}
+						return
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		if total := e.TotalBytes(); total > 2<<20+512<<10 {
+			t.Fatalf("concurrent writers took the instance to %d bytes past its 2MiB quota", total)
+		}
 	})
 	t.Run("free disk", func(t *testing.T) {
 		e := newEngine(t, nil)
@@ -377,21 +425,18 @@ func TestIsolationSchemaFunctions(t *testing.T) {
 	mustQuery(t, e, "a", Write, "CREATE TRIGGER tr AFTER INSERT ON t BEGIN INSERT INTO log SELECT load_extension('/tmp/x.so'); END")
 	bothAccess(func(a Access, name string) {
 		_, err := query(e, "a", a, "SELECT * FROM v")
-		if err == nil {
-			t.Fatalf("%s: view calling load_extension ran", name)
-		}
+		wantNoLoadExtension(t, err, name+" view calling load_extension")
 	})
 	_, err := query(e, "a", Write, "INSERT INTO t VALUES (1)")
-	if err == nil {
-		t.Fatal("trigger calling load_extension ran")
-	}
+	wantNoLoadExtension(t, err, "trigger calling load_extension")
 	if v := scalar(t, mustQuery(t, e, "a", Read, "SELECT count(*) FROM t")); v.Int != 0 {
 		t.Fatal("insert that fired a failing trigger was kept")
 	}
 
 	// A function that isn't marked innocuous can't run from the schema. Only
 	// engine code can register one, so do it on the pooled writer.
-	p := e.pool(d.DefaultBranchID, e.Layout().BranchFile(d.ID, d.DefaultBranchID))
+	p := e.acquirePool(d.DefaultBranchID, e.Layout().BranchFile(d.ID, d.DefaultBranchID))
+	defer e.releasePool(p)
 	w, err := p.acquireWriter(context.Background(), false)
 	if err != nil {
 		t.Fatal(err)
@@ -410,4 +455,36 @@ func TestIsolationSchemaFunctions(t *testing.T) {
 		t.Fatalf("non-innocuous function in a view: got %v, want unsafe use", err)
 	}
 	p.releaseWriter(w)
+}
+
+// Temp objects would live on a pooled connection and leak into later
+// requests: shadowing a table for readers, or capturing writes with a temp
+// trigger. Both the TEMP keyword and the temp. schema prefix are denied.
+func TestIsolationTempObjects(t *testing.T) {
+	e := newEngine(t, func(c *config.Config) { c.ReadersPerBranch = 1 })
+	mustCreate(t, e, "a")
+	mustQuery(t, e, "a", Write, "CREATE TABLE users(name)")
+	mustQuery(t, e, "a", Write, "CREATE TABLE audit(name)")
+	mustQuery(t, e, "a", Write, "INSERT INTO users VALUES ('real')")
+	for _, sql := range []string{
+		"CREATE TEMP TABLE users(name)",
+		"CREATE TABLE temp.users(name)",
+		"CREATE TABLE temp.users AS SELECT 'planted' AS name",
+		"CREATE VIEW temp.users AS SELECT 'planted' AS name",
+		"CREATE TRIGGER temp.spy AFTER INSERT ON main.users BEGIN INSERT INTO main.audit VALUES (new.name); END",
+		"CREATE TEMP TRIGGER spy AFTER INSERT ON main.users BEGIN INSERT INTO main.audit VALUES (new.name); END",
+	} {
+		bothAccess(func(a Access, name string) {
+			_, err := query(e, "a", a, sql)
+			wantCode(t, err, apierr.StatementDenied, name+" "+sql)
+		})
+	}
+	// With one reader and one writer, a leak would show up here.
+	if v := scalar(t, mustQuery(t, e, "a", Read, "SELECT name FROM users")); v.Text != "real" {
+		t.Fatalf("reader sees %q", v.Text)
+	}
+	mustQuery(t, e, "a", Write, "INSERT INTO users VALUES ('second')")
+	if v := scalar(t, mustQuery(t, e, "a", Read, "SELECT count(*) FROM audit")); v.Int != 0 {
+		t.Fatalf("a trigger captured %d rows", v.Int)
+	}
 }

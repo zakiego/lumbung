@@ -35,9 +35,10 @@ type Engine struct {
 	poolsMu sync.Mutex
 	pools   map[string]*branchPool // by branch id
 
-	usageMu sync.Mutex
-	sizes   map[string]int64 // bytes on disk by branch id
-	total   int64
+	usageMu  sync.Mutex
+	sizes    map[string]int64 // bytes on disk by branch id
+	total    int64
+	reserved int64 // room promised to write transactions in flight
 
 	stop chan struct{}
 	done chan struct{}
@@ -126,24 +127,42 @@ func (e *Engine) limits() sqlitex.Limits {
 	}
 }
 
-// pool returns the connection pool for a branch, evicting the least recently
-// used idle pool when the open-branch cap is reached.
-func (e *Engine) pool(branchID, path string) *branchPool {
+// acquirePool returns the connection pool for a branch and holds a
+// reference to it, so eviction and idle close leave it alone until
+// releasePool. It evicts the least recently used unheld pool when the
+// open-branch cap is reached.
+func (e *Engine) acquirePool(branchID, path string) *branchPool {
 	e.poolsMu.Lock()
 	defer e.poolsMu.Unlock()
-	if p, ok := e.pools[branchID]; ok {
-		return p
+	p, ok := e.pools[branchID]
+	if !ok {
+		if len(e.pools) >= e.cfg.MaxOpenBranches {
+			e.evictLocked(1)
+		}
+		p = newBranchPool(path, e.limits(), e.cfg.ReadersPerBranch)
+		e.pools[branchID] = p
 	}
-	if len(e.pools) >= e.cfg.MaxOpenBranches {
-		e.evictLocked(1)
-	}
-	p := newBranchPool(path, e.limits(), e.cfg.ReadersPerBranch)
-	e.pools[branchID] = p
+	p.refs++
 	return p
 }
 
-// evictLocked closes up to n idle pools, oldest first. A pool with
-// connections in use is never evicted, so the cap can be passed briefly.
+// releasePool drops a reference taken by acquirePool.
+func (e *Engine) releasePool(p *branchPool) {
+	e.poolsMu.Lock()
+	p.refs--
+	e.poolsMu.Unlock()
+}
+
+// evictable reports whether nothing holds or uses a pool. Call with poolsMu.
+func evictable(p *branchPool) (bool, time.Time) {
+	if p.refs > 0 {
+		return false, time.Time{}
+	}
+	return p.idleSince()
+}
+
+// evictLocked closes up to n idle pools, oldest first. A pool a request
+// holds is never evicted, so the cap can be passed briefly.
 func (e *Engine) evictLocked(n int) {
 	type cand struct {
 		id   string
@@ -151,7 +170,7 @@ func (e *Engine) evictLocked(n int) {
 	}
 	var cands []cand
 	for id, p := range e.pools {
-		if idle, last := p.idleSince(); idle {
+		if ok, last := evictable(p); ok {
 			cands = append(cands, cand{id, last})
 		}
 	}
@@ -182,7 +201,7 @@ func (e *Engine) closeIdle(cutoff time.Time) {
 	e.poolsMu.Lock()
 	defer e.poolsMu.Unlock()
 	for id, p := range e.pools {
-		if idle, last := p.idleSince(); idle && last.Before(cutoff) {
+		if ok, last := evictable(p); ok && last.Before(cutoff) {
 			delete(e.pools, id)
 			go func() { _ = p.close(context.Background()) }()
 		}
@@ -267,15 +286,18 @@ func (e *Engine) CreateDatabase(ctx context.Context, name string) (meta.Database
 	}
 	// Create the file through a writer (which sets WAL mode) before the
 	// record exists, so a recorded branch always has its file.
-	p := e.pool(branchID, path)
+	p := e.acquirePool(branchID, path)
 	w, err := p.acquireWriter(ctx, true)
+	if err == nil {
+		p.releaseWriter(w)
+	}
+	e.releasePool(p)
 	if err != nil {
 		e.dropPool(branchID)
 		_ = os.RemoveAll(e.layout.DatabaseDir(dbID))
-		return meta.Database{}, err
+		return meta.Database{}, mapAcquire(err)
 	}
-	p.releaseWriter(w)
-	d, _, err := e.meta.CreateDatabase(ctx, name, dbID, branchID)
+	d, _, err := e.meta.CreateDatabase(ctx, name, dbID, branchID, e.cfg.MaxDatabases)
 	if err != nil {
 		e.dropPool(branchID)
 		_ = os.RemoveAll(e.layout.DatabaseDir(dbID))

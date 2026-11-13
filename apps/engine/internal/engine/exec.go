@@ -3,8 +3,10 @@ package engine
 import (
 	"context"
 	"errors"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ncruces/go-sqlite3"
 
@@ -71,17 +73,32 @@ func (e *Engine) Batch(ctx context.Context, t Target, access Access, stmts []Sta
 }
 
 func (e *Engine) run(ctx context.Context, t Target, access Access, stmts []Statement) ([]*Result, error) {
+	var results []*Result
+	err := e.session(ctx, t, access, e.cfg.StatementTimeout, func(conn *sqlitex.Conn, _ target) error {
+		var err error
+		results, err = e.runAll(conn, stmts)
+		return err
+	})
+	return results, err
+}
+
+// session runs f on a connection to the target inside one transaction:
+// a read-only connection and BEGIN for Read, the writer and BEGIN IMMEDIATE
+// with the size caps applied for Write. It commits when f succeeds and rolls
+// back otherwise, and maps errors to API errors.
+func (e *Engine) session(ctx context.Context, t Target, access Access, timeout time.Duration, f func(*sqlitex.Conn, target) error) error {
 	if access != Read && access != Write {
-		return nil, apierr.New(apierr.BadRequest, "unknown access")
+		return apierr.New(apierr.BadRequest, "unknown access")
 	}
 	tg, err := e.resolve(ctx, t.Database, t.Branch)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, e.cfg.StatementTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	p := e.pool(tg.branch.ID, tg.path)
+	p := e.acquirePool(tg.branch.ID, tg.path)
+	defer e.releasePool(p)
 	var conn *sqlitex.Conn
 	if access == Write {
 		conn, err = p.acquireWriter(ctx, false)
@@ -89,7 +106,7 @@ func (e *Engine) run(ctx context.Context, t Target, access Access, stmts []State
 		conn, err = p.acquireReader(ctx)
 	}
 	if err != nil {
-		return nil, mapAcquire(err)
+		return mapAcquire(err)
 	}
 	defer func() {
 		if access == Write {
@@ -99,12 +116,16 @@ func (e *Engine) run(ctx context.Context, t Target, access Access, stmts []State
 		}
 	}()
 
-	var quotaLimited bool
+	var grant sizeGrant
 	if access == Write {
-		quotaLimited, err = e.applySizeLimit(conn)
+		grant, err = e.applySizeLimit(conn)
 		if err != nil {
-			return nil, err
+			return err
 		}
+		defer func() {
+			e.truncateWAL(conn, tg.path)
+			e.finishWrite(tg.branch.ID, tg.path, grant)
+		}()
 	}
 
 	conn.SetInterrupt(ctx)
@@ -113,21 +134,17 @@ func (e *Engine) run(ctx context.Context, t Target, access Access, stmts []State
 		begin = "BEGIN IMMEDIATE"
 	}
 	if err := conn.ExecTrusted(begin); err != nil {
-		return nil, e.sqlErr(err, quotaLimited)
+		return e.sqlErr(err, grant.quotaLimited)
 	}
-	results, err := e.runAll(conn, stmts)
-	if err != nil {
+	if err := f(conn, tg); err != nil {
 		_ = conn.ExecTrusted("ROLLBACK")
-		return nil, e.sqlErr(err, quotaLimited)
+		return e.sqlErr(err, grant.quotaLimited)
 	}
 	if err := conn.ExecTrusted("COMMIT"); err != nil {
 		_ = conn.ExecTrusted("ROLLBACK")
-		return nil, e.sqlErr(err, quotaLimited)
+		return e.sqlErr(err, grant.quotaLimited)
 	}
-	if access == Write {
-		e.recordSize(tg.branch.ID, fileBytes(tg.path))
-	}
-	return results, nil
+	return nil
 }
 
 func mapAcquire(err error) error {
@@ -137,7 +154,9 @@ func mapAcquire(err error) error {
 	if errors.Is(err, errPoolClosed) {
 		return apierr.New(apierr.Busy, "branch is closing, retry")
 	}
-	return apierr.FromSQLite(err)
+	// Opening a connection isn't user SQL: a failure here (a missing or
+	// unreadable file) is the engine's problem, not a denied statement.
+	return apierr.New(apierr.Internal, "can't open the branch").WithDetail(err.Error())
 }
 
 // sqlErr maps an error from running statements. A full database is the
@@ -150,34 +169,76 @@ func (e *Engine) sqlErr(err error, quotaLimited bool) error {
 	return ae
 }
 
+// sizeGrant is the disk room a write transaction reserved.
+type sizeGrant struct {
+	bytes        int64
+	quotaLimited bool // the instance quota, not the branch limit, set the cap
+}
+
 // applySizeLimit caps how far the writer's file may grow with
 // max_page_count: the branch limit, or less when the instance quota leaves
-// less room. It reports whether the quota was the tighter cap.
-func (e *Engine) applySizeLimit(conn *sqlitex.Conn) (bool, error) {
-	total := e.TotalBytes()
-	if total >= e.cfg.MaxInstanceBytes {
-		return true, apierr.Newf(apierr.InstanceQuotaExceeded, "the instance uses %d bytes of its %d byte quota", total, e.cfg.MaxInstanceBytes)
-	}
+// less room. Room is reserved under the usage lock until finishWrite, so
+// concurrent writers on different branches can't each spend the same free
+// space. New pages land in the WAL before the database file, so a
+// transaction may add at most half the free room in pages.
+//
+// The cap is never below the current page count: a full branch, or one on a
+// full instance, still runs deletes and writes that reuse free pages.
+func (e *Engine) applySizeLimit(conn *sqlitex.Conn) (sizeGrant, error) {
 	pageSize, err := trustedInt(conn, "PRAGMA page_size")
 	if err != nil {
-		return false, apierr.FromSQLite(err)
+		return sizeGrant{}, apierr.FromSQLite(err)
 	}
 	pages, err := trustedInt(conn, "PRAGMA page_count")
 	if err != nil {
-		return false, apierr.FromSQLite(err)
+		return sizeGrant{}, apierr.FromSQLite(err)
 	}
-	limit := e.cfg.MaxBranchBytes / pageSize
-	quotaLimited := false
-	if room := pages + (e.cfg.MaxInstanceBytes-total)/pageSize; room < limit {
-		limit, quotaLimited = room, true
+	branchPages := e.cfg.MaxBranchBytes / pageSize
+
+	e.usageMu.Lock()
+	free := e.cfg.MaxInstanceBytes - e.total - e.reserved
+	roomPages := int64(0)
+	if free > 0 {
+		roomPages = free / (2 * pageSize)
 	}
-	if limit < 1 {
-		limit = 1
+	limit := min(branchPages, pages+roomPages)
+	g := sizeGrant{quotaLimited: pages+roomPages < branchPages}
+	if limit < pages {
+		limit = pages
 	}
-	if _, err := trustedInt(conn, "PRAGMA max_page_count = "+strconv.FormatInt(limit, 10)); err != nil {
-		return false, apierr.FromSQLite(err)
+	g.bytes = (limit - pages) * pageSize * 2
+	e.reserved += g.bytes
+	e.usageMu.Unlock()
+
+	if _, err := trustedInt(conn, "PRAGMA max_page_count = "+strconv.FormatInt(max(limit, 1), 10)); err != nil {
+		e.finishWrite("", "", g)
+		return sizeGrant{}, apierr.FromSQLite(err)
 	}
-	return quotaLimited, nil
+	return g, nil
+}
+
+// finishWrite releases a write's reservation and records the branch's new
+// size. An empty branchID only releases.
+func (e *Engine) finishWrite(branchID, path string, g sizeGrant) {
+	e.usageMu.Lock()
+	e.reserved -= g.bytes
+	e.usageMu.Unlock()
+	if branchID != "" {
+		e.recordSize(branchID, fileBytes(path))
+	}
+}
+
+// truncateWAL checkpoints and truncates the WAL once it passes a quarter of
+// the branch limit (at most 1 MiB), so the log can't sit on disk at the size
+// of the largest transaction. A checkpoint blocked by readers just waits for
+// the next write.
+func (e *Engine) truncateWAL(conn *sqlitex.Conn, path string) {
+	threshold := min(e.cfg.MaxBranchBytes/4, 1<<20)
+	fi, err := os.Stat(path + "-wal")
+	if err != nil || fi.Size() <= threshold {
+		return
+	}
+	_ = conn.ExecTrusted("PRAGMA wal_checkpoint(TRUNCATE)")
 }
 
 func trustedInt(conn *sqlitex.Conn, sql string) (int64, error) {
@@ -345,19 +406,22 @@ func bindValue(stmt *sqlite3.Stmt, i int, v value.Value) error {
 	return err
 }
 
-// column reads one value and the bytes it counts toward the result cap.
+// column reads one value and the bytes it counts toward the result cap: an
+// estimate of its JSON size, and never less than the memory a Value takes,
+// so a wide result of NULLs can't build a huge response cheaply.
 func column(stmt *sqlite3.Stmt, i int) (value.Value, int64) {
+	const minCost = 48
 	switch stmt.ColumnType(i) {
 	case sqlite3.INTEGER:
-		return value.IntValue(stmt.ColumnInt64(i)), 8
+		return value.IntValue(stmt.ColumnInt64(i)), minCost
 	case sqlite3.FLOAT:
-		return value.FloatValue(stmt.ColumnFloat(i)), 8
+		return value.FloatValue(stmt.ColumnFloat(i)), minCost
 	case sqlite3.TEXT:
 		s := stmt.ColumnText(i)
-		return value.TextValue(s), int64(len(s))
+		return value.TextValue(s), minCost + int64(len(s))*2 // escaping can double it
 	case sqlite3.BLOB:
 		b := stmt.ColumnBlob(i, nil)
-		return value.BlobValue(b), int64(len(b))
+		return value.BlobValue(b), minCost + int64(len(b))*2 // base64, plus the raw bytes held
 	}
-	return value.NullValue(), 1
+	return value.NullValue(), minCost
 }

@@ -25,6 +25,7 @@ type branchPool struct {
 	opened  int             // readers open, idle or in use
 	waiters chan struct{}   // signalled when a reader is returned
 	inUse   int             // connections handed out
+	refs    int             // requests holding the pool; guarded by Engine.poolsMu
 	closed  bool
 	last    time.Time
 }
@@ -222,6 +223,12 @@ func (p *branchPool) close(ctx context.Context) error {
 		case <-p.waiters:
 		case <-time.After(20 * time.Millisecond): // a wake-up may go to a reader instead
 		case <-ctx.Done():
+			// Give up on the readers still out (releaseReader closes them
+			// when they come back) but don't leak the writer.
+			if p.writer != nil {
+				_ = p.writer.Close()
+				p.writer = nil
+			}
 			p.writerSem <- struct{}{}
 			return ctx.Err()
 		}
