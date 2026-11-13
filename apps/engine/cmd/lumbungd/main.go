@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -37,7 +38,7 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","version":%q}`+"\n", version.Version)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": version.Version})
 	})
 
 	srv := &http.Server{
@@ -63,6 +64,9 @@ func run() error {
 		return err
 	case <-ctx.Done():
 	}
+	// Restore default signal handling so a second Ctrl+C stops the process
+	// during the graceful shutdown below.
+	stop()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

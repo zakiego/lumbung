@@ -8,7 +8,7 @@ The machine the build started on has Go 1.25.6. On this date go.dev lists 1.27.4
 
 ## Decision
 
-`apps/engine/go.mod` declares `go 1.27.4`. A local Go older than that downloads the 1.27.4 toolchain on first use (the default `GOTOOLCHAIN=auto`). CI reads the version from `go.mod` through `actions/setup-go`'s `go-version-file`. The Docker build stage uses the matching `golang` image.
+`apps/engine/go.mod` declares `go 1.27.4`. A local Go older than that downloads the 1.27.4 toolchain on first use (the default `GOTOOLCHAIN=auto`). CI reads the version from `go.mod` through `actions/setup-go`'s `go-version-file`. The Docker build stage (milestone 10) must use the matching `golang` image.
 
 staticcheck and govulncheck are pinned as `tool` directives in `go.mod` and run with `go tool`, so CI and local runs use the same versions.
 
