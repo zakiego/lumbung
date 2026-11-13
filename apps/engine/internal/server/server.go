@@ -173,3 +173,21 @@ func OpenAPI() ([]byte, error) {
 	}
 	return append(b, '\n'), nil
 }
+
+// WithThrowawayAPI builds the API on a temporary data directory and calls
+// f with it, for generating documents that need no running instance.
+func WithThrowawayAPI(f func(*api.Server) error) error {
+	dir, err := os.MkdirTemp("", "lumbung-docs-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	cfg := config.Defaults()
+	cfg.DataDir = dir
+	eng, err := engine.Open(context.Background(), cfg, slog.New(slog.DiscardHandler))
+	if err != nil {
+		return err
+	}
+	defer eng.Close()
+	return f(api.New(eng, nil))
+}

@@ -20,6 +20,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
 	"github.com/zakiego/lumbung/apps/engine/internal/auth"
@@ -48,6 +49,8 @@ type Server struct {
 
 	touchMu sync.Mutex
 	touched map[string]time.Time
+
+	mcpServer *mcp.Server
 }
 
 // Option changes a server at construction.
@@ -81,6 +84,7 @@ func New(eng *engine.Engine, log *slog.Logger, opts ...Option) *Server {
 	s.api = humago.New(s.mux, Config())
 	s.api.UseMiddleware(s.middleware)
 	s.register()
+	s.mountMCP()
 	s.mux.HandleFunc("GET /health", s.health)
 	return s
 }
