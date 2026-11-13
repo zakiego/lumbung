@@ -1,0 +1,18 @@
+{
+  "name": "lumbung",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev:engine": "pnpm --filter @lumbung/engine dev",
+    "dev:site": "pnpm --filter @lumbung/site dev",
+    "build": "pnpm -r --workspace-concurrency=1 build",
+    "typecheck": "pnpm -r --workspace-concurrency=1 typecheck",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "lint": "pnpm -r --workspace-concurrency=1 --if-present lint",
+    "check:wording": "bash scripts/check-wording.sh"
+  }
+}
