@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - examples/*
 
 # pnpm 12 runs no dependency build scripts unless they're listed here.
 allowBuilds:

@@ -10,6 +10,7 @@ apps/dashboard   TanStack Start (Nitro) + shadcn + Better Auth, a client of the 
 apps/site        Astro + Starlight: landing and docs (Cloudflare Pages)
 apps/edge        Cloudflare Worker that routes our public hostname
 packages/client  @lumbung/client TypeScript SDK and Drizzle adapter
+examples/        Runnable examples, tested in CI (drizzle: drizzle-kit + lumbung migrate)
 docs/adr         Decision records
 ops/             Our own deployment files and notes
 scripts/         CI helpers, worktree setup, wording check, docs tests

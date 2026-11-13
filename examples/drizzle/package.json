@@ -1,0 +1,21 @@
+{
+  "name": "@lumbung/example-drizzle",
+  "private": true,
+  "type": "module",
+  "description": "Drizzle with Lumbung: schema, drizzle-kit migrations applied by lumbung migrate, queries through @lumbung/client/drizzle.",
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lumbung/client": "workspace:*",
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "drizzle-kit": "0.31.11",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
