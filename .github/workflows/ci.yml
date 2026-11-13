@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wording:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the check reads every commit message
+      - run: bash scripts/check-wording.test.sh
+      - run: bash scripts/check-wording.sh
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+
+  engine:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/engine
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/engine/go.mod
+          cache-dependency-path: apps/engine/go.sum
+      - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go tool staticcheck ./...
+      - run: go test -race ./...
+      - run: go tool govulncheck ./...
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter '!@lumbung/engine' -r typecheck
+      - run: pnpm --filter '!@lumbung/engine' -r --if-present test
+      - run: pnpm --filter @lumbung/site build
