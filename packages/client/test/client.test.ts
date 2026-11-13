@@ -17,12 +17,12 @@ describe("values", () => {
   test("round-trip every type exactly", async () => {
     const name = await freshDatabase()
     const db = createClient({ url, token, database: name, intMode: "bigint" })
-    await db.query("CREATE TABLE v(i INTEGER, f REAL, s TEXT, b BLOB, n)")
+    // Untyped columns, so the stored type is exactly what was sent.
+    await db.query("CREATE TABLE v(i, f, big, nz, s, b, n)")
     const blob = new Uint8Array([0, 1, 2, 255])
-    await db.query("INSERT INTO v VALUES (?, ?, ?, ?, ?)", [9007199254740993n, 1.0, "héllo\u0000x", blob, null])
-    const r = await db.query("SELECT i, f, typeof(f) AS tf, s, b, n FROM v")
-    expect(r.rows[0]).toEqual({ i: 9007199254740993n, f: 1, tf: "real", s: "héllo\u0000x", b: blob, n: null })
-    expect(r.columnTypes).toEqual(["INTEGER", "REAL", "", "TEXT", "BLOB", ""])
+    await db.query("INSERT INTO v VALUES (?, ?, ?, ?, ?, ?, ?)", [9007199254740993n, 1.5, 1e21, -0, "héllo\u0000x", blob, null])
+    const r = await db.query("SELECT i, f, big, typeof(big) AS tb, typeof(nz) AS tz, s, b, n FROM v")
+    expect(r.rows[0]).toEqual({ i: 9007199254740993n, f: 1.5, big: 1e21, tb: "real", tz: "real", s: "héllo\u0000x", b: blob, n: null })
   })
 
   test("intMode number refuses to round, string keeps digits", async () => {
@@ -40,6 +40,8 @@ describe("values", () => {
     expect(encodeValue(-Infinity)).toEqual({ type: "float", value: "-Infinity" })
     expect(encodeValue(new Date("2026-01-02T03:04:05.000Z"))).toEqual({ type: "text", value: "2026-01-02T03:04:05.000Z" })
     expect(() => encodeValue(2 ** 60)).toThrow(RangeError)
+    expect(encodeValue(1e21)).toEqual({ type: "float", value: 1e21 })
+    expect(encodeValue(-0)).toEqual({ type: "float", value: -0 })
     expect(() => encodeValue(NaN)).toThrow(RangeError)
     expect(() => encodeValue(2n ** 64n)).toThrow(RangeError)
     expect(decodeValue({ type: "float", value: "Infinity" }, "number")).toBe(Infinity)

@@ -47,4 +47,7 @@ test("drizzle on a Lumbung branch", async () => {
   expect(await db.select().from(users).all()).toHaveLength(3)
   const [, rows] = await db.batch([db.insert(users).values({ email: "e@example.com" }), db.select().from(users)])
   expect(rows).toHaveLength(4)
+
+  // db.transaction() can't work over HTTP; it fails with a clear error.
+  await expect(db.transaction(async (tx) => tx.select().from(users))).rejects.toMatchObject({ cause: { code: "unsupported" } })
 })

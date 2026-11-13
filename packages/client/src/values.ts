@@ -24,9 +24,15 @@ function fromBase64(b64: string): Uint8Array {
   return out
 }
 
+const TWO_63 = 2 ** 63
+
 /**
  * Encodes a parameter. Integers always travel as decimal strings, so a
- * bigint keeps every bit; a JS number with a fraction is a float.
+ * bigint keeps every bit. A JS number is an integer when it is a safe
+ * integer, and a float when it has a fraction, is -0, or is too large for
+ * 64-bit integers (1e21, 1e300). A whole number between 2^53 and 2^63 is
+ * refused: as a number it may already have been rounded, so pass a bigint
+ * for an exact integer.
  */
 export function encodeValue(v: InValue): WireParam {
   if (v === null || v === undefined) return { type: "null" }
@@ -39,9 +45,9 @@ export function encodeValue(v: InValue): WireParam {
       }
       return { type: "integer", value: v.toString() }
     case "number":
-      if (Number.isInteger(v)) {
+      if (Number.isInteger(v) && !Object.is(v, -0) && Math.abs(v) < TWO_63) {
         if (!Number.isSafeInteger(v)) {
-          throw new RangeError(`${v} isn't a safe integer; pass a bigint to keep its exact value`)
+          throw new RangeError(`${v} isn't a safe integer; pass a bigint for an exact integer`)
         }
         return { type: "integer", value: String(v) }
       }

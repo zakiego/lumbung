@@ -46,6 +46,15 @@ export interface QueryOptions {
   signal?: AbortSignal
 }
 
+export interface BatchOptions extends QueryOptions {
+  /**
+   * Schema migration mode: foreign key enforcement is off for the batch and
+   * every foreign key is checked once before commit, so rebuilding a table
+   * doesn't fire ON DELETE actions. Needs a write token.
+   */
+  migration?: boolean
+}
+
 /** A statement's result. */
 export interface Result {
   /** Column names, in order. Repeated names appear more than once. */
@@ -147,7 +156,16 @@ export class Client {
       }
       if (res.ok) {
         if (res.status === 204) return undefined as T
-        return (await res.json()) as T
+        try {
+          return (await res.json()) as T
+        } catch (err) {
+          // A cut-off or non-JSON success body (a proxy in the way).
+          lastError = new LumbungError("invalid_response", res.status, "the response body isn't valid JSON", {
+            requestId: res.headers.get("x-request-id") ?? undefined,
+            cause: err,
+          })
+          continue
+        }
       }
       const error = await toError(res)
       lastError = error
@@ -211,8 +229,8 @@ export class Client {
   }
 
   /** Runs statements in order in one transaction: all take effect or none do. */
-  async batch(statements: Statement[], opts: QueryOptions = {}): Promise<Result[]> {
-    const body = { statements: statements.map(statementBody), read_only: opts.readOnly || undefined }
+  async batch(statements: Statement[], opts: BatchOptions = {}): Promise<Result[]> {
+    const body = { statements: statements.map(statementBody), read_only: opts.readOnly || undefined, migration: opts.migration || undefined }
     const r = await this.request<{ results: ResultOut[] }>("POST", `${this.#target()}/batch`, { body, safe: opts.readOnly === true, signal: opts.signal })
     return r.results.map((x) => this.#decode(x))
   }
