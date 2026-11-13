@@ -34,7 +34,7 @@ When a request hits a limit, nothing partial comes back and anything it wrote is
 
 A full branch, or any branch on an instance at its quota, still serves reads and deletes, and writes that reuse the space deletes freed. SQLite doesn't shrink a file when rows are deleted, so freed space is reused rather than returned.
 
-The branch limit counts the database's pages. The write-ahead log next to it is checkpointed and truncated once it passes a quarter of the branch limit (at most 1 MiB), so it stays small. The instance quota counts both, and a write may only claim half the free room in new pages, since each new page is written to the log first.
+The branch limit counts the database's pages. The write-ahead log next to it is checkpointed and truncated once it passes a quarter of the branch limit (at most 1 MiB), so it stays small. The instance quota counts both, and a write may only claim half the free room in new pages, since each new page is written to the log first. Creating a branch, resetting one, importing and restoring a database from the trash are checked against the quota before they copy anything.
 
 ## Connections
 

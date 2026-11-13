@@ -35,6 +35,10 @@ A branch can start from:
 | Delete | Removes the branch and its file. |
 | Schema diff | Compares tables, columns, indexes, views and triggers with another branch. |
 
+## Waiting for maintenance
+
+Reset, delete and import replace or remove the branch's file, so they wait for requests already running on the branch to finish. While one waits, new requests on that branch queue behind it for at most a few seconds at a time, then go through, so a long download can't take the branch offline. If the requests don't finish within two minutes, the operation fails with `busy` and nothing changes.
+
 ## Protected branches
 
 A protected branch can't be deleted or reset. The default branch is always protected. Turn protection on for any branch you want to keep safe.
