@@ -59,7 +59,7 @@ func TestCopyDuringWrites(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := checkIntegrity(bg, e.Layout().BranchFile(d.ID, b.ID)); err != nil {
+		if err := e.checkIntegrity(bg, e.Layout().BranchFile(d.ID, b.ID)); err != nil {
 			t.Fatal(err)
 		}
 		check(name)
@@ -67,7 +67,7 @@ func TestCopyDuringWrites(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := checkIntegrity(bg, e.Layout().SnapshotFile(d.ID, sn.ID)); err != nil {
+		if err := e.checkIntegrity(bg, e.Layout().SnapshotFile(d.ID, sn.ID)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -185,7 +185,7 @@ func TestCrashMidWrite(t *testing.T) {
 			t.Fatal(err)
 		}
 		d, _ := e.GetDatabase(bg, "app")
-		if err := checkIntegrity(bg, e.Layout().BranchFile(d.ID, d.DefaultBranchID)); err != nil {
+		if err := e.checkIntegrity(bg, e.Layout().BranchFile(d.ID, d.DefaultBranchID)); err != nil {
 			t.Fatalf("round %d: %v", round, err)
 		}
 		cnt := scalar(t, mustQuery(t, e, "app", Read, "SELECT count(*) FROM log")).Int

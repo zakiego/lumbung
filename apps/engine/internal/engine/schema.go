@@ -37,7 +37,8 @@ type ColumnInfo struct {
 	Hidden  int     `json:"hidden"` // 0 normal, 1 hidden (virtual tables), 2 or 3 generated
 }
 
-// Index is an index, including ones SQLite made for UNIQUE constraints.
+// Index is an index created with CREATE INDEX. Indexes SQLite makes for
+// UNIQUE and PRIMARY KEY constraints aren't listed; they show in the table's DDL.
 type Index struct {
 	Name    string   `json:"name"`
 	Table   string   `json:"table"`

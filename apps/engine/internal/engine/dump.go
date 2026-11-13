@@ -12,6 +12,7 @@ import (
 
 	"github.com/ncruces/go-sqlite3"
 
+	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlitex"
 )
 
@@ -32,6 +33,11 @@ func writeDump(conn *sqlitex.Conn, out io.Writer) error {
 	sc, err := readSchema(conn)
 	if err != nil {
 		return err
+	}
+	for _, t := range sc.Tables {
+		if t.Virtual && contentless(t.SQL) {
+			return apierr.Newf(apierr.BadRequest, "table %q is a contentless FTS5 table: its index can't be rebuilt from SQL. Download the branch as a .db file instead", t.Name)
+		}
 	}
 	w := bufio.NewWriterSize(out, 64<<10)
 	fmt.Fprintln(w, "PRAGMA foreign_keys=OFF;")
@@ -98,6 +104,13 @@ func dumpRows(conn *sqlitex.Conn, w *bufio.Writer, query, prefix string) error {
 		w.WriteString(");\n")
 	}
 	return stmt.Err()
+}
+
+// contentless reports whether a virtual table is a contentless FTS5 table,
+// whose rows can't be read back to rebuild it.
+func contentless(createSQL string) bool {
+	norm := strings.ToLower(strings.Join(strings.Fields(createSQL), ""))
+	return strings.Contains(norm, "usingfts5") && (strings.Contains(norm, "content=''") || strings.Contains(norm, `content=""`))
 }
 
 // quoteColumn renders a value as an SQL literal that reads back as the same

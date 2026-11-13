@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -39,23 +40,38 @@ var sqliteHeader = []byte("SQLite format 3\x00")
 // Import replaces a branch's content with an uploaded database file or SQL
 // dump (PLAN 6.7). The upload is built into a new file first and checked
 // under the same isolation rules as user SQL; the branch only changes when
-// everything passed.
+// everything passed. The mode's rule is checked again at the moment of the
+// swap, so writes that land during a long import are never silently lost.
 func (e *Engine) Import(ctx context.Context, t Target, format ImportFormat, mode ImportMode, r io.Reader) error {
 	tg, err := e.resolve(ctx, t.Database, t.Branch)
 	if err != nil {
 		return err
 	}
-	if mode == ImportReplace && (tg.branch.Protected || tg.branch.ID == tg.db.DefaultBranchID) {
-		return apierr.Newf(apierr.BranchProtected, "branch %q is protected; import into a new branch and promote it", tg.branch.Name)
-	}
-	if mode == ImportIntoEmpty {
-		empty, err := e.branchEmpty(ctx, t)
+	allowed := func(cur target) error {
+		if mode == ImportReplace {
+			if cur.branch.Protected || cur.branch.ID == cur.db.DefaultBranchID {
+				return apierr.Newf(apierr.BranchProtected, "branch %q is protected; import into a new branch and promote it", cur.branch.Name)
+			}
+			return nil
+		}
+		empty, err := fileIsEmpty(cur.path)
 		if err != nil {
 			return err
 		}
 		if !empty {
-			return apierr.Newf(apierr.BranchNotEmpty, "branch %q already has tables; use mode=replace", tg.branch.Name)
+			return apierr.Newf(apierr.BranchNotEmpty, "branch %q already has tables; use mode=replace", cur.branch.Name)
 		}
+		return nil
+	}
+	// Check up front too, so a doomed import doesn't upload first.
+	if mode == ImportReplace {
+		if err := allowed(tg); err != nil {
+			return err
+		}
+	} else if empty, err := e.branchEmpty(ctx, t); err != nil {
+		return err
+	} else if !empty {
+		return apierr.Newf(apierr.BranchNotEmpty, "branch %q already has tables; use mode=replace", tg.branch.Name)
 	}
 	if err := e.checkDisk(); err != nil {
 		return err
@@ -77,23 +93,57 @@ func (e *Engine) Import(ctx context.Context, t Target, format ImportFormat, mode
 	if err != nil {
 		return err
 	}
-	if err := checkIntegrity(ctx, staged); err != nil {
+	if err := e.checkIntegrity(ctx, staged); err != nil {
 		return apierr.New(apierr.InvalidImport, "the imported database fails its integrity check").WithDetail(err.Error())
 	}
-	if err := e.swapBranchFile(ctx, tg, staged); err != nil {
+	_ = removeCompanions(staged)
+	grow := fileBytes(staged) - fileBytes(tg.path)
+	if grow > 0 {
+		if err := e.reserveBytes(grow); err != nil {
+			return err
+		}
+		defer e.releaseBytes(grow)
+	}
+	if err := e.swapBranchFile(ctx, tg, staged, allowed); err != nil {
 		return err
 	}
 	return e.meta.TouchBranch(ctx, tg.branch.ID)
 }
 
+func removeCompanions(path string) error {
+	for _, p := range []string{path + "-wal", path + "-shm", path + "-journal"} {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
 func (e *Engine) branchEmpty(ctx context.Context, t Target) (bool, error) {
 	empty := true
 	err := e.session(ctx, t, Read, e.cfg.StatementTimeout, func(conn *sqlitex.Conn, _ target) error {
-		return eachRow(conn, "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite\\_%' ESCAPE '\\'", func(s *sqlite3.Stmt) {
-			empty = s.ColumnInt(0) == 0
-		})
+		return eachRow(conn, userObjectsSQL, func(s *sqlite3.Stmt) { empty = s.ColumnInt(0) == 0 })
 	})
 	return empty, err
+}
+
+const userObjectsSQL = `SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite\_%' ESCAPE '\'`
+
+// fileIsEmpty checks a branch file directly, for the recheck inside the
+// exclusive section, when no request holds the file.
+func fileIsEmpty(path string) (bool, error) {
+	c, err := sqlite3.Open(trustedURI(path, "rw"))
+	if err != nil {
+		return false, err
+	}
+	defer c.Close()
+	stmt, _, err := c.Prepare(userObjectsSQL)
+	if err != nil {
+		return false, err
+	}
+	defer stmt.Close()
+	stmt.Step()
+	return stmt.ColumnInt(0) == 0, stmt.Err()
 }
 
 // copyLimited writes r to path, failing once more than limit bytes arrive.
@@ -150,22 +200,21 @@ func (e *Engine) stageDB(ctx context.Context, r io.Reader, staged string, limit 
 	return nil
 }
 
-// stageSQL runs a SQL dump into a new file under the user authorizer, with
-// transaction statements turned into no-ops (the dump runs in one
-// transaction the engine opens).
+// stageSQL runs a SQL dump into a new file under the user authorizer. The
+// dump is read one statement at a time, so memory and time stay linear in
+// its size. It runs in one transaction the engine opens, with BEGIN and
+// COMMIT in the dump turned into no-ops, and with foreign keys checked once
+// at the end rather than per statement, since dumps write tables in name
+// order, not dependency order.
 func (e *Engine) stageSQL(ctx context.Context, r io.Reader, staged string, limit int64) error {
-	body, err := io.ReadAll(io.LimitReader(r, limit+1))
-	if err != nil {
-		return err
-	}
-	if int64(len(body)) > limit {
-		return apierr.Newf(apierr.ImportTooLarge, "the upload is larger than %d bytes", limit)
-	}
 	conn, err := sqlitex.Open(ctx, sqlitex.Options{Path: staged, Create: true, Limits: e.limits()})
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
+	// A dumped row is one INSERT, and a blob is written as hex at twice its
+	// size, so a statement may be about twice the value limit.
+	conn.Limit(sqlite3.LIMIT_SQL_LENGTH, int(min(2*e.cfg.MaxValueBytes+(1<<20), 1<<30-1)))
 	pageSize, err := trustedInt(conn, "PRAGMA page_size")
 	if err != nil {
 		return err
@@ -173,37 +222,136 @@ func (e *Engine) stageSQL(ctx context.Context, r io.Reader, staged string, limit
 	if _, err := trustedInt(conn, fmt.Sprintf("PRAGMA max_page_count = %d", e.cfg.MaxBranchBytes/pageSize)); err != nil {
 		return err
 	}
+	if err := conn.ExecTrusted("PRAGMA foreign_keys = OFF"); err != nil {
+		return err
+	}
 	conn.SetInterrupt(ctx)
 	conn.IgnoreTransactions(true)
 	if err := conn.ExecTrusted("BEGIN IMMEDIATE"); err != nil {
 		return err
 	}
-	sql := string(body)
-	for strings.TrimSpace(sql) != "" {
-		stmt, tail, err := conn.Prepare(sql)
-		if err != nil {
-			_ = conn.ExecTrusted("ROLLBACK")
-			return importErr(err)
+	fail := func(err error) error {
+		_ = conn.ExecTrusted("ROLLBACK")
+		return err
+	}
+	split := newSplitter(io.LimitReader(r, limit+1))
+	var pending strings.Builder
+	for {
+		chunk, err := split.next()
+		if err != nil && !errors.Is(err, io.EOF) {
+			return fail(err)
 		}
-		if stmt == nil {
-			break // only comments and whitespace left
+		if split.read > limit {
+			return fail(apierr.Newf(apierr.ImportTooLarge, "the upload is larger than %d bytes", limit))
 		}
-		for stmt.Step() {
+		pending.WriteString(chunk)
+		done := errors.Is(err, io.EOF)
+		if strings.TrimSpace(pending.String()) != "" {
+			ran, perr := runDumpStatement(conn, pending.String(), done)
+			if perr != nil {
+				return fail(perr)
+			}
+			if ran {
+				pending.Reset()
+			}
 		}
-		err = stmt.Err()
-		stmt.Close()
-		if err != nil {
-			_ = conn.ExecTrusted("ROLLBACK")
-			return importErr(err)
+		if done {
+			break
 		}
-		sql = tail
 	}
 	conn.IgnoreTransactions(false)
+	var violations int
+	if err := eachRow(conn, "SELECT count(*) FROM pragma_foreign_key_check", func(s *sqlite3.Stmt) { violations = s.ColumnInt(0) }); err != nil {
+		return fail(importErr(err))
+	}
+	if violations > 0 {
+		return fail(apierr.Newf(apierr.InvalidImport, "the dump leaves %d rows that break foreign keys", violations))
+	}
 	if err := conn.ExecTrusted("COMMIT"); err != nil {
-		_ = conn.ExecTrusted("ROLLBACK")
-		return importErr(err)
+		return fail(importErr(err))
 	}
 	return nil
+}
+
+// runDumpStatement prepares and runs text holding one statement. It reports
+// false when the text is an unfinished statement (a trigger body split at an
+// inner semicolon) so the caller appends the next chunk.
+func runDumpStatement(conn *sqlitex.Conn, text string, last bool) (bool, error) {
+	stmt, tail, err := conn.Prepare(text)
+	if err != nil {
+		if !last && strings.Contains(err.Error(), "incomplete input") {
+			return false, nil
+		}
+		return false, importErr(err)
+	}
+	if stmt == nil {
+		return true, nil // only comments
+	}
+	for stmt.Step() {
+	}
+	err = stmt.Err()
+	stmt.Close()
+	if err != nil {
+		return false, importErr(err)
+	}
+	if strings.TrimSpace(tail) != "" {
+		// The splitter only cuts at a semicolon outside quotes and comments,
+		// so a tail means it misread the text.
+		return false, apierr.New(apierr.InvalidImport, "the SQL dump couldn't be split into statements")
+	}
+	return true, nil
+}
+
+// splitter cuts SQL text after each semicolon that sits outside quotes,
+// identifiers and comments. A cut may still fall inside a trigger body; the
+// caller detects that and joins chunks.
+type splitter struct {
+	r    *bufio.Reader
+	read int64
+}
+
+func newSplitter(r io.Reader) *splitter { return &splitter{r: bufio.NewReaderSize(r, 64<<10)} }
+
+func (s *splitter) next() (string, error) {
+	var b strings.Builder
+	var quote rune // ', ", ` or ] while inside one
+	lineComment, blockComment := false, false
+	var prev rune
+	for {
+		c, size, err := s.r.ReadRune()
+		if err != nil {
+			return b.String(), err
+		}
+		s.read += int64(size)
+		b.WriteRune(c)
+		switch {
+		case lineComment:
+			if c == '\n' {
+				lineComment = false
+			}
+		case blockComment:
+			if prev == '*' && c == '/' {
+				blockComment = false
+				c = 0
+			}
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '\'' || c == '"' || c == '`':
+			quote = c
+		case c == '[':
+			quote = ']'
+		case prev == '-' && c == '-':
+			lineComment = true
+		case prev == '/' && c == '*':
+			blockComment = true
+			c = 0
+		case c == ';':
+			return b.String(), nil
+		}
+		prev = c
+	}
 }
 
 func importErr(err error) error {
@@ -226,7 +374,7 @@ func (e *Engine) ExportDB(ctx context.Context, t Target, w io.Writer) error {
 	if err := e.checkDisk(); err != nil {
 		return err
 	}
-	tmp := tempName(e.layout.TmpDir() + "/export")
+	tmp := tempName(e.layout.TmpDir() + "/download")
 	defer func() { _ = removeBranchFiles(tmp) }()
 	if err := e.copyBranch(ctx, tg, tmp); err != nil {
 		return err
@@ -255,7 +403,7 @@ func (e *Engine) copyBranch(ctx context.Context, tg target, dst string) error {
 		return apierr.New(apierr.Busy, "timed out waiting for the branch")
 	}
 	defer g.unshare()
-	if _, err := copyDB(ctx, tg.path, dst); err != nil {
+	if _, err := e.copyDB(ctx, tg.path, dst); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return apierr.New(apierr.StatementTimeout, "the copy ran too long")
 		}

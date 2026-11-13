@@ -34,9 +34,12 @@ type Engine struct {
 	refused error
 
 	poolsMu sync.Mutex
-	pools   map[string]*branchPool // by branch id
+	pools   map[string]*branchPool   // by branch id
+	closing map[string]chan struct{} // pools being closed, closed when done
 
 	gates gates // per-branch maintenance gates
+
+	trashMu sync.Mutex // serializes deleting, restoring and purging databases
 
 	usageMu  sync.Mutex
 	sizes    map[string]int64 // bytes on disk by branch id
@@ -67,6 +70,7 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*Engine, er
 		layout:    layout,
 		log:       log,
 		pools:     map[string]*branchPool{},
+		closing:   map[string]chan struct{}{},
 		sizes:     map[string]int64{},
 		stop:      make(chan struct{}),
 		done:      make(chan struct{}),
@@ -79,6 +83,9 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*Engine, er
 	} else if err != nil {
 		return nil, err
 	} else if err := e.scanUsage(ctx); err != nil {
+		_ = e.meta.Close()
+		return nil, err
+	} else if err := e.removeOrphans(ctx); err != nil {
 		_ = e.meta.Close()
 		return nil, err
 	}
@@ -138,6 +145,17 @@ func (e *Engine) limits() sqlitex.Limits {
 func (e *Engine) acquirePool(branchID, path string) *branchPool {
 	e.poolsMu.Lock()
 	defer e.poolsMu.Unlock()
+	// A pool still closing holds the file: wait so the new pool never shares
+	// a WAL with connections that are about to delete it.
+	for {
+		ch, closing := e.closing[branchID]
+		if !closing {
+			break
+		}
+		e.poolsMu.Unlock()
+		<-ch
+		e.poolsMu.Lock()
+	}
 	p, ok := e.pools[branchID]
 	if !ok {
 		if len(e.pools) >= e.cfg.MaxOpenBranches {
@@ -180,10 +198,24 @@ func (e *Engine) evictLocked(n int) {
 	}
 	sort.Slice(cands, func(i, j int) bool { return cands[i].last.Before(cands[j].last) })
 	for i := 0; i < n && i < len(cands); i++ {
-		p := e.pools[cands[i].id]
-		delete(e.pools, cands[i].id)
-		go func() { _ = p.close(context.Background()) }()
+		e.closeLocked(cands[i].id)
 	}
+}
+
+// closeLocked closes a pool in the background, recording it in closing until
+// it is done. Call with poolsMu held.
+func (e *Engine) closeLocked(branchID string) {
+	p := e.pools[branchID]
+	delete(e.pools, branchID)
+	done := make(chan struct{})
+	e.closing[branchID] = done
+	go func() {
+		_ = p.close(context.Background())
+		e.poolsMu.Lock()
+		delete(e.closing, branchID)
+		e.poolsMu.Unlock()
+		close(done)
+	}()
 }
 
 func (e *Engine) janitor() {
@@ -207,8 +239,17 @@ func (e *Engine) tick(now time.Time) {
 	if e.refused != nil {
 		return
 	}
+	// Cancelled when the engine closes, so shutdown never waits on a long
+	// scheduled snapshot.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
+	go func() {
+		select {
+		case <-e.stop:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 	e.deleteExpiredBranches(ctx)
 	e.runSchedules(ctx, now)
 	e.purgeTrash(ctx, now)
@@ -237,8 +278,7 @@ func (e *Engine) closeIdle(cutoff time.Time) {
 	defer e.poolsMu.Unlock()
 	for id, p := range e.pools {
 		if ok, last := evictable(p); ok && last.Before(cutoff) {
-			delete(e.pools, id)
-			go func() { _ = p.close(context.Background()) }()
+			e.closeLocked(id)
 		}
 	}
 }
@@ -349,14 +389,19 @@ func (e *Engine) CreateDatabase(ctx context.Context, name string) (meta.Database
 	return d, nil
 }
 
-// dropPool closes and forgets a branch's pool.
+// dropPool closes and forgets a branch's pool, and waits for one that was
+// already closing, so the caller can touch the file afterwards.
 func (e *Engine) dropPool(branchID string) {
 	e.poolsMu.Lock()
 	p, ok := e.pools[branchID]
 	delete(e.pools, branchID)
+	ch := e.closing[branchID]
 	e.poolsMu.Unlock()
 	if ok {
 		_ = p.close(context.Background())
+	}
+	if ch != nil {
+		<-ch
 	}
 }
 

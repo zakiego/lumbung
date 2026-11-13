@@ -267,13 +267,22 @@ func (s *Store) PurgeDue(ctx context.Context, at time.Time) ([]Database, error) 
 	return s.listDatabases(ctx, `deleted_at IS NOT NULL AND purge_after <= '`+at.UTC().Format(time.RFC3339Nano)+`'`)
 }
 
-// PurgeDatabase deletes every record of a trashed database.
-func (s *Store) PurgeDatabase(ctx context.Context, dbID string) error {
+// PurgeDatabase deletes every record of a trashed database. It reports
+// false, changing nothing, if the database isn't in the trash (restored
+// meanwhile).
+func (s *Store) PurgeDatabase(ctx context.Context, dbID string) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM databases WHERE id = ? AND deleted_at IS NOT NULL`, dbID).Scan(&n); err != nil {
+		return false, err
+	}
+	if n == 0 {
+		return false, nil
+	}
 	for _, q := range []string{
 		`DELETE FROM snapshot_schedules WHERE database_id = ?`,
 		`DELETE FROM snapshots WHERE database_id = ?`,
@@ -281,8 +290,8 @@ func (s *Store) PurgeDatabase(ctx context.Context, dbID string) error {
 		`DELETE FROM databases WHERE id = ? AND deleted_at IS NOT NULL`,
 	} {
 		if _, err := tx.ExecContext(ctx, q, dbID); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return tx.Commit()
+	return true, tx.Commit()
 }

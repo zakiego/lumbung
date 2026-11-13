@@ -44,6 +44,8 @@ func (e *Engine) RenameDatabase(ctx context.Context, dbRef, name string) (meta.D
 // DeleteDatabase moves a database to the trash (PLAN 6.6). Its branches stop
 // answering at once; it can be restored until the trash retention passes.
 func (e *Engine) DeleteDatabase(ctx context.Context, dbRef string) (meta.Database, error) {
+	e.trashMu.Lock()
+	defer e.trashMu.Unlock()
 	d, err := e.database(ctx, dbRef)
 	if err != nil {
 		return meta.Database{}, err
@@ -80,6 +82,7 @@ func (e *Engine) DeleteDatabase(ctx context.Context, dbRef string) (meta.Databas
 		return meta.Database{}, err
 	}
 	if err := moveIfExists(e.layout.SnapshotDir(d.ID), filepath.Join(entry, "snapshots")); err != nil {
+		_ = moveIfExists(filepath.Join(entry, "dbs"), e.layout.DatabaseDir(d.ID))
 		return meta.Database{}, err
 	}
 	if err := e.meta.SoftDeleteDatabase(ctx, d.ID, time.Now().Add(e.cfg.TrashRetention)); err != nil {
@@ -100,6 +103,8 @@ func (e *Engine) RestoreDatabase(ctx context.Context, dbRef, name string) (meta.
 	if e.refused != nil {
 		return meta.Database{}, e.refused
 	}
+	e.trashMu.Lock()
+	defer e.trashMu.Unlock()
 	d, err := e.meta.GetDeletedDatabase(ctx, dbRef)
 	if err != nil {
 		return meta.Database{}, err
@@ -111,10 +116,16 @@ func (e *Engine) RestoreDatabase(ctx context.Context, dbRef, name string) (meta.
 		return meta.Database{}, apierr.Newf(apierr.NameTaken, "a database named %q already exists; restore it under another name", name)
 	}
 	entry := e.layout.TrashEntry(d.ID)
+	need := dirBytes(filepath.Join(entry, "dbs"))
+	if err := e.reserveBytes(need); err != nil {
+		return meta.Database{}, err
+	}
+	defer e.releaseBytes(need)
 	if err := moveIfExists(filepath.Join(entry, "dbs"), e.layout.DatabaseDir(d.ID)); err != nil {
 		return meta.Database{}, err
 	}
 	if err := moveIfExists(filepath.Join(entry, "snapshots"), e.layout.SnapshotDir(d.ID)); err != nil {
+		_ = moveIfExists(e.layout.DatabaseDir(d.ID), filepath.Join(entry, "dbs"))
 		return meta.Database{}, err
 	}
 	restored, err := e.meta.RestoreDatabase(ctx, d.ID, name)
@@ -142,14 +153,41 @@ func (e *Engine) purgeTrash(ctx context.Context, now time.Time) {
 		return
 	}
 	for _, d := range due {
-		if err := os.RemoveAll(e.layout.TrashEntry(d.ID)); err != nil {
-			e.log.Error("purge database files", "db", d.ID, "err", err)
-			continue
-		}
-		if err := e.meta.PurgeDatabase(ctx, d.ID); err != nil {
-			e.log.Error("purge database records", "db", d.ID, "err", err)
+		e.purgeOne(ctx, d.ID)
+	}
+}
+
+// purgeOne removes a trashed database for good: records first, in a
+// transaction that confirms it is still trashed, then its files.
+func (e *Engine) purgeOne(ctx context.Context, dbID string) {
+	e.trashMu.Lock()
+	defer e.trashMu.Unlock()
+	purged, err := e.meta.PurgeDatabase(ctx, dbID)
+	if err != nil {
+		e.log.Error("purge database records", "db", dbID, "err", err)
+		return
+	}
+	if !purged {
+		return // restored meanwhile
+	}
+	if err := os.RemoveAll(e.layout.TrashEntry(dbID)); err != nil {
+		e.log.Error("purge database files", "db", dbID, "err", err)
+	}
+}
+
+// dirBytes sums the sizes of files directly in dir.
+func dirBytes(dir string) int64 {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	var n int64
+	for _, en := range entries {
+		if info, err := en.Info(); err == nil && !en.IsDir() {
+			n += info.Size()
 		}
 	}
+	return n
 }
 
 func moveIfExists(from, to string) error {

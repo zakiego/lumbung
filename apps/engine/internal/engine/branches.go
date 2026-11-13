@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
@@ -104,9 +105,19 @@ func (e *Engine) CreateBranch(ctx context.Context, dbRef, name string, src Branc
 	}
 
 	dst := e.layout.BranchFile(d.ID, nb.ID)
+	var srcSize int64
+	if parentTarget != nil {
+		srcSize = fileBytes(parentTarget.path)
+	} else {
+		srcSize = fileBytes(srcPath)
+	}
+	if err := e.reserveBytes(srcSize); err != nil {
+		return meta.Branch{}, err
+	}
+	defer e.releaseBytes(srcSize)
 	if parentTarget != nil {
 		err = e.copyBranch(ctx, *parentTarget, dst)
-	} else if _, cerr := copyDB(ctx, srcPath, dst); cerr != nil {
+	} else if _, cerr := e.copyDB(ctx, srcPath, dst); cerr != nil {
 		err = apierr.FromSQLite(cerr)
 	}
 	if err != nil {
@@ -141,20 +152,28 @@ func (e *Engine) DeleteBranch(ctx context.Context, dbRef, branchRef string) erro
 	if err != nil {
 		return err
 	}
+	if err := unprotected(tg); err != nil {
+		return err
+	}
+	return e.withExclusive(ctx, tg, unprotected, func(cur target) error {
+		e.dropPool(cur.branch.ID)
+		if err := e.meta.DeleteSchedule(ctx, cur.branch.ID); err != nil {
+			return err
+		}
+		if err := e.meta.DeleteBranch(ctx, cur.branch.ID); err != nil {
+			return err
+		}
+		e.forgetSize(cur.branch.ID)
+		return removeBranchFiles(cur.path)
+	})
+}
+
+// unprotected refuses a protected branch or the default branch.
+func unprotected(tg target) error {
 	if tg.branch.Protected || tg.branch.ID == tg.db.DefaultBranchID {
 		return apierr.Newf(apierr.BranchProtected, "branch %q is protected", tg.branch.Name)
 	}
-	return e.withExclusive(ctx, tg, func() error {
-		e.dropPool(tg.branch.ID)
-		if err := e.meta.DeleteSchedule(ctx, tg.branch.ID); err != nil {
-			return err
-		}
-		if err := e.meta.DeleteBranch(ctx, tg.branch.ID); err != nil {
-			return err
-		}
-		e.forgetSize(tg.branch.ID)
-		return removeBranchFiles(tg.path)
-	})
+	return nil
 }
 
 // ResetBranch replaces a branch's content with a fresh copy of what it was
@@ -164,8 +183,8 @@ func (e *Engine) ResetBranch(ctx context.Context, dbRef, branchRef string) (meta
 	if err != nil {
 		return meta.Branch{}, err
 	}
-	if tg.branch.Protected || tg.branch.ID == tg.db.DefaultBranchID {
-		return meta.Branch{}, apierr.Newf(apierr.BranchProtected, "branch %q is protected", tg.branch.Name)
+	if err := unprotected(tg); err != nil {
+		return meta.Branch{}, err
 	}
 	var srcPath string
 	var parentTarget *target
@@ -191,14 +210,22 @@ func (e *Engine) ResetBranch(ctx context.Context, dbRef, branchRef string) (meta
 	// the file swap.
 	staged := tempName(tg.path)
 	defer func() { _ = removeBranchFiles(staged) }()
+	srcSize := fileBytes(srcPath)
+	if parentTarget != nil {
+		srcSize = fileBytes(parentTarget.path)
+	}
+	if err := e.reserveBytes(srcSize); err != nil {
+		return meta.Branch{}, err
+	}
+	defer e.releaseBytes(srcSize)
 	if parentTarget != nil {
 		if err := e.copyBranch(ctx, *parentTarget, staged); err != nil {
 			return meta.Branch{}, err
 		}
-	} else if _, err := copyDB(ctx, srcPath, staged); err != nil {
+	} else if _, err := e.copyDB(ctx, srcPath, staged); err != nil {
 		return meta.Branch{}, apierr.FromSQLite(err)
 	}
-	if err := e.swapBranchFile(ctx, tg, staged); err != nil {
+	if err := e.swapBranchFile(ctx, tg, staged, unprotected); err != nil {
 		return meta.Branch{}, err
 	}
 	if err := e.meta.TouchBranch(ctx, tg.branch.ID); err != nil {
@@ -208,24 +235,41 @@ func (e *Engine) ResetBranch(ctx context.Context, dbRef, branchRef string) (meta
 }
 
 // swapBranchFile replaces a branch's file with a prepared one, holding the
-// branch alone so no request sees the swap half done.
-func (e *Engine) swapBranchFile(ctx context.Context, tg target, staged string) error {
-	return e.withExclusive(ctx, tg, func() error {
-		e.dropPool(tg.branch.ID)
-		if err := removeBranchFiles(tg.path); err != nil {
+// branch alone so no request sees the swap half done. recheck runs on the
+// branch as it is once the gate is held.
+//
+// The staged file is synced, then renamed over the old file, which is atomic:
+// after a crash the branch has either its old content or the new one. The old
+// file's -wal and -shm go first, once its connections are closed (closing
+// checkpoints them), so the new file never meets a stale log.
+func (e *Engine) swapBranchFile(ctx context.Context, tg target, staged string, recheck func(target) error) error {
+	if err := syncFile(staged); err != nil {
+		return err
+	}
+	return e.withExclusive(ctx, tg, recheck, func(cur target) error {
+		e.dropPool(cur.branch.ID)
+		for _, p := range []string{cur.path + "-wal", cur.path + "-shm", cur.path + "-journal"} {
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+		if err := os.Rename(staged, cur.path); err != nil {
 			return err
 		}
-		if err := os.Rename(staged, tg.path); err != nil {
+		if err := syncDir(filepath.Dir(cur.path)); err != nil {
 			return err
 		}
-		e.recordSize(tg.branch.ID, fileBytes(tg.path))
+		e.recordSize(cur.branch.ID, fileBytes(cur.path))
 		return nil
 	})
 }
 
 // withExclusive runs f holding the branch's gate alone. It waits for
-// requests in flight, at most maintenanceTimeout.
-func (e *Engine) withExclusive(ctx context.Context, tg target, f func() error) error {
+// requests in flight, at most maintenanceTimeout. Once the gate is held it
+// looks the branch up again, since it may have been deleted, renamed,
+// promoted or protected while this waited, and runs recheck on that fresh
+// state before f.
+func (e *Engine) withExclusive(ctx context.Context, tg target, recheck func(target) error, f func(target) error) error {
 	ctx, cancel := context.WithTimeout(ctx, maintenanceTimeout)
 	defer cancel()
 	g := e.gates.get(tg.branch.ID)
@@ -233,7 +277,16 @@ func (e *Engine) withExclusive(ctx context.Context, tg target, f func() error) e
 		return apierr.New(apierr.Busy, "timed out waiting for requests on the branch to finish")
 	}
 	defer g.release()
-	return f()
+	cur, err := e.resolve(ctx, tg.db.ID, tg.branch.ID)
+	if err != nil {
+		return err
+	}
+	if recheck != nil {
+		if err := recheck(cur); err != nil {
+			return err
+		}
+	}
+	return f(cur)
 }
 
 // PromoteBranch makes a branch the database's default. The old default
@@ -243,7 +296,12 @@ func (e *Engine) PromoteBranch(ctx context.Context, dbRef, branchRef string) (me
 	if err != nil {
 		return meta.Branch{}, err
 	}
-	if err := e.meta.SetDefaultBranch(ctx, tg.db.ID, tg.branch.ID); err != nil {
+	// Hold the branch so a delete or reset waiting on it sees the new default
+	// when it rechecks.
+	err = e.withExclusive(ctx, tg, nil, func(cur target) error {
+		return e.meta.SetDefaultBranch(ctx, cur.db.ID, cur.branch.ID)
+	})
+	if err != nil {
 		return meta.Branch{}, err
 	}
 	return e.meta.GetBranch(ctx, tg.db.ID, tg.branch.ID)

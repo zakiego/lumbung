@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -63,7 +64,36 @@ func (g *gate) unshare() {
 }
 
 // exclusive takes the gate alone, waiting for requests in flight to finish.
+//
+// While it waits it blocks new requests, but only for priorityWindow at a
+// time: if the requests in flight haven't drained by then (a long download
+// or copy holds the gate for minutes), it lets new requests through for a
+// moment and tries again, so a waiting reset can't take the branch offline.
 func (g *gate) exclusive(ctx context.Context) error {
+	for {
+		if err := g.tryExclusive(ctx, priorityWindow); err == nil {
+			return nil
+		} else if ctx.Err() != nil {
+			return err
+		}
+		select {
+		case <-time.After(priorityBreak):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+var (
+	priorityWindow = 5 * time.Second
+	priorityBreak  = 500 * time.Millisecond
+)
+
+var errWindow = errors.New("engine: priority window passed")
+
+func (g *gate) tryExclusive(ctx context.Context, window time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, window)
+	defer cancel()
 	g.mu.Lock()
 	g.waiting++
 	g.mu.Unlock()
@@ -82,7 +112,7 @@ func (g *gate) exclusive(ctx context.Context) error {
 			g.waiting--
 			g.notify()
 			g.mu.Unlock()
-			return err
+			return errWindow
 		}
 	}
 }

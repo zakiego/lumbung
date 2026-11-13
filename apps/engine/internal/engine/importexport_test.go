@@ -150,16 +150,16 @@ func TestImportRules(t *testing.T) {
 	err = e.Import(bg, tgt, ImportDB, ImportIntoEmpty, bytes.NewReader(make([]byte, 100<<10)))
 	wantCode(t, err, apierr.ImportTooLarge, "oversized upload")
 	// Dumps run under the same rules as user SQL.
-	for name, body := range map[string]string{
-		"attach":       "ATTACH '/etc/passwd' AS p;",
-		"temp trigger": "CREATE TABLE a(x); CREATE TEMP TRIGGER t AFTER INSERT ON a BEGIN SELECT 1; END;",
-		"bad sql":      "CREATE TABLE (;",
-		"savepoint":    "SAVEPOINT s;",
+	for name, c := range map[string]struct{ body, code string }{
+		"attach":       {"ATTACH '/etc/passwd' AS p;", apierr.StatementDenied},
+		"vacuum into":  {"CREATE TABLE a(x); VACUUM INTO '/tmp/x.db';", apierr.StatementDenied},
+		"temp trigger": {"CREATE TABLE a(x); CREATE TEMP TRIGGER t AFTER INSERT ON a BEGIN SELECT 1; END;", apierr.StatementDenied},
+		"temp schema":  {"CREATE TABLE temp.a(x);", apierr.StatementDenied},
+		"savepoint":    {"SAVEPOINT s;", apierr.StatementDenied},
+		"bad sql":      {"CREATE TABLE (;", apierr.InvalidImport},
 	} {
-		err := e.Import(bg, tgt, ImportSQL, ImportIntoEmpty, strings.NewReader(body))
-		if err == nil {
-			t.Errorf("%s: dump accepted", name)
-		}
+		err := e.Import(bg, tgt, ImportSQL, ImportIntoEmpty, strings.NewReader(c.body))
+		wantCode(t, err, c.code, name)
 	}
 	// BEGIN and COMMIT in a dump are harmless no-ops.
 	if err := e.Import(bg, tgt, ImportSQL, ImportIntoEmpty, strings.NewReader("BEGIN TRANSACTION;\nCREATE TABLE z(a);\nCOMMIT;\n")); err != nil {

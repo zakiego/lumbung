@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 
 	"github.com/ncruces/go-sqlite3"
+
+	"github.com/zakiego/lumbung/apps/engine/internal/sqlitex"
 )
 
 // tempName returns a path next to dst for a file being prepared. Only the
@@ -32,7 +34,7 @@ func trustedURI(path, mode string) string {
 // The copy is written to a temp file, checked with integrity_check, synced,
 // then renamed into place, so dst either doesn't exist or is complete.
 // It returns the size of the copy.
-func copyDB(ctx context.Context, src, dst string) (int64, error) {
+func (e *Engine) copyDB(ctx context.Context, src, dst string) (int64, error) {
 	if _, err := os.Stat(dst); err == nil {
 		return 0, fmt.Errorf("engine: copy target %s exists", dst)
 	}
@@ -59,7 +61,7 @@ func copyDB(ctx context.Context, src, dst string) (int64, error) {
 		cleanup()
 		return 0, fmt.Errorf("engine: backup: %w", err)
 	}
-	if err := checkIntegrity(ctx, tmp); err != nil {
+	if err := e.checkIntegrity(ctx, tmp); err != nil {
 		cleanup()
 		return 0, err
 	}
@@ -82,24 +84,20 @@ func copyDB(ctx context.Context, src, dst string) (int64, error) {
 	return fi.Size(), nil
 }
 
-// checkIntegrity runs PRAGMA integrity_check on an engine-owned file.
-func checkIntegrity(ctx context.Context, path string) error {
-	c, err := sqlite3.OpenContext(ctx, trustedURI(path, "rw"))
+// checkIntegrity runs PRAGMA integrity_check on a file the engine is about
+// to adopt. The check evaluates the file's own schema (CHECK constraints,
+// expression indexes), and an uploaded file is untrusted, so it runs on a
+// hardened user connection with the usual limits.
+func (e *Engine) checkIntegrity(ctx context.Context, path string) error {
+	c, err := sqlitex.Open(ctx, sqlitex.Options{Path: path, Limits: e.limits()})
 	if err != nil {
 		return fmt.Errorf("engine: open for integrity check: %w", err)
 	}
 	defer c.Close()
 	c.SetInterrupt(ctx)
-	stmt, _, err := c.Prepare("PRAGMA integrity_check")
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
 	var msgs []string
-	for stmt.Step() {
-		msgs = append(msgs, stmt.ColumnText(0))
-	}
-	if err := stmt.Err(); err != nil {
+	err = eachRow(c, "PRAGMA integrity_check", func(s *sqlite3.Stmt) { msgs = append(msgs, s.ColumnText(0)) })
+	if err != nil {
 		return fmt.Errorf("engine: integrity check: %w", err)
 	}
 	if len(msgs) != 1 || msgs[0] != "ok" {
