@@ -17,6 +17,8 @@ export default defineConfig({
           label: "Start",
           items: [{ label: "What is Lumbung", slug: "docs" }],
         },
+        { label: "Concepts", items: [{ autogenerate: { directory: "docs/concepts" } }] },
+        { label: "Reference", items: [{ autogenerate: { directory: "docs/reference" } }] },
       ],
     }),
   ],
