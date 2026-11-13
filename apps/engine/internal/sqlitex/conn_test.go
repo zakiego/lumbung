@@ -1,0 +1,148 @@
+package sqlitex
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/ncruces/go-sqlite3"
+)
+
+func openUser(t *testing.T, path string, readOnly bool) *Conn {
+	t.Helper()
+	c, err := Open(context.Background(), Options{Path: path, ReadOnly: readOnly, Create: !readOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	return c
+}
+
+func userText(c *Conn, sql string) (string, error) {
+	stmt, _, err := c.Prepare(sql)
+	if err != nil {
+		return "", err
+	}
+	defer stmt.Close()
+	var out string
+	if stmt.Step() {
+		out = stmt.ColumnText(0)
+	}
+	return out, stmt.Err()
+}
+
+func TestOpenSettings(t *testing.T) {
+	c := openUser(t, filepath.Join(t.TempDir(), "a.db"), false)
+	for sql, want := range map[string]string{
+		"PRAGMA journal_mode": "wal",
+		"PRAGMA foreign_keys": "1",
+	} {
+		if got, err := userText(c, sql); err != nil || got != want {
+			t.Errorf("%s: got %q %v, want %q", sql, got, err, want)
+		}
+	}
+	for op, want := range map[sqlite3.DBConfig]bool{
+		sqlite3.DBCONFIG_DEFENSIVE:      true,
+		sqlite3.DBCONFIG_TRUSTED_SCHEMA: false,
+	} {
+		if got, _ := c.Config(op); got != want {
+			t.Errorf("config %d: got %v, want %v", op, got, want)
+		}
+	}
+}
+
+// The VFS refuses other files even when the authorizer and the attach limit
+// are out of the way, which only engine code can arrange.
+func TestConfinedVFS(t *testing.T) {
+	dir := t.TempDir()
+	other := filepath.Join(dir, "other.db")
+	if err := os.WriteFile(other, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := openUser(t, filepath.Join(dir, "a.db"), false)
+	c.Limit(sqlite3.LIMIT_ATTACHED, 2)
+	if err := c.ExecTrusted("ATTACH '" + other + "' AS o"); !errors.Is(err, sqlite3.CANTOPEN) {
+		t.Fatalf("attach other: got %v, want CANTOPEN", err)
+	}
+	if err := c.ExecTrusted("VACUUM INTO '" + filepath.Join(dir, "v.db") + "'"); !errors.Is(err, sqlite3.CANTOPEN) {
+		t.Fatalf("vacuum into: got %v, want CANTOPEN", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "v.db")); !os.IsNotExist(err) {
+		t.Fatalf("vacuum target exists: %v", err)
+	}
+	// The branch's own file still works.
+	if err := c.Exec("CREATE TABLE t(x); INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAuthorizerPragmas(t *testing.T) {
+	c := openUser(t, filepath.Join(t.TempDir(), "a.db"), false)
+	if err := c.Exec("CREATE TABLE t(x)"); err != nil {
+		t.Fatal(err)
+	}
+	allowed := []string{
+		"PRAGMA table_info(t)", "SELECT * FROM pragma_table_info('t')", "PRAGMA user_version",
+		"PRAGMA user_version = 3", "PRAGMA journal_mode", "PRAGMA integrity_check",
+		"PRAGMA foreign_keys = OFF", "PRAGMA main.page_count",
+	}
+	denied := []string{
+		"PRAGMA journal_mode = DELETE", "PRAGMA writable_schema = ON", "PRAGMA temp_store_directory = '/tmp'",
+		"PRAGMA locking_mode = EXCLUSIVE", "PRAGMA database_list", "PRAGMA temp_store = FILE",
+		"PRAGMA max_page_count = 1", "PRAGMA mmap_size = 1000000", "PRAGMA cache_size = 1",
+		"SELECT * FROM pragma_database_list",
+	}
+	for _, sql := range allowed {
+		if _, err := userText(c, sql); err != nil {
+			t.Errorf("%s: denied: %v", sql, err)
+		}
+	}
+	for _, sql := range denied {
+		if _, err := userText(c, sql); !errors.Is(err, sqlite3.AUTH) {
+			t.Errorf("%s: got %v, want AUTH", sql, err)
+		}
+	}
+	if err := c.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := userText(c, "PRAGMA foreign_keys"); got != "1" {
+		t.Fatalf("reset left foreign_keys = %s", got)
+	}
+}
+
+func TestAuthorizerStatements(t *testing.T) {
+	c := openUser(t, filepath.Join(t.TempDir(), "a.db"), false)
+	for _, sql := range []string{
+		"BEGIN", "COMMIT", "SAVEPOINT s", "CREATE TEMP TABLE x(a)", "CREATE TEMP VIEW v AS SELECT 1",
+		"ATTACH ':memory:' AS m", "DETACH main", "CREATE VIRTUAL TABLE g USING generate_series",
+	} {
+		if _, err := userText(c, sql); !errors.Is(err, sqlite3.AUTH) && !errors.Is(err, sqlite3.ERROR) {
+			t.Errorf("%s: got %v, want a denial", sql, err)
+		} else if err == nil {
+			t.Errorf("%s: allowed", sql)
+		}
+	}
+	if err := c.Exec("CREATE VIRTUAL TABLE f USING fts5(body)"); err != nil {
+		t.Fatalf("fts5: %v", err)
+	}
+	if !c.GetAutocommit() {
+		t.Fatal("a denied BEGIN left a transaction open")
+	}
+}
+
+func TestReadOnlyConn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.db")
+	w := openUser(t, path, false)
+	if err := w.Exec("CREATE TABLE t(x)"); err != nil {
+		t.Fatal(err)
+	}
+	r := openUser(t, path, true)
+	if err := r.Exec("INSERT INTO t VALUES (1)"); !errors.Is(err, sqlite3.READONLY) {
+		t.Fatalf("insert on read-only: got %v", err)
+	}
+	if _, err := Open(context.Background(), Options{Path: path, ReadOnly: true, Create: true}); !errors.Is(err, ErrReadOnlyCreate) {
+		t.Fatalf("read-only create: got %v", err)
+	}
+}
