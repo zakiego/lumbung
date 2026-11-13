@@ -58,6 +58,10 @@ jobs:
       - run: pnpm --filter @lumbung/engine lint
       - run: pnpm --filter @lumbung/engine test
       - run: pnpm --filter @lumbung/engine vulncheck
+      - name: OpenAPI document matches the handlers
+        run: |
+          pnpm --filter @lumbung/engine openapi:gen
+          git diff --exit-code -- apps/engine/openapi.json
       - name: Generated docs match the code
         run: |
           pnpm --filter @lumbung/engine docs:gen
