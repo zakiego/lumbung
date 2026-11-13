@@ -1,0 +1,7 @@
+{
+  "code": "sql_error",
+  "detail": "sqlite3: SQL logic error: no such table: missing",
+  "status": 400,
+  "title": "SQL error",
+  "type": "about:blank"
+}

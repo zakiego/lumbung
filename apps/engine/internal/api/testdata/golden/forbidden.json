@@ -1,0 +1,6 @@
+{
+  "code": "forbidden",
+  "status": 403,
+  "title": "this needs an instance admin token",
+  "type": "about:blank"
+}

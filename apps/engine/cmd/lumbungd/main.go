@@ -1,81 +1,65 @@
 // Command lumbungd is the Lumbung engine: it owns databases, branches and
 // tokens, and serves the REST API and MCP.
+//
+//	lumbungd            serve (settings come from LUMBUNG_* environment variables)
+//	lumbungd openapi    print the OpenAPI document
+//	lumbungd version    print the version
 package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
+	"github.com/zakiego/lumbung/apps/engine/internal/config"
+	"github.com/zakiego/lumbung/apps/engine/internal/server"
 	"github.com/zakiego/lumbung/apps/engine/internal/version"
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		slog.Error("lumbungd stopped", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	addr := flag.String("addr", envOr("LUMBUNG_ADDR", "127.0.0.1:4870"), "listen address")
-	showVersion := flag.Bool("version", false, "print the version and exit")
-	flag.Parse()
-
-	if *showVersion {
+func run(args []string) error {
+	cmd := ""
+	if len(args) > 0 {
+		cmd = args[0]
+	}
+	switch cmd {
+	case "version", "--version", "-version":
 		fmt.Println(version.Version)
 		return nil
+	case "openapi":
+		b, err := server.OpenAPI()
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.Write(b)
+		return err
+	case "", "serve":
+	default:
+		return fmt.Errorf("unknown command %q (want serve, openapi or version)", cmd)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": version.Version})
-	})
-
-	srv := &http.Server{
-		Addr:              *addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
+	cfg, err := config.Load(os.Getenv)
+	if err != nil {
+		return err
 	}
+	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	slog.SetDefault(log)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	errc := make(chan error, 1)
-	go func() {
-		slog.Info("lumbungd listening", "addr", *addr, "version", version.Version)
-		errc <- srv.ListenAndServe()
-	}()
-
-	select {
-	case err := <-errc:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
+	srv, err := server.New(ctx, cfg, log)
+	if err != nil {
 		return err
-	case <-ctx.Done():
 	}
-	// Restore default signal handling so a second Ctrl+C stops the process
-	// during the graceful shutdown below.
-	stop()
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	return srv.Shutdown(shutdownCtx)
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
+	log.Info("lumbungd starting", "version", version.Version, "data_dir", srv.Engine.Layout().Root)
+	return srv.Run(ctx)
 }

@@ -1,0 +1,6 @@
+{
+  "code": "token_not_found",
+  "status": 404,
+  "title": "no live token with that id",
+  "type": "about:blank"
+}

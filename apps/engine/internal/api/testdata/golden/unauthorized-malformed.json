@@ -1,0 +1,6 @@
+{
+  "code": "unauthorized",
+  "status": 401,
+  "title": "malformed token",
+  "type": "about:blank"
+}

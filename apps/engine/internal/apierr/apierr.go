@@ -64,6 +64,16 @@ const (
 	BranchNotEmpty        = "branch_not_empty"
 	InvalidImport         = "invalid_import"
 	ImportTooLarge        = "import_too_large"
+	Unauthorized          = "unauthorized"
+	Forbidden             = "forbidden"
+	RateLimited           = "rate_limited"
+	NotFound              = "not_found"
+	MethodNotAllowed      = "method_not_allowed"
+	InvalidRequest        = "invalid_request"
+	RequestTooLarge       = "request_too_large"
+	RequestTimeout        = "request_timeout"
+	IdempotencyMismatch   = "idempotency_mismatch"
+	TokenNotFound         = "token_not_found"
 	Busy                  = "busy"
 	Unavailable           = "unavailable"
 	Internal              = "internal"
@@ -97,6 +107,16 @@ var Codes = []CodeInfo{
 	{BranchNotEmpty, http.StatusConflict, "An import into a branch that already has tables needs `mode=replace`."},
 	{InvalidImport, http.StatusBadRequest, "The uploaded file isn't a valid SQLite database or SQL dump, or fails its integrity check."},
 	{ImportTooLarge, http.StatusRequestEntityTooLarge, "The upload is larger than the import limit or the branch size limit."},
+	{Unauthorized, http.StatusUnauthorized, "The `Authorization: Bearer` token is missing, malformed, revoked or expired."},
+	{Forbidden, http.StatusForbidden, "The token is valid but its scope doesn't allow this."},
+	{RateLimited, http.StatusTooManyRequests, "Too many requests for this token, or too many failed logins from this address. `Retry-After` says when to try again."},
+	{NotFound, http.StatusNotFound, "No such endpoint."},
+	{MethodNotAllowed, http.StatusMethodNotAllowed, "The endpoint doesn't accept this HTTP method."},
+	{InvalidRequest, http.StatusUnprocessableEntity, "The request doesn't match the API schema. `errors` lists each problem."},
+	{RequestTooLarge, http.StatusRequestEntityTooLarge, "The request body is larger than the limit."},
+	{RequestTimeout, http.StatusRequestTimeout, "The request body took too long to arrive."},
+	{IdempotencyMismatch, http.StatusUnprocessableEntity, "This `Idempotency-Key` was already used for a different request."},
+	{TokenNotFound, http.StatusNotFound, "No live token with that id."},
 	{Busy, http.StatusServiceUnavailable, "The branch stayed locked longer than the busy timeout. Retry."},
 	{Unavailable, http.StatusServiceUnavailable, "The engine can't serve: for example meta.db is newer than this binary."},
 	{Internal, http.StatusInternalServerError, "Something failed inside the engine. The log has details."},

@@ -1,0 +1,6 @@
+{
+  "code": "name_taken",
+  "status": 409,
+  "title": "a database named \"app\" already exists",
+  "type": "about:blank"
+}

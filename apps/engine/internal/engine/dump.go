@@ -3,6 +3,7 @@ package engine
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -34,10 +35,8 @@ func writeDump(conn *sqlitex.Conn, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	for _, t := range sc.Tables {
-		if t.Virtual && contentless(t.SQL) {
-			return apierr.Newf(apierr.BadRequest, "table %q is a contentless FTS5 table: its index can't be rebuilt from SQL. Download the branch as a .db file instead", t.Name)
-		}
+	if err := dumpable(sc); err != nil {
+		return err
 	}
 	w := bufio.NewWriterSize(out, 64<<10)
 	fmt.Fprintln(w, "PRAGMA foreign_keys=OFF;")
@@ -104,6 +103,25 @@ func dumpRows(conn *sqlitex.Conn, w *bufio.Writer, query, prefix string) error {
 		w.WriteString(");\n")
 	}
 	return stmt.Err()
+}
+
+func dumpable(sc *Schema) error {
+	for _, t := range sc.Tables {
+		if t.Virtual && contentless(t.SQL) {
+			return apierr.Newf(apierr.BadRequest, "table %q is a contentless FTS5 table: its index can't be rebuilt from SQL. Download the branch as a .db file instead", t.Name)
+		}
+	}
+	return nil
+}
+
+// SQLDumpable reports whether a branch can be written as a SQL dump, so the
+// API can refuse before it starts streaming.
+func (e *Engine) SQLDumpable(ctx context.Context, t Target) error {
+	sc, err := e.Schema(ctx, t)
+	if err != nil {
+		return err
+	}
+	return dumpable(sc)
 }
 
 // contentless reports whether a virtual table is a contentless FTS5 table,

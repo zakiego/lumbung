@@ -1,0 +1,6 @@
+{
+  "code": "unauthorized",
+  "status": 401,
+  "title": "send Authorization: Bearer \u003ctoken\u003e",
+  "type": "about:blank"
+}

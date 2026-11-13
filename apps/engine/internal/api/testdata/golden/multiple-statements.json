@@ -1,0 +1,6 @@
+{
+  "code": "multiple_statements",
+  "status": 400,
+  "title": "send one statement per query, or use batch",
+  "type": "about:blank"
+}

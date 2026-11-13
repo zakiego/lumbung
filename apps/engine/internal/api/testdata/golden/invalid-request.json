@@ -1,0 +1,13 @@
+{
+  "code": "invalid_request",
+  "errors": [
+    {
+      "location": "body.name",
+      "message": "expected string to match pattern ^[a-z0-9][a-z0-9-]{0,62}$",
+      "value": "Bad Name"
+    }
+  ],
+  "status": 422,
+  "title": "validation failed",
+  "type": "about:blank"
+}

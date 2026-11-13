@@ -35,6 +35,16 @@ type Config struct {
 	MaxImportBytes int64
 	ImportTimeout  time.Duration
 
+	ServiceToken       string
+	RateLimit          int
+	RateBurst          int
+	AuthFailuresPerMin int
+	ClientIPHeader     string
+	TrustedProxies     string
+	SlowQuery          time.Duration
+	StatsRetention     time.Duration
+	AuditMaxRows       int
+
 	ReadersPerBranch int
 	MaxOpenBranches  int
 	IdleConnTimeout  time.Duration
@@ -121,6 +131,16 @@ var Settings = []Setting{
 	{"LUMBUNG_MAX_IMPORT_BYTES", KindBytes, "1GiB", "Largest `.db` file or SQL dump an import accepts. The branch size limit also applies.", bytesOf(func(c *Config) *int64 { return &c.MaxImportBytes })},
 	{"LUMBUNG_IMPORT_TIMEOUT", KindDuration, "10m", "Longest an import may run, in place of the statement timeout.", dur(func(c *Config) *time.Duration { return &c.ImportTimeout })},
 
+	{"LUMBUNG_SERVICE_TOKEN", KindString, "", "An instance admin token for the dashboard. When unset, lumbungd generates one on first start and writes it to `secrets/service-token` in the data folder, mode 600.", str(func(c *Config) *string { return &c.ServiceToken })},
+	{"LUMBUNG_RATE_LIMIT", KindInt, "50", "Requests per second each token may make, on average. Past it the API answers `rate_limited`.", integer(func(c *Config) *int { return &c.RateLimit })},
+	{"LUMBUNG_RATE_BURST", KindInt, "100", "Requests a token may make at once before the rate limit applies.", integer(func(c *Config) *int { return &c.RateBurst })},
+	{"LUMBUNG_AUTH_FAILURES_PER_MINUTE", KindInt, "20", "Failed authentications allowed per client address per minute.", integer(func(c *Config) *int { return &c.AuthFailuresPerMin })},
+	{"LUMBUNG_CLIENT_IP_HEADER", KindString, "", "Header holding the real client address when lumbungd runs behind a proxy, such as `X-Forwarded-For` or `CF-Connecting-IP`. Only trusted when the connection comes from `LUMBUNG_TRUSTED_PROXIES`. Empty uses the connection's address.", str(func(c *Config) *string { return &c.ClientIPHeader })},
+	{"LUMBUNG_TRUSTED_PROXIES", KindString, "127.0.0.1/32,::1/128", "Comma-separated networks whose connections may set the client IP header.", str(func(c *Config) *string { return &c.TrustedProxies })},
+	{"LUMBUNG_SLOW_QUERY", KindDuration, "1s", "Queries slower than this go to the branch's slow-query log (the newest 50 are kept).", dur(func(c *Config) *time.Duration { return &c.SlowQuery })},
+	{"LUMBUNG_STATS_RETENTION", KindDuration, "48h", "How long per-minute branch stats are kept.", dur(func(c *Config) *time.Duration { return &c.StatsRetention })},
+	{"LUMBUNG_AUDIT_MAX_ROWS", KindInt, "100000", "Most audit log entries kept; the oldest are dropped first.", integer(func(c *Config) *int { return &c.AuditMaxRows })},
+
 	{"LUMBUNG_READERS_PER_BRANCH", KindInt, "4", "Read-only connections kept per open branch, next to its one writer.", integer(func(c *Config) *int { return &c.ReadersPerBranch })},
 	{"LUMBUNG_MAX_OPEN_BRANCHES", KindInt, "64", "Most branches with open connections at once. The least recently used idle branch is closed to make room.", integer(func(c *Config) *int { return &c.MaxOpenBranches })},
 	{"LUMBUNG_IDLE_CONN_TIMEOUT", KindDuration, "5m", "A branch unused this long has its connections closed.", dur(func(c *Config) *time.Duration { return &c.IdleConnTimeout })},
@@ -128,13 +148,17 @@ var Settings = []Setting{
 }
 
 // Load resolves the configuration: each setting's environment value when
-// set and not empty, otherwise its default.
+// set and not empty, otherwise its default. A setting whose default is empty
+// stays empty unless set.
 func Load(getenv func(string) string) (Config, error) {
 	var c Config
 	for _, s := range Settings {
 		v := strings.TrimSpace(getenv(s.Env))
 		if v == "" {
 			v = s.Default
+		}
+		if v == "" {
+			continue
 		}
 		if err := s.set(&c, v); err != nil {
 			return Config{}, fmt.Errorf("config: %s: %w", s.Env, err)

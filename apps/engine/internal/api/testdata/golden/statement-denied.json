@@ -1,0 +1,7 @@
+{
+  "code": "statement_denied",
+  "detail": "sqlite3: authorization denied: not authorized",
+  "status": 403,
+  "title": "statement not allowed",
+  "type": "about:blank"
+}

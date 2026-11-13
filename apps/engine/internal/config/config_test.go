@@ -16,8 +16,8 @@ func TestDefaults(t *testing.T) {
 			t.Errorf("%s listed twice", s.Env)
 		}
 		seen[s.Env] = true
-		if s.Doc == "" || s.Default == "" {
-			t.Errorf("%s needs a default and a doc", s.Env)
+		if s.Doc == "" || (s.Default == "" && s.Kind != KindString) {
+			t.Errorf("%s needs a doc, and a default unless it's an optional string", s.Env)
 		}
 	}
 }

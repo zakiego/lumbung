@@ -1,0 +1,7 @@
+{
+  "code": "read_only",
+  "detail": "sqlite3: attempt to write a readonly database",
+  "status": 403,
+  "title": "this access can't write",
+  "type": "about:blank"
+}

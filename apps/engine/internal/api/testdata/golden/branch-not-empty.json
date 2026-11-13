@@ -1,0 +1,6 @@
+{
+  "code": "branch_not_empty",
+  "status": 409,
+  "title": "branch \"main\" already has tables; use mode=replace",
+  "type": "about:blank"
+}

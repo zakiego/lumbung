@@ -9,6 +9,7 @@
     "typecheck": "go vet ./...",
     "lint": "test -z \"$(gofmt -l .)\" || { gofmt -l .; exit 1; }; go vet ./... && go tool staticcheck ./...",
     "vulncheck": "go tool govulncheck ./...",
-    "docs:gen": "go run ./internal/tools/docgen -out ../site/src/content/docs/docs/reference"
+    "docs:gen": "go run ./internal/tools/docgen -out ../site/src/content/docs/docs/reference -openapi openapi.json",
+    "openapi:gen": "go run ./cmd/lumbungd openapi > openapi.json"
   }
 }

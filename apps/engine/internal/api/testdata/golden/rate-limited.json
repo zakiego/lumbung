@@ -1,0 +1,6 @@
+{
+  "code": "rate_limited",
+  "status": 429,
+  "title": "too many requests for this token",
+  "type": "about:blank"
+}

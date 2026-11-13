@@ -1,0 +1,6 @@
+{
+  "code": "database_not_found",
+  "status": 404,
+  "title": "no database \"nope\"",
+  "type": "about:blank"
+}

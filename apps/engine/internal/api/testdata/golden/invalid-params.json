@@ -1,0 +1,6 @@
+{
+  "code": "invalid_params",
+  "status": 400,
+  "title": "the statement has 2 parameters, got 1 args",
+  "type": "about:blank"
+}

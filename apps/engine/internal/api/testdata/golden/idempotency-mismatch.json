@@ -1,0 +1,6 @@
+{
+  "code": "idempotency_mismatch",
+  "status": 422,
+  "title": "this Idempotency-Key was used for a different request",
+  "type": "about:blank"
+}

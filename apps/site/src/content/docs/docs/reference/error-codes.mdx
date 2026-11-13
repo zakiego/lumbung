@@ -47,6 +47,16 @@ Errors come back as `application/problem+json` with a stable `code`. Match on `c
 | `branch_not_empty` | 409 Conflict | An import into a branch that already has tables needs `mode=replace`. |
 | `invalid_import` | 400 Bad Request | The uploaded file isn't a valid SQLite database or SQL dump, or fails its integrity check. |
 | `import_too_large` | 413 Request Entity Too Large | The upload is larger than the import limit or the branch size limit. |
+| `unauthorized` | 401 Unauthorized | The `Authorization: Bearer` token is missing, malformed, revoked or expired. |
+| `forbidden` | 403 Forbidden | The token is valid but its scope doesn't allow this. |
+| `rate_limited` | 429 Too Many Requests | Too many requests for this token, or too many failed logins from this address. `Retry-After` says when to try again. |
+| `not_found` | 404 Not Found | No such endpoint. |
+| `method_not_allowed` | 405 Method Not Allowed | The endpoint doesn't accept this HTTP method. |
+| `invalid_request` | 422 Unprocessable Entity | The request doesn't match the API schema. `errors` lists each problem. |
+| `request_too_large` | 413 Request Entity Too Large | The request body is larger than the limit. |
+| `request_timeout` | 408 Request Timeout | The request body took too long to arrive. |
+| `idempotency_mismatch` | 422 Unprocessable Entity | This `Idempotency-Key` was already used for a different request. |
+| `token_not_found` | 404 Not Found | No live token with that id. |
 | `busy` | 503 Service Unavailable | The branch stayed locked longer than the busy timeout. Retry. |
 | `unavailable` | 503 Service Unavailable | The engine can't serve: for example meta.db is newer than this binary. |
 | `internal` | 500 Internal Server Error | Something failed inside the engine. The log has details. |
