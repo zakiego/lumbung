@@ -1,0 +1,28 @@
+node_modules/
+dist/
+.output/
+.nitro/
+.tanstack/
+.astro/
+.wrangler/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# Go
+apps/engine/bin/
+*.test
+*.out
+
+# Local data and secrets
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+
+.DS_Store
