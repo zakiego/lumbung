@@ -66,10 +66,55 @@ func (e *Engine) Query(ctx context.Context, t Target, access Access, stmt Statem
 // Batch runs statements in order in one transaction: all of them take
 // effect or none do.
 func (e *Engine) Batch(ctx context.Context, t Target, access Access, stmts []Statement) ([]*Result, error) {
+	return e.BatchWith(ctx, t, access, stmts, BatchOptions{})
+}
+
+// BatchOptions change how a batch runs.
+type BatchOptions struct {
+	// Migration turns foreign key enforcement off for the batch and checks
+	// every foreign key once before committing. Rebuilding a table (create
+	// a new one, copy, drop the old, rename), which schema tools generate
+	// for column changes, would otherwise fire ON DELETE actions on the
+	// drop and delete child rows. Needs write access.
+	Migration bool
+}
+
+// BatchWith is Batch with options.
+func (e *Engine) BatchWith(ctx context.Context, t Target, access Access, stmts []Statement, opts BatchOptions) ([]*Result, error) {
 	if len(stmts) == 0 {
 		return nil, apierr.New(apierr.EmptyStatement, "the batch has no statements")
 	}
-	return e.run(ctx, t, access, stmts)
+	if !opts.Migration {
+		return e.run(ctx, t, access, stmts)
+	}
+	if access != Write {
+		return nil, apierr.New(apierr.ReadOnly, "a migration needs write access")
+	}
+	var results []*Result
+	err := e.sessionWith(ctx, t, access, e.cfg.StatementTimeout, sessionHooks{
+		beforeBegin: func(conn *sqlitex.Conn) error { return conn.ExecTrusted("PRAGMA foreign_keys = OFF") },
+		beforeCommit: func(conn *sqlitex.Conn) error {
+			n, err := trustedInt(conn, "SELECT count(*) FROM pragma_foreign_key_check")
+			if err != nil {
+				return err
+			}
+			if n > 0 {
+				return apierr.Newf(apierr.ConstraintViolation, "the migration leaves %d rows that break foreign keys; nothing was applied", n)
+			}
+			return nil
+		},
+	}, func(conn *sqlitex.Conn, _ target) error {
+		var err error
+		results, err = e.runAll(conn, stmts)
+		return err
+	})
+	return results, err
+}
+
+// sessionHooks run engine SQL around a session's transaction.
+type sessionHooks struct {
+	beforeBegin  func(*sqlitex.Conn) error
+	beforeCommit func(*sqlitex.Conn) error
 }
 
 func (e *Engine) run(ctx context.Context, t Target, access Access, stmts []Statement) ([]*Result, error) {
@@ -87,6 +132,10 @@ func (e *Engine) run(ctx context.Context, t Target, access Access, stmts []State
 // with the size caps applied for Write. It commits when f succeeds and rolls
 // back otherwise, and maps errors to API errors.
 func (e *Engine) session(ctx context.Context, t Target, access Access, timeout time.Duration, f func(*sqlitex.Conn, target) error) error {
+	return e.sessionWith(ctx, t, access, timeout, sessionHooks{}, f)
+}
+
+func (e *Engine) sessionWith(ctx context.Context, t Target, access Access, timeout time.Duration, hooks sessionHooks, f func(*sqlitex.Conn, target) error) error {
 	if access != Read && access != Write {
 		return apierr.New(apierr.BadRequest, "unknown access")
 	}
@@ -144,12 +193,23 @@ func (e *Engine) session(ctx context.Context, t Target, access Access, timeout t
 	if access == Write {
 		begin = "BEGIN IMMEDIATE"
 	}
+	if hooks.beforeBegin != nil {
+		if err := hooks.beforeBegin(conn); err != nil {
+			return e.sqlErr(err, grant.quotaLimited)
+		}
+	}
 	if err := conn.ExecTrusted(begin); err != nil {
 		return e.sqlErr(err, grant.quotaLimited)
 	}
 	if err := f(conn, tg); err != nil {
 		_ = conn.ExecTrusted("ROLLBACK")
 		return e.sqlErr(err, grant.quotaLimited)
+	}
+	if hooks.beforeCommit != nil {
+		if err := hooks.beforeCommit(conn); err != nil {
+			_ = conn.ExecTrusted("ROLLBACK")
+			return e.sqlErr(err, grant.quotaLimited)
+		}
 	}
 	if err := conn.ExecTrusted("COMMIT"); err != nil {
 		_ = conn.ExecTrusted("ROLLBACK")

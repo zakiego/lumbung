@@ -33,6 +33,7 @@ type defaultQueryIn struct {
 type batchBody struct {
 	Statements []StatementIn `json:"statements" minItems:"1" maxItems:"1000" doc:"Run in order in one transaction: all take effect or none do."`
 	ReadOnly   bool          `json:"read_only,omitempty" doc:"Run on a read-only connection even if the token can write."`
+	Migration  bool          `json:"migration,omitempty" doc:"Turn foreign key enforcement off for the batch and check every foreign key once before committing. Use it for schema migrations: rebuilding a table (create, copy, drop, rename) would otherwise fire ON DELETE actions and delete child rows. Needs write access."`
 }
 
 type batchIn struct {
@@ -64,6 +65,10 @@ func access(p auth.Principal, dbID, branchID string, readOnly bool) engine.Acces
 }
 
 func (s *Server) runQuery(ctx context.Context, dbRef, branchRef string, stmts []StatementIn, readOnly, single bool) ([]*engine.Result, error) {
+	return s.runBatch(ctx, dbRef, branchRef, stmts, readOnly, single, false)
+}
+
+func (s *Server) runBatch(ctx context.Context, dbRef, branchRef string, stmts []StatementIn, readOnly, single, migration bool) ([]*engine.Result, error) {
 	p := principalFrom(ctx)
 	d, b, err := s.branch(ctx, p, dbRef, branchRef, auth.AccessRead)
 	if err != nil {
@@ -84,7 +89,11 @@ func (s *Server) runQuery(ctx context.Context, dbRef, branchRef string, stmts []
 		for i, st := range stmts {
 			es[i] = st.engine()
 		}
-		results, err = s.eng.Batch(ctx, t, acc, es)
+		if migration && acc != engine.Write {
+			err = apierr.New(apierr.ReadOnly, "a migration needs a token that can write")
+		} else {
+			results, err = s.eng.BatchWith(ctx, t, acc, es, engine.BatchOptions{Migration: migration})
+		}
 	}
 	s.record(b.ID, stmts, start, results, err)
 	if err != nil {
@@ -154,7 +163,7 @@ func (s *Server) registerQuery(api huma.API) {
 		})
 	huma.Register(api, batchOp("batch", "/v1/databases/{db}/branches/{branch}/batch", "Run statements on a branch in one transaction"),
 		func(ctx context.Context, in *batchIn) (*batchOut, error) {
-			rs, err := s.runQuery(ctx, in.DB, in.Branch, in.Body.Statements, in.Body.ReadOnly, false)
+			rs, err := s.runBatch(ctx, in.DB, in.Branch, in.Body.Statements, in.Body.ReadOnly, false, in.Body.Migration)
 			if err != nil {
 				return nil, err
 			}
@@ -162,7 +171,7 @@ func (s *Server) registerQuery(api huma.API) {
 		})
 	huma.Register(api, batchOp("batch-default", "/v1/databases/{db}/batch", "Run statements on the default branch in one transaction"),
 		func(ctx context.Context, in *defaultBatchIn) (*batchOut, error) {
-			rs, err := s.runQuery(ctx, in.DB, "", in.Body.Statements, in.Body.ReadOnly, false)
+			rs, err := s.runBatch(ctx, in.DB, "", in.Body.Statements, in.Body.ReadOnly, false, in.Body.Migration)
 			if err != nil {
 				return nil, err
 			}

@@ -76,6 +76,10 @@
       "BatchBody": {
         "additionalProperties": false,
         "properties": {
+          "migration": {
+            "description": "Turn foreign key enforcement off for the batch and check every foreign key once before committing. Use it for schema migrations: rebuilding a table (create, copy, drop, rename) would otherwise fire ON DELETE actions and delete child rows. Needs write access.",
+            "type": "boolean"
+          },
           "read_only": {
             "description": "Run on a read-only connection even if the token can write.",
             "type": "boolean"

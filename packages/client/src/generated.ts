@@ -33,6 +33,8 @@ export interface AuditOut {
 }
 
 export interface BatchBody {
+  /** Turn foreign key enforcement off for the batch and check every foreign key once before committing. Use it for schema migrations: rebuilding a table (create, copy, drop, rename) would otherwise fire ON DELETE actions and delete child rows. Needs write access. */
+  migration?: boolean;
   /** Run on a read-only connection even if the token can write. */
   read_only?: boolean;
   /** Run in order in one transaction: all take effect or none do. */
