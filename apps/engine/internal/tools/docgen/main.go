@@ -1,6 +1,7 @@
 // Command docgen writes the docs reference pages that come from code:
-// Configuration (config.Settings), Error codes (apierr.Codes) and the REST
-// API (openapi.json, itself generated from the handlers). CI runs it
+// Configuration (config.Settings), Error codes (apierr.Codes), the REST API
+// (openapi.json, itself generated from the handlers) and the CLI (its
+// command tree). CI runs it
 // and fails when the committed pages differ, so they can't drift.
 //
 //	go run ./internal/tools/docgen -out ../site/src/content/docs/docs/reference
@@ -39,6 +40,7 @@ func main() {
 		log.Fatal(err)
 	}
 	write(filepath.Join(*out, "rest-api.mdx"), page)
+	write(filepath.Join(*out, "cli.mdx"), cliReference())
 }
 
 func write(path string, content []byte) {
