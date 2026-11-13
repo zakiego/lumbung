@@ -114,21 +114,46 @@ func TestAuthorizerPragmas(t *testing.T) {
 
 func TestAuthorizerStatements(t *testing.T) {
 	c := openUser(t, filepath.Join(t.TempDir(), "a.db"), false)
+	if err := c.Exec("CREATE TABLE users(name)"); err != nil {
+		t.Fatal(err)
+	}
 	for _, sql := range []string{
 		"BEGIN", "COMMIT", "SAVEPOINT s", "CREATE TEMP TABLE x(a)", "CREATE TEMP VIEW v AS SELECT 1",
-		"ATTACH ':memory:' AS m", "DETACH main", "CREATE VIRTUAL TABLE g USING generate_series",
+		"ATTACH ':memory:' AS m", "DETACH main",
+		// Temp objects made by naming the schema instead of the TEMP keyword.
+		"CREATE TABLE temp.users(name)", "CREATE TABLE TEMP.x(a)", "CREATE VIEW temp.v AS SELECT 1",
+		"CREATE TRIGGER temp.tr AFTER INSERT ON main.users BEGIN SELECT 1; END",
+		"CREATE VIRTUAL TABLE temp.f USING fts5(b)",
+		"INSERT INTO temp.sqlite_master VALUES ('table', 'x', 'x', 0, 'CREATE TABLE x(a)')",
+		"CREATE TABLE temp.t2 AS SELECT * FROM users",
 	} {
-		if _, err := userText(c, sql); !errors.Is(err, sqlite3.AUTH) && !errors.Is(err, sqlite3.ERROR) {
-			t.Errorf("%s: got %v, want a denial", sql, err)
-		} else if err == nil {
-			t.Errorf("%s: allowed", sql)
+		if _, err := userText(c, sql); !errors.Is(err, sqlite3.AUTH) {
+			t.Errorf("%s: got %v, want AUTH", sql, err)
 		}
+	}
+	// SQLite itself refuses a temp index on a main table.
+	if _, err := userText(c, "CREATE INDEX temp.i ON users(name)"); err == nil {
+		t.Error("temp index on a main table allowed")
+	}
+	if _, err := userText(c, "SELECT count(*) FROM temp.sqlite_schema"); err != nil {
+		t.Errorf("reading temp schema: %v", err)
 	}
 	if err := c.Exec("CREATE VIRTUAL TABLE f USING fts5(body)"); err != nil {
 		t.Fatalf("fts5: %v", err)
 	}
 	if !c.GetAutocommit() {
 		t.Fatal("a denied BEGIN left a transaction open")
+	}
+}
+
+// Reset refuses to hand back a connection that somehow holds a temp object.
+func TestResetRejectsTempObjects(t *testing.T) {
+	c := openUser(t, filepath.Join(t.TempDir(), "a.db"), false)
+	if err := c.ExecTrusted("CREATE TEMP TABLE leftover(a)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Reset(); !errors.Is(err, ErrDirty) {
+		t.Fatalf("reset: got %v, want ErrDirty", err)
 	}
 }
 

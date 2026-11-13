@@ -203,14 +203,34 @@ func (c *Conn) PrepareTrusted(sql string) (*sqlite3.Stmt, error) {
 	return stmt, err
 }
 
+// ErrDirty means a connection holds state that must not reach the next
+// request, so the pool closes it instead of reusing it.
+var ErrDirty = errors.New("sqlitex: connection holds temp objects")
+
 // Reset returns the connection to its pooled state after a request: no open
 // transaction, no interrupt, and the engine's per-connection settings back.
+// It fails with ErrDirty if any temp object exists, as a backstop to the
+// authorizer's temp rules.
 func (c *Conn) Reset() error {
 	c.SetInterrupt(context.Background())
 	if !c.GetAutocommit() {
 		if err := c.ExecTrusted("ROLLBACK"); err != nil {
 			return fmt.Errorf("sqlitex: rollback on reset: %w", err)
 		}
+	}
+	stmt, err := c.PrepareTrusted("SELECT count(*) FROM temp.sqlite_schema")
+	if err != nil {
+		return err
+	}
+	stmt.Step()
+	n := stmt.ColumnInt(0)
+	err = stmt.Err()
+	stmt.Close()
+	if err != nil {
+		return err
+	}
+	if n != 0 {
+		return ErrDirty
 	}
 	return c.ExecTrusted("PRAGMA foreign_keys = ON")
 }

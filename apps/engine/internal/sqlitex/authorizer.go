@@ -85,7 +85,15 @@ var allowedModules = map[string]bool{
 
 // authorize is the authorizer for user SQL. It runs when a statement is
 // prepared, including statements that expand views and triggers.
-func authorize(action sqlite3.AuthorizerActionCode, arg3, arg4, _, _ string) sqlite3.AuthorizerReturnCode {
+func authorize(action sqlite3.AuthorizerActionCode, arg3, arg4, schema, _ string) sqlite3.AuthorizerReturnCode {
+	// Nothing may touch the temp schema except reading it. The TEMP keyword
+	// raises the CREATE_TEMP_* codes below, but naming the schema
+	// (CREATE TABLE temp.x, CREATE TRIGGER temp.t ...) raises the plain
+	// codes with schema "temp". Temp objects live on the connection, so on a
+	// pooled connection they would shadow or capture later requests' data.
+	if strings.EqualFold(schema, "temp") && action != sqlite3.AUTH_READ {
+		return sqlite3.AUTH_DENY
+	}
 	switch action {
 	case sqlite3.AUTH_ATTACH, sqlite3.AUTH_DETACH:
 		// VACUUM INTO also arrives here, as an attach of its target file.

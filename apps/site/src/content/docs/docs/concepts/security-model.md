@@ -15,7 +15,7 @@ One database can never read or write another database's file, `meta.db`, or anyt
 | `VACUUM` or `VACUUM INTO` | `statement_denied` |
 | `load_extension()` | not available: it isn't compiled in |
 | `BEGIN`, `COMMIT`, `SAVEPOINT` | `statement_denied`; each request runs in its own transaction |
-| `CREATE TEMP TABLE`, `TEMP VIEW`, `TEMP TRIGGER`, `TEMP INDEX` | `statement_denied` |
+| Any temp object: `CREATE TEMP ...` or `CREATE ... temp.name` | `statement_denied`; temp objects would outlive the request on a shared connection |
 | A pragma not on the allowlist below | `statement_denied` |
 | A write with read-only access | `read_only`, refused by SQLite itself |
 | A statement that runs too long | `statement_timeout`; the connection stays usable |
