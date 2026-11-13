@@ -41,6 +41,11 @@ func main() {
 	}
 	write(filepath.Join(*out, "rest-api.mdx"), page)
 	write(filepath.Join(*out, "cli.mdx"), cliReference())
+	mcpPage, err := mcpReference()
+	if err != nil {
+		log.Fatal(err)
+	}
+	write(filepath.Join(*out, "mcp-tools.mdx"), mcpPage)
 }
 
 func write(path string, content []byte) {
