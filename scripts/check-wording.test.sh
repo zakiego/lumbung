@@ -20,7 +20,7 @@ expect() {
   local want="$1" desc="$2" dir="$3"
   shift 3
   local got=0
-  env "$@" bash "$script" "$dir" >/dev/null 2>&1 || got=1
+  env "$@" bash "$script" "$dir" >/dev/null 2>&1 || got=$?
   if [ "$got" -ne "$want" ]; then
     echo "FAIL: $desc (exit $got, want $want)"
     bash "$script" "$dir" || true
@@ -63,5 +63,16 @@ expect 1 "name in the PR title" "$d" PR_TITLE="feat: $name style api"
 
 d="$(new_repo)"; echo ok >"$d/a.md"
 expect 1 "phrase in the PR body" "$d" PR_BODY="an alternative to it"
+
+d="$(new_repo)"; echo ok >"$d/a.md"; git -C "$d" add a.md; git -C "$d" commit -q -m "feat: like $name"
+git -C "$d" commit -q --allow-empty -m "fix: later commit"
+expect 0 "a range that skips the old bad commit passes" "$d" WORDING_COMMITS=HEAD~1..HEAD
+
+d="$(new_repo)"; echo ok >"$d/a.md"; git -C "$d" add a.md; git -C "$d" commit -q -m "chore: base"
+git -C "$d" commit -q --allow-empty -m "feat: like $name"
+expect 1 "a range that holds the bad commit fails" "$d" WORDING_COMMITS=HEAD~1..HEAD
+
+d="$(mktemp -d)"; echo "a $name here" >"$d/a.md"
+expect 2 "a directory that isn't a repo is an error, not a pass" "$d"
 
 echo "check-wording tests: $pass passed"
