@@ -3,11 +3,11 @@
   "private": true,
   "description": "Lumbung engine (lumbungd) and CLI (lumbung), a Go module. These scripts let pnpm run its checks with the rest of the workspace.",
   "scripts": {
-    "dev": "go run ./cmd/lumbungd",
+    "dev": "bash ../../scripts/dev.sh engine",
     "build": "go build -trimpath -o bin/ ./cmd/...",
     "test": "go test -race ./...",
     "typecheck": "go vet ./...",
-    "lint": "go vet ./... && go tool staticcheck ./...",
+    "lint": "test -z \"$(gofmt -l .)\" || { gofmt -l .; exit 1; }; go vet ./... && go tool staticcheck ./...",
     "vulncheck": "go tool govulncheck ./..."
   }
 }

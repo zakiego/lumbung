@@ -2,15 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
+    # edited: a changed PR title or body is rechecked for the wording rule.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Every commit on main keeps its own result; other refs only need the latest.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   wording:
@@ -18,29 +20,44 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # the check reads every commit message
+          fetch-depth: 0 # the check reads commit messages
       - run: bash scripts/check-wording.test.sh
-      - run: bash scripts/check-wording.sh
+      - name: Check wording
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        # Only the commits this event adds, so an old commit can't fail every run.
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            range="$PR_BASE..$PR_HEAD"
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            range="$BEFORE..$GITHUB_SHA"
+          else
+            range="origin/$DEFAULT_BRANCH..$GITHUB_SHA"
+          fi
+          WORDING_COMMITS="$range" bash scripts/check-wording.sh
 
   engine:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/engine
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: apps/engine/go.mod
           cache-dependency-path: apps/engine/go.sum
-      - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
-      - run: go vet ./...
-      - run: go tool staticcheck ./...
-      - run: go test -race ./...
-      - run: go tool govulncheck ./...
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      # The same package scripts as local runs (gofmt, vet, staticcheck).
+      - run: pnpm --filter @lumbung/engine lint
+      - run: pnpm --filter @lumbung/engine test
+      - run: pnpm --filter @lumbung/engine vulncheck
 
   web:
     runs-on: ubuntu-latest
