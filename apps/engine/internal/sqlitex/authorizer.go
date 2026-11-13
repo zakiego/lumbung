@@ -92,6 +92,13 @@ func authorize(action sqlite3.AuthorizerActionCode, arg3, arg4, schema, _ string
 	// codes with schema "temp". Temp objects live on the connection, so on a
 	// pooled connection they would shadow or capture later requests' data.
 	if strings.EqualFold(schema, "temp") && action != sqlite3.AUTH_READ {
+		// ALTER TABLE ... RENAME rewrites references in every schema,
+		// including the temp schema's table of objects. That table is always
+		// empty here (temp objects are denied, and Reset checks), so the
+		// internal update is harmless.
+		if action == sqlite3.AUTH_UPDATE && strings.EqualFold(arg3, "sqlite_temp_master") {
+			return sqlite3.AUTH_OK
+		}
 		return sqlite3.AUTH_DENY
 	}
 	switch action {

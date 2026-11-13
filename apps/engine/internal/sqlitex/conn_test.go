@@ -141,6 +141,16 @@ func TestAuthorizerStatements(t *testing.T) {
 	if err := c.Exec("CREATE VIRTUAL TABLE f USING fts5(body)"); err != nil {
 		t.Fatalf("fts5: %v", err)
 	}
+	// Every ALTER TABLE form works, including renames, which touch the
+	// (empty) temp schema internally.
+	for _, sql := range []string{
+		"CREATE TABLE r(x)", "ALTER TABLE r RENAME TO r2", "ALTER TABLE r2 RENAME COLUMN x TO y",
+		"ALTER TABLE r2 ADD COLUMN z", "ALTER TABLE r2 DROP COLUMN z",
+	} {
+		if err := c.Exec(sql); err != nil {
+			t.Errorf("%s: %v", sql, err)
+		}
+	}
 	if !c.GetAutocommit() {
 		t.Fatal("a denied BEGIN left a transaction open")
 	}
