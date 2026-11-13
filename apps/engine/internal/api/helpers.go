@@ -140,6 +140,11 @@ func (s *Server) branch(ctx context.Context, p auth.Principal, dbRef, ref, acces
 		ref = d.DefaultBranchID
 	}
 	b, err := s.eng.GetBranch(ctx, d.ID, ref)
+	if p.BranchID != "" && (err != nil || b.ID != p.BranchID) {
+		// Answer the same for a missing branch and someone else's, so a
+		// branch token can't probe for branch names.
+		return meta.Database{}, meta.Branch{}, apierr.New(apierr.Forbidden, "this token can't do that on this branch")
+	}
 	if err != nil {
 		return meta.Database{}, meta.Branch{}, err
 	}

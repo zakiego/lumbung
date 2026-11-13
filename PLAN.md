@@ -193,7 +193,7 @@ Rules:
 
 - `query` runs one statement with bound parameters. `batch` runs a list of statements in one transaction, all or nothing. Interactive transactions arrive with the libSQL protocol milestone.
 - Errors use `application/problem+json` with a stable machine-readable `code`. The list of codes is part of the docs.
-- Create endpoints accept `Idempotency-Key`. Lists are cursor-paginated.
+- Create endpoints accept `Idempotency-Key`, except token creation: replaying it would mean storing the secret. Lists are cursor-paginated.
 - The OpenAPI document is generated from the Go handlers and committed as `apps/engine/openapi.json`. CI fails when the committed file differs from a fresh generation. The SDK types and the docs API reference are both generated from it, so the three can't drift.
 
 ## 8. MCP

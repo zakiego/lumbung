@@ -32,9 +32,26 @@ type exportIn struct {
 }
 
 // streamBody hands the raw request body to the operation, which reads it
-// itself instead of letting Huma buffer it (imports can be large).
+// itself instead of letting Huma buffer it (imports can be large). Reads
+// carry a deadline renewed each time bytes arrive, so a stalled upload is cut
+// off instead of holding the import open.
 func streamBody(ctx huma.Context, next func(huma.Context)) {
-	next(huma.WithValue(ctx, keyBody{}, ctx.BodyReader()))
+	r := &idleReader{r: ctx.BodyReader(), set: ctx.SetReadDeadline, idle: uploadIdle}
+	next(huma.WithValue(ctx, keyBody{}, io.Reader(r)))
+}
+
+// uploadIdle is how long an upload may send nothing before it is cut off.
+var uploadIdle = time.Minute
+
+type idleReader struct {
+	r    io.Reader
+	set  func(time.Time) error
+	idle time.Duration
+}
+
+func (r *idleReader) Read(p []byte) (int, error) {
+	_ = r.set(time.Now().Add(r.idle))
+	return r.r.Read(p)
 }
 
 func (s *Server) registerTransfer(api huma.API) {

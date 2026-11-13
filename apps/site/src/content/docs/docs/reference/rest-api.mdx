@@ -744,10 +744,6 @@ Response `200`:
 
 `POST /v1/tokens`
 
-| Parameter | In | Type | Description |
-|---|---|---|---|
-| `Idempotency-Key` | header | string |  |
-
 Request body:
 
 | Field | Type | Description |
@@ -755,7 +751,7 @@ Request body:
 | `access` (required) | string: read, write, admin |  |
 | `branch` | string | Branch name or id, to limit a database token to one branch. |
 | `database` | string | Database name or id. Omit for an instance token. |
-| `expires_in_days` | integer | 0: never expires. |
+| `expires_in_days` | integer | 0: never expires. A token that expires can't create one that outlives it: the expiry is capped at the creator's. |
 | `name` (required) | string |  |
 
 Response `201`:

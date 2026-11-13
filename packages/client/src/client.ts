@@ -273,10 +273,9 @@ export class Client {
   readonly tokens = {
     list: (o: ListOptions = {}) => this.#page<TokenOut>("/v1/tokens", o),
     /** Creates a token. The full token is in `token` and is only shown here. */
-    create: (o: { name: string; access: "read" | "write" | "admin"; database?: string; branch?: string; expiresInDays?: number; idempotencyKey?: string }) =>
+    create: (o: { name: string; access: "read" | "write" | "admin"; database?: string; branch?: string; expiresInDays?: number }) =>
       this.request<TokenOut & { token: string }>("POST", "/v1/tokens", {
         body: { name: o.name, access: o.access, database: o.database, branch: o.branch, expires_in_days: o.expiresInDays },
-        headers: idem(o.idempotencyKey),
       }),
     revoke: (id: string) => this.request<void>("DELETE", `/v1/tokens/${enc(id)}`),
   }

@@ -129,7 +129,7 @@ export interface CreateTokenInBody {
   branch?: string;
   /** Database name or id. Omit for an instance token. */
   database?: string;
-  /** 0: never expires. */
+  /** 0: never expires. A token that expires can't create one that outlives it: the expiry is capped at the creator's. */
   expires_in_days?: number;
   name: string;
 }

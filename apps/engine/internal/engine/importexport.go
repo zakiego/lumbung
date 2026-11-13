@@ -78,6 +78,7 @@ func (e *Engine) Import(ctx context.Context, t Target, format ImportFormat, mode
 	}
 	ctx, cancel := context.WithTimeout(ctx, e.cfg.ImportTimeout)
 	defer cancel()
+	r = ctxReader{ctx: ctx, r: r}
 
 	staged := tempName(tg.path)
 	defer func() { _ = removeBranchFiles(staged) }()
@@ -108,6 +109,20 @@ func (e *Engine) Import(ctx context.Context, t Target, format ImportFormat, mode
 		return err
 	}
 	return e.meta.TouchBranch(ctx, tg.branch.ID)
+}
+
+// ctxReader stops reading once ctx is done, so the import timeout covers the
+// upload as well as the work after it.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, apierr.New(apierr.RequestTimeout, "the import ran past its time limit")
+	}
+	return c.r.Read(p)
 }
 
 func removeCompanions(path string) error {

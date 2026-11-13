@@ -90,9 +90,12 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
-// now is the timestamp format stored in meta.db: UTC RFC 3339 with
-// nanoseconds, which sorts as text.
-func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+// TimeLayout is how meta.db stores times: UTC RFC 3339 with a fixed nine
+// fraction digits. Fixed width makes text order match time order (RFC3339Nano
+// drops trailing zeros, so ".5Z" would sort after ".52Z").
+const TimeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+func now() string { return time.Now().UTC().Format(TimeLayout) }
 
 func parseTime(s sql.NullString) *time.Time {
 	if !s.Valid || s.String == "" {

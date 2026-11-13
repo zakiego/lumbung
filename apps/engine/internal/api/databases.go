@@ -134,6 +134,11 @@ func (s *Server) registerDatabases(api huma.API) {
 			if err == nil && !p.SeesDatabase(d.ID) {
 				err = apierr.Newf(apierr.DatabaseNotFound, "no database %q", in.DB)
 			}
+			if err == nil && p.BranchID != "" {
+				// The database's details cover every branch, which a token
+				// limited to one branch doesn't reach.
+				err = apierr.New(apierr.Forbidden, "this token is limited to one branch")
+			}
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -212,7 +217,7 @@ func (s *Server) registerDatabases(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			items, next, err := page(all, func(d meta.Database) string { return d.DeletedAt.UTC().Format(time.RFC3339Nano) + d.ID }, *in)
+			items, next, err := page(all, func(d meta.Database) string { return d.DeletedAt.UTC().Format(meta.TimeLayout) + d.ID }, *in)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}

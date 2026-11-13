@@ -85,7 +85,7 @@ func (s *Store) AddStats(ctx context.Context, buckets []StatsBucket, keepSince t
 		minute := b.Minute.UTC().Format(time.RFC3339)
 		var old string
 		err := tx.QueryRowContext(ctx, `SELECT duration_hist FROM stats_minute WHERE branch_id = ? AND minute = ?`, b.BranchID, minute).Scan(&old)
-		hist := b.Durations
+		hist := append([]int64(nil), b.Durations...) // don't change the caller's batch
 		if err == nil {
 			var prev []int64
 			if json.Unmarshal([]byte(old), &prev) == nil {
@@ -148,7 +148,7 @@ type SlowQuery struct {
 // maxPerBranch entries.
 func (s *Store) AddSlowQuery(ctx context.Context, branchID string, q SlowQuery, maxPerBranch int) error {
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO slow_queries (branch_id, at, duration_ms, sql, error_code) VALUES (?, ?, ?, ?, ?)`,
-		branchID, q.At.UTC().Format(time.RFC3339Nano), q.DurationMS, q.SQL, q.ErrorCode); err != nil {
+		branchID, q.At.UTC().Format(TimeLayout), q.DurationMS, q.SQL, q.ErrorCode); err != nil {
 		return err
 	}
 	_, err := s.db.ExecContext(ctx,
@@ -191,7 +191,7 @@ func (s *Store) GetIdempotent(ctx context.Context, tokenID, key string, maxAge t
 	var r Idempotent
 	err := s.db.QueryRowContext(ctx,
 		`SELECT method, path, request_hash, status, body FROM idempotency WHERE token_id = ? AND key = ? AND created_at >= ?`,
-		tokenID, key, time.Now().Add(-maxAge).UTC().Format(time.RFC3339Nano)).Scan(&r.Method, &r.Path, &r.RequestHash, &r.Status, &r.Body)
+		tokenID, key, time.Now().Add(-maxAge).UTC().Format(TimeLayout)).Scan(&r.Method, &r.Path, &r.RequestHash, &r.Status, &r.Body)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Idempotent{}, false, nil
 	}
@@ -207,7 +207,7 @@ func (s *Store) PutIdempotent(ctx context.Context, tokenID, key string, r Idempo
 		tokenID, key, r.Method, r.Path, r.RequestHash, r.Status, r.Body, now()); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM idempotency WHERE created_at < ?`, time.Now().Add(-maxAge).UTC().Format(time.RFC3339Nano))
+	_, err := s.db.ExecContext(ctx, `DELETE FROM idempotency WHERE created_at < ?`, time.Now().Add(-maxAge).UTC().Format(TimeLayout))
 	return err
 }
 

@@ -93,7 +93,7 @@ func (s *Server) registerBranches(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			items, next, err := page(all, func(b meta.Branch) string { return b.CreatedAt.UTC().Format(time.RFC3339Nano) + b.ID }, in.PageIn)
+			items, next, err := page(all, func(b meta.Branch) string { return b.CreatedAt.UTC().Format(meta.TimeLayout) + b.ID }, in.PageIn)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -118,7 +118,10 @@ func (s *Server) registerBranches(api huma.API) {
 					return nil, toProblem(ctx, err)
 				}
 			}
-			return idempotent(ctx, s, "create-branch", in.IdempotencyKey, in.Body, func() (*branchBody, error) {
+			return idempotent(ctx, s, "create-branch", in.IdempotencyKey, struct {
+				DB   string
+				Body any
+			}{d.ID, in.Body}, func() (*branchBody, error) {
 				opts := engine.NewBranchOptions{Protected: in.Body.Protected, ExpiresIn: time.Duration(in.Body.ExpiresInDays) * 24 * time.Hour}
 				b, err := s.eng.CreateBranch(ctx, d.ID, in.Body.Name, engine.BranchSource{Branch: in.Body.From, Snapshot: in.Body.FromSnapshot}, opts)
 				if err != nil {
@@ -176,9 +179,15 @@ func (s *Server) registerBranches(api huma.API) {
 
 	huma.Register(api, op("reset-branch", http.MethodPost, base+"/{branch}/reset", "Reset a branch to a fresh copy of its parent", "Branches", "branch.reset"),
 		func(ctx context.Context, in *BranchPath) (*branchBody, error) {
-			d, b, err := s.branch(ctx, principalFrom(ctx), in.DB, in.Branch, auth.AccessWrite)
+			p := principalFrom(ctx)
+			d, b, err := s.branch(ctx, p, in.DB, in.Branch, auth.AccessWrite)
 			if err != nil {
 				return nil, toProblem(ctx, err)
+			}
+			// A reset copies the parent's current data into the branch, so a
+			// token limited to the branch must not be able to pull it in.
+			if !p.AtLeast(auth.AccessWrite, d.ID, "") {
+				return nil, toProblem(ctx, apierr.New(apierr.Forbidden, "resetting needs write access to the whole database"))
 			}
 			setTarget(ctx, d.ID+"/"+b.ID)
 			b, err = s.eng.ResetBranch(ctx, d.ID, b.ID)

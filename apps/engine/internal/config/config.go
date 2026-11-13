@@ -6,6 +6,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -167,6 +168,9 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.MaxValueBytes > 1<<30 || c.MaxSQLBytes > 1<<30 {
 		return Config{}, fmt.Errorf("config: LUMBUNG_MAX_VALUE_BYTES and LUMBUNG_MAX_SQL_BYTES can't pass 1GiB")
 	}
+	if _, err := ParseNetworks(c.TrustedProxies); err != nil {
+		return Config{}, fmt.Errorf("config: LUMBUNG_TRUSTED_PROXIES: %w", err)
+	}
 	if c.ConnMaxMemory < 4<<20 {
 		return Config{}, fmt.Errorf("config: LUMBUNG_CONN_MAX_MEMORY must be at least 4MiB")
 	}
@@ -180,6 +184,36 @@ func Defaults() Config {
 		panic(err)
 	}
 	return c
+}
+
+// ParseNetworks reads a comma-separated list of CIDR networks or bare IPs
+// (a bare IP is one address).
+func ParseNetworks(list string) ([]*net.IPNet, error) {
+	var out []*net.IPNet
+	for _, part := range strings.Split(list, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if !strings.Contains(part, "/") {
+			ip := net.ParseIP(part)
+			if ip == nil {
+				return nil, fmt.Errorf("%q isn't an IP or a CIDR network", part)
+			}
+			bits := 128
+			if ip.To4() != nil {
+				ip, bits = ip.To4(), 32
+			}
+			out = append(out, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+			continue
+		}
+		_, n, err := net.ParseCIDR(part)
+		if err != nil {
+			return nil, fmt.Errorf("%q isn't an IP or a CIDR network", part)
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 var units = []struct {

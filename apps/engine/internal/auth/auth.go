@@ -104,7 +104,8 @@ type Principal struct {
 	BranchID   string
 	Access     string
 	Service    bool
-	Actor      string // dashboard user, only honored for the service token
+	ExpiresAt  *time.Time // nil: never
+	Actor      string     // dashboard user, only honored for the service token
 }
 
 // FromToken builds a principal from a live token record. It fails for a
@@ -118,7 +119,7 @@ func FromToken(t meta.Token, now time.Time) (Principal, error) {
 	}
 	return Principal{
 		TokenID: t.ID, Name: t.Name, Scope: t.Scope, DatabaseID: t.DatabaseID,
-		BranchID: t.BranchID, Access: t.Access, Service: t.Service,
+		BranchID: t.BranchID, Access: t.Access, Service: t.Service, ExpiresAt: t.ExpiresAt,
 	}, nil
 }
 
@@ -165,7 +166,20 @@ func (p Principal) SeesDatabase(dbID string) bool {
 }
 
 // Covers reports whether p's grant includes everything q's grant has, so p
-// may mint q without escalating.
+// may mint q without escalating. Expiry is handled by ChildExpiry.
+// ChildExpiry caps a requested expiry (nil: never) at the principal's own,
+// so a token can't outlive the token that created it.
+func (p Principal) ChildExpiry(requested *time.Time) *time.Time {
+	if p.ExpiresAt == nil {
+		return requested
+	}
+	if requested == nil || requested.After(*p.ExpiresAt) {
+		t := *p.ExpiresAt
+		return &t
+	}
+	return requested
+}
+
 func (p Principal) Covers(scope, dbID, branchID, access string) bool {
 	if !p.InstanceAdmin() && (rank(p.Access) < rank(AccessAdmin)) {
 		return false

@@ -49,6 +49,9 @@ type Engine struct {
 	stop chan struct{}
 	done chan struct{}
 
+	closeOnce sync.Once
+	closeErr  error
+
 	// freeBytes reports free disk space; replaced in tests.
 	freeBytes func(path string) (int64, error)
 }
@@ -94,8 +97,14 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*Engine, er
 	return e, nil
 }
 
-// Close closes every connection and meta.db.
+// Close closes every connection and meta.db. Later calls return the first
+// call's result.
 func (e *Engine) Close() error {
+	e.closeOnce.Do(func() { e.closeErr = e.close() })
+	return e.closeErr
+}
+
+func (e *Engine) close() error {
 	close(e.stop)
 	<-e.done
 	e.poolsMu.Lock()

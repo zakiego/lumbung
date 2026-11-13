@@ -1,6 +1,7 @@
 package meta
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -103,8 +104,8 @@ func (s *Store) RevokeToken(ctx context.Context, id string) (bool, error) {
 
 // TouchToken records a token's last use, at most once a minute per token.
 func (s *Store) TouchToken(ctx context.Context, id string, at time.Time) error {
-	ts := at.UTC().Format(time.RFC3339Nano)
-	cutoff := at.Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+	ts := at.UTC().Format(TimeLayout)
+	cutoff := at.Add(-time.Minute).UTC().Format(TimeLayout)
 	_, err := s.db.ExecContext(ctx, `UPDATE tokens SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at < ?)`, ts, id, cutoff)
 	return err
 }
@@ -116,4 +117,45 @@ func (s *Store) ServiceToken(ctx context.Context) (Token, bool, error) {
 		return Token{}, false, nil
 	}
 	return t, err == nil, err
+}
+
+// ErrTokenIDTaken means a service token's id belongs to another token.
+var ErrTokenIDTaken = errors.New("meta: token id already used by another token")
+
+// SetServiceToken makes the token with this id and hash the one live service
+// token, in one transaction: an earlier service token with the same id and
+// secret comes back, any other live service token is revoked. It refuses,
+// changing nothing, when the id belongs to a token that isn't a service
+// token or has a different secret.
+func (s *Store) SetServiceToken(ctx context.Context, id string, hash []byte) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var service bool
+	var existing []byte
+	err = tx.QueryRowContext(ctx, `SELECT service, secret_hash FROM tokens WHERE id = ?`, id).Scan(&service, &existing)
+	found := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if found && (!service || !bytes.Equal(existing, hash)) {
+		return ErrTokenIDTaken
+	}
+	ts := now()
+	if _, err := tx.ExecContext(ctx, `UPDATE tokens SET revoked_at = ? WHERE service = 1 AND revoked_at IS NULL AND id != ?`, ts, id); err != nil {
+		return err
+	}
+	if found {
+		_, err = tx.ExecContext(ctx, `UPDATE tokens SET revoked_at = NULL WHERE id = ?`, id)
+	} else {
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO tokens (id, name, secret_hash, scope, access, service, created_at) VALUES (?, 'service', ?, 'instance', 'admin', 1, ?)`,
+			id, hash, ts)
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }

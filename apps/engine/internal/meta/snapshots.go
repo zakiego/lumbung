@@ -143,7 +143,7 @@ func (s *Store) AllSchedules(ctx context.Context) ([]Schedule, error) {
 
 // MarkScheduleRun records when a schedule last took a snapshot.
 func (s *Store) MarkScheduleRun(ctx context.Context, branchID string, at time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE snapshot_schedules SET last_run_at = ? WHERE branch_id = ?`, at.UTC().Format(time.RFC3339Nano), branchID)
+	_, err := s.db.ExecContext(ctx, `UPDATE snapshot_schedules SET last_run_at = ? WHERE branch_id = ?`, at.UTC().Format(TimeLayout), branchID)
 	return err
 }
 

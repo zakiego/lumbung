@@ -15,7 +15,7 @@ func fmtTime(t *time.Time) any {
 	if t == nil {
 		return nil
 	}
-	return t.UTC().Format(time.RFC3339Nano)
+	return t.UTC().Format(TimeLayout)
 }
 
 // ListBranches returns a database's branches, oldest first.
@@ -176,7 +176,7 @@ func (s *Store) SetDefaultBranch(ctx context.Context, dbID, branchID string) err
 func (s *Store) ExpiredBranches(ctx context.Context, at time.Time) ([]Branch, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+branchColsB+` FROM branches b JOIN databases d ON d.id = b.database_id
 		WHERE d.deleted_at IS NULL AND b.protected = 0 AND b.expires_at IS NOT NULL AND b.expires_at <= ? AND b.id != d.default_branch_id`,
-		at.UTC().Format(time.RFC3339Nano))
+		at.UTC().Format(TimeLayout))
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +238,7 @@ func (s *Store) RenameDatabase(ctx context.Context, dbID, name string) (Database
 func (s *Store) SoftDeleteDatabase(ctx context.Context, dbID string, purgeAfter time.Time) error {
 	ts := now()
 	_, err := s.db.ExecContext(ctx, `UPDATE databases SET deleted_at = ?, purge_after = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
-		ts, purgeAfter.UTC().Format(time.RFC3339Nano), ts, dbID)
+		ts, purgeAfter.UTC().Format(TimeLayout), ts, dbID)
 	return err
 }
 
@@ -279,7 +279,7 @@ func (s *Store) RestoreDatabase(ctx context.Context, dbID, name string) (Databas
 
 // PurgeDue lists trashed databases whose retention has passed.
 func (s *Store) PurgeDue(ctx context.Context, at time.Time) ([]Database, error) {
-	return s.listDatabases(ctx, `deleted_at IS NOT NULL AND purge_after <= '`+at.UTC().Format(time.RFC3339Nano)+`'`)
+	return s.listDatabases(ctx, `deleted_at IS NOT NULL AND purge_after <= '`+at.UTC().Format(TimeLayout)+`'`)
 }
 
 // PurgeDatabase deletes every record of a trashed database. It reports

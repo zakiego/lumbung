@@ -402,7 +402,7 @@
             "type": "string"
           },
           "expires_in_days": {
-            "description": "0: never expires.",
+            "description": "0: never expires. A token that expires can't create one that outlives it: the expiry is capped at the creator's.",
             "format": "int64",
             "maximum": 3650,
             "minimum": 0,
@@ -7471,16 +7471,6 @@
       },
       "post": {
         "operationId": "create-token",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "schema": {
-              "maxLength": 200,
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {

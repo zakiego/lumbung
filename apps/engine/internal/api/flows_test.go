@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"bytes"
-	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -64,11 +63,54 @@ func TestAuthentication(t *testing.T) {
 	golden(t, "unauthorized-malformed", e.fails(e.do("nope", "GET", pDBs, "/v1/databases", nil), 401, "unauthorized"))
 	fake := "lmb_aaaaaaaaaaaaaaaaaaaa_" + strings.Repeat("b", 40)
 	e.fails(e.do(fake, "GET", pDBs, "/v1/databases", nil), 401, "unauthorized")
-	// Three failures from this address: the next attempt is refused, even
-	// with a good token, until the window passes.
-	r = e.fails(e.do(e.admin, "GET", pDBs, "/v1/databases", nil), 429, "rate_limited")
+	// Three failures from this address: more bad tokens are refused with
+	// rate_limited, but a valid token still gets in.
+	r = e.fails(e.do(fake, "GET", pDBs, "/v1/databases", nil), 429, "rate_limited")
 	if r.header.Get("Retry-After") == "" {
 		t.Fatal("no Retry-After")
+	}
+	e.ok(e.do(e.admin, "GET", pDBs, "/v1/databases", nil), 200)
+}
+
+func TestUnknownRoutesAreProblems(t *testing.T) {
+	e := newEnv(t, nil)
+	e.fails(e.do(e.admin, "GET", "", "/v1/nope", nil), 404, "not_found")
+	e.fails(e.do(e.admin, "PUT", "", "/v1/databases", nil), 405, "method_not_allowed")
+}
+
+func TestReviewFixes(t *testing.T) {
+	e := newEnv(t, nil)
+	e.createDB("a")
+	e.createDB("b")
+	e.ok(e.sql(e.admin, "a", "CREATE TABLE t(x)"), 200)
+	e.ok(e.do(e.admin, "POST", pBranches, "/v1/databases/a/branches", map[string]any{"name": "dev"}), 201)
+
+	// create-token takes no Idempotency-Key: the secret is never stored.
+	a := e.ok(e.do(e.admin, "POST", pTokens, "/v1/tokens", map[string]any{"name": "x", "access": "read"}, "Idempotency-Key", "same"), 201).json(t)
+	b := e.ok(e.do(e.admin, "POST", pTokens, "/v1/tokens", map[string]any{"name": "x", "access": "read"}, "Idempotency-Key", "same"), 201).json(t)
+	if a["id"] == b["id"] {
+		t.Fatal("create-token replayed a stored response")
+	}
+
+	// The key covers the path: reusing it on another database is a different
+	// request, refused instead of replaying the first database's branch.
+	e.ok(e.do(e.admin, "POST", pBranches, "/v1/databases/a/branches", map[string]any{"name": "pr"}, "Idempotency-Key", "k"), 201)
+	e.fails(e.do(e.admin, "POST", pBranches, "/v1/databases/b/branches", map[string]any{"name": "pr"}, "Idempotency-Key", "k"), 422, "idempotency_mismatch")
+	e.fails(e.do(e.admin, "GET", pBranch, "/v1/databases/b/branches/pr", nil), 404, "branch_not_found")
+
+	// A branch token can't reset (that would copy the parent in), can't see
+	// the database's details, and can't tell missing branches from others.
+	devOnly, _ := e.token(map[string]any{"name": "dev", "database": "a", "branch": "dev", "access": "write"})
+	e.fails(e.do(devOnly, "POST", pBranch+"/reset", "/v1/databases/a/branches/dev/reset", nil), 403, "forbidden")
+	e.fails(e.do(devOnly, "GET", pDB, "/v1/databases/a", nil), 403, "forbidden")
+	e.fails(e.do(devOnly, "GET", pBranch, "/v1/databases/a/branches/nope", nil), 403, "forbidden")
+	e.fails(e.do(devOnly, "GET", pBranch, "/v1/databases/a/branches/main", nil), 403, "forbidden")
+
+	// A token that expires can't mint one that outlives it.
+	short, _ := e.token(map[string]any{"name": "short", "database": "a", "access": "admin", "expires_in_days": 1})
+	child := e.ok(e.do(short, "POST", pTokens, "/v1/tokens", map[string]any{"name": "child", "database": "a", "access": "read"}), 201).json(t)
+	if child["expires_at"] == nil {
+		t.Fatal("child of an expiring token never expires")
 	}
 }
 
@@ -311,12 +353,4 @@ func TestBranchesSnapshotsAndTransfer(t *testing.T) {
 		t.Fatalf("promote: %v", d)
 	}
 	e.ok(e.do(e.admin, "DELETE", pBranch, "/v1/databases/app/branches/dev", nil), 204)
-}
-
-func TestNotFoundRoute(t *testing.T) {
-	e := newEnv(t, nil)
-	r := e.do(e.admin, "GET", "", "/v1/nope", nil)
-	if r.status != http.StatusNotFound {
-		t.Fatalf("unknown route: %d", r.status)
-	}
 }

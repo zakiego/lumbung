@@ -21,7 +21,7 @@ A token has a **scope**, the whole instance or one database (optionally one bran
 |---|---|---|---|
 | Run SELECT, read schema, diff, stats, snapshots, download | yes | yes | yes |
 | Run writes (on the branch's writer connection) | no | yes | yes |
-| Create branches and snapshots, reset branches, import into an empty branch, restore a snapshot into a new branch | no | yes | yes |
+| Create branches and snapshots, reset branches (needs the whole database), import into an empty branch, restore a snapshot into a new branch | no | yes | yes |
 | Delete, rename, protect or promote branches, set snapshot schedules, delete snapshots, import with `mode=replace` | no | no | yes |
 | Create and revoke tokens within its own scope | no | no | yes |
 
@@ -31,13 +31,17 @@ A read token runs every statement on a read-only connection, so SQLite itself re
 
 ### Database and branch tokens
 
-A database token only sees its database: other databases answer `database_not_found`, as if they didn't exist. A token limited to one branch can query, download, snapshot and read the schema of that branch only. It can't list branches or reach the default branch through `/v1/databases/{db}/query` unless that branch is the default.
+A database token only sees its database: other databases answer `database_not_found`, as if they didn't exist. A token limited to one branch can query, download, snapshot and read the schema of that branch only. Every other branch, and any branch name that doesn't exist, answers `forbidden`, so it can't probe for names. It can't list branches, read the database's details, reset its branch (a reset copies the parent's data in), or reach the default branch through `/v1/databases/{db}/query` unless that branch is the default.
 
 When a branch is deleted, tokens limited to it are revoked. When a database is purged from the trash, its tokens are removed.
 
 ## Expiry and limits
 
-A token can expire after a number of days. Each token is rate limited (`LUMBUNG_RATE_LIMIT`, `LUMBUNG_RATE_BURST`), and failed authentications are limited per client address (`LUMBUNG_AUTH_FAILURES_PER_MINUTE`). Both answer `rate_limited` with a `Retry-After` header.
+A token can expire after a number of days. A token that expires can't create one that outlives it: the new token's expiry is capped at its creator's. Revoking a token doesn't revoke the tokens it created; revoke those too.
+
+Each token is rate limited (`LUMBUNG_RATE_LIMIT`, `LUMBUNG_RATE_BURST`). Failed authentications are limited per client address (`LUMBUNG_AUTH_FAILURES_PER_MINUTE`): past the limit, bad tokens from that address get `rate_limited`, while valid tokens keep working, so a flood of bad requests through a shared proxy can't lock real clients out. Both answer with a `Retry-After` header. Behind a proxy, set `LUMBUNG_CLIENT_IP_HEADER` and `LUMBUNG_TRUSTED_PROXIES` so each client gets its own limit; `X-Forwarded-For` is read from the right, skipping trusted proxies.
+
+Creating a token takes no `Idempotency-Key`: replaying the response would mean storing the secret, which is only ever shown once.
 
 ## The service token
 

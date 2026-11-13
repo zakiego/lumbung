@@ -77,29 +77,10 @@ func ensureServiceToken(ctx context.Context, eng *engine.Engine, cfg config.Conf
 	if err != nil {
 		return fmt.Errorf("server: the service token isn't a valid Lumbung token (lmb_<id>_<secret>)")
 	}
-	store := eng.Meta()
-	cur, ok, err := store.ServiceToken(ctx)
-	if err != nil {
-		return err
+	err = eng.Meta().SetServiceToken(ctx, id, auth.Hash(token))
+	if errors.Is(err, meta.ErrTokenIDTaken) {
+		return fmt.Errorf("server: the service token's id %s belongs to another token or secret; set a newly generated token", id)
 	}
-	if ok && cur.ID == id && auth.Matches(token, cur.SecretHash) {
-		return nil
-	}
-	if ok {
-		if _, err := store.RevokeToken(ctx, cur.ID); err != nil {
-			return err
-		}
-	}
-	if old, err := store.GetToken(ctx, id); err == nil {
-		// The id exists but isn't the live service token (revoked, or a
-		// different secret). Refuse rather than resurrect it.
-		_ = old
-		return fmt.Errorf("server: the service token's id %s is already used by another token; generate a new one", id)
-	} else if !errors.Is(err, meta.ErrNoToken) {
-		return err
-	}
-	_, err = store.CreateToken(ctx, meta.Token{ID: id, Name: "service", SecretHash: auth.Hash(token),
-		Scope: auth.ScopeInstance, Access: auth.AccessAdmin, Service: true})
 	return err
 }
 

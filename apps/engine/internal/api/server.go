@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
 	"github.com/zakiego/lumbung/apps/engine/internal/auth"
+	"github.com/zakiego/lumbung/apps/engine/internal/config"
 	"github.com/zakiego/lumbung/apps/engine/internal/engine"
 	"github.com/zakiego/lumbung/apps/engine/internal/meta"
 	"github.com/zakiego/lumbung/apps/engine/internal/ratelimit"
@@ -40,8 +42,12 @@ type Server struct {
 	perToken *ratelimit.Limiter
 	failures *ratelimit.Limiter
 	proxies  []*net.IPNet
+	ipHeader string
 	now      func() time.Time
 	extra    []func(huma.API) // more operations, added by other packages (MCP)
+
+	touchMu sync.Mutex
+	touched map[string]time.Time
 }
 
 // Option changes a server at construction.
@@ -65,15 +71,13 @@ func New(eng *engine.Engine, log *slog.Logger, opts ...Option) *Server {
 		perToken: ratelimit.New(float64(cfg.RateLimit), cfg.RateBurst),
 		failures: ratelimit.New(float64(cfg.AuthFailuresPerMin)/60, cfg.AuthFailuresPerMin),
 		now:      time.Now,
+		touched:  map[string]time.Time{},
+		ipHeader: cfg.ClientIPHeader,
 	}
 	for _, o := range opts {
 		o(s)
 	}
-	for _, cidr := range strings.Split(cfg.TrustedProxies, ",") {
-		if _, n, err := net.ParseCIDR(strings.TrimSpace(cidr)); err == nil {
-			s.proxies = append(s.proxies, n)
-		}
-	}
+	s.proxies, _ = config.ParseNetworks(cfg.TrustedProxies) // checked by config.Load
 	s.api = humago.New(s.mux, Config())
 	s.api.UseMiddleware(s.middleware)
 	s.register()
@@ -114,8 +118,55 @@ func stampRequestID(ctx huma.Context, _ string, v any) (any, error) {
 	return v, nil
 }
 
-// Handler returns the HTTP handler.
-func (s *Server) Handler() http.Handler { return s.mux }
+// Handler returns the HTTP handler. Requests no route matches get a
+// problem+json 404 or 405 instead of the router's plain text.
+func (s *Server) Handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mux.ServeHTTP(&problemFallback{ResponseWriter: w}, r)
+	})
+}
+
+// problemFallback rewrites the router's own text/plain 404 and 405 into
+// problems. Responses from handlers already have a JSON content type.
+type problemFallback struct {
+	http.ResponseWriter
+	swallow bool
+}
+
+func (f *problemFallback) WriteHeader(status int) {
+	h := f.Header()
+	if (status == http.StatusNotFound || status == http.StatusMethodNotAllowed) && strings.HasPrefix(h.Get("Content-Type"), "text/plain") {
+		f.swallow = true
+		code := apierr.NotFound
+		msg := "no such endpoint"
+		if status == http.StatusMethodNotAllowed {
+			code, msg = apierr.MethodNotAllowed, "this endpoint doesn't accept that method"
+		}
+		h.Set("Content-Type", "application/problem+json")
+		h.Del("X-Content-Type-Options")
+		f.ResponseWriter.WriteHeader(status)
+		_ = json.NewEncoder(f.ResponseWriter).Encode(problemFrom(apierr.New(code, msg)))
+		return
+	}
+	f.ResponseWriter.WriteHeader(status)
+}
+
+func (f *problemFallback) Write(b []byte) (int, error) {
+	if f.swallow {
+		return len(b), nil
+	}
+	return f.ResponseWriter.Write(b)
+}
+
+// Flush lets streamed downloads through.
+func (f *problemFallback) Flush() {
+	if fl, ok := f.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the real writer (read deadlines).
+func (f *problemFallback) Unwrap() http.ResponseWriter { return f.ResponseWriter }
 
 // API exposes the Huma API, for generating the OpenAPI document.
 func (s *Server) API() huma.API { return s.api }
@@ -153,34 +204,43 @@ func newRequestID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// clientIP is the connection's address, or the proxy header's when the
-// connection comes from a trusted proxy.
+func (s *Server) trusted(ip net.IP) bool {
+	for _, n := range s.proxies {
+		if ip != nil && n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// clientIP is the connection's address, or, when the connection comes from a
+// trusted proxy, the address the proxy header names. A list (X-Forwarded-For)
+// is read from the right, skipping trusted proxies: proxies append, so the
+// left end is whatever the client chose to send.
 func (s *Server) clientIP(ctx huma.Context) string {
 	host, _, err := net.SplitHostPort(ctx.RemoteAddr())
 	if err != nil {
 		host = ctx.RemoteAddr()
 	}
-	hdr := s.eng.Config().ClientIPHeader
-	if hdr == "" {
+	if s.ipHeader == "" {
 		return host
 	}
-	ip := net.ParseIP(host)
-	trusted := false
-	for _, n := range s.proxies {
-		if ip != nil && n.Contains(ip) {
-			trusted = true
-			break
+	return s.clientIPFrom(host, ctx.Header(s.ipHeader))
+}
+
+func (s *Server) clientIPFrom(host, header string) string {
+	if s.ipHeader == "" || !s.trusted(net.ParseIP(host)) {
+		return host
+	}
+	parts := strings.Split(header, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		ip := net.ParseIP(strings.TrimSpace(parts[i]))
+		if ip == nil {
+			return host // malformed: don't guess
 		}
-	}
-	if !trusted {
-		return host
-	}
-	v := ctx.Header(hdr)
-	if i := strings.IndexByte(v, ','); i >= 0 {
-		v = v[:i] // X-Forwarded-For: the first entry is the client
-	}
-	if ip := net.ParseIP(strings.TrimSpace(v)); ip != nil {
-		return ip.String()
+		if !s.trusted(ip) {
+			return ip.String()
+		}
 	}
 	return host
 }
@@ -219,8 +279,25 @@ func (s *Server) authenticate(ctx context.Context, header string) (auth.Principa
 	if err != nil {
 		return auth.Principal{}, apierr.New(apierr.Unauthorized, err.Error())
 	}
-	_ = s.store.TouchToken(ctx, rec.ID, s.now())
+	s.touch(ctx, rec.ID)
 	return p, nil
+}
+
+// touch records a token's last use, writing meta.db at most once a minute
+// per token so the hot path doesn't take the write lock on every request.
+func (s *Server) touch(ctx context.Context, tokenID string) {
+	now := s.now()
+	s.touchMu.Lock()
+	last, ok := s.touched[tokenID]
+	if ok && now.Sub(last) < time.Minute {
+		s.touchMu.Unlock()
+		return
+	}
+	s.touched[tokenID] = now
+	s.touchMu.Unlock()
+	if err := s.store.TouchToken(ctx, tokenID, now); err != nil {
+		s.log.Error("record token use", "err", err)
+	}
 }
 
 var actorRe = regexp.MustCompile(`^[^\x00-\x1f\x7f]{1,200}$`)
@@ -238,17 +315,17 @@ func (s *Server) middleware(ctx huma.Context, next func(huma.Context)) {
 	ctx = huma.WithValue(ctx, keyInfo, info)
 	ctx = huma.WithValue(ctx, keyLog, s.log)
 
-	ip := s.clientIP(ctx)
-	if ok, wait := s.failuresAllowed(ip); !ok {
-		ctx.SetHeader("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-		writeProblem(ctx, apierr.New(apierr.RateLimited, "too many failed authentications from this address"), id)
-		return
-	}
+	// Authenticate first: a valid token always gets in, so a flood of bad
+	// tokens from a shared address (a proxy, a tunnel) can't lock real
+	// clients out. Failures are what the per-address limit counts.
 	p, err := s.authenticate(ctx.Context(), ctx.Header("Authorization"))
 	if err != nil {
 		ae := apierr.As(err)
 		if ae.Code == apierr.Unauthorized {
-			s.failures.Allow(ip)
+			if ok, wait := s.failures.Allow(s.clientIP(ctx)); !ok {
+				ctx.SetHeader("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+				ae = apierr.New(apierr.RateLimited, "too many failed authentications from this address")
+			}
 		} else {
 			s.log.Error("authenticate", "err", err)
 			ae = apierr.New(apierr.Internal, "internal error")
@@ -283,9 +360,4 @@ func (s *Server) middleware(ctx huma.Context, next func(huma.Context)) {
 			s.log.Error("audit", "err", err, "action", action)
 		}
 	}
-}
-
-// failuresAllowed checks, without spending, whether an address may still try.
-func (s *Server) failuresAllowed(ip string) (bool, time.Duration) {
-	return s.failures.Peek(ip)
 }

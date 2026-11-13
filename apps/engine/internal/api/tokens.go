@@ -41,14 +41,15 @@ type tokenList struct {
 	}
 }
 
+// createTokenIn takes no Idempotency-Key: replaying a create would have to
+// store the secret, which is only ever shown once.
 type createTokenIn struct {
-	IdempotencyKey string `header:"Idempotency-Key" maxLength:"200"`
-	Body           struct {
+	Body struct {
 		Name          string `json:"name" minLength:"1" maxLength:"100"`
 		Database      string `json:"database,omitempty" doc:"Database name or id. Omit for an instance token."`
 		Branch        string `json:"branch,omitempty" doc:"Branch name or id, to limit a database token to one branch."`
 		Access        string `json:"access" enum:"read,write,admin"`
-		ExpiresInDays int    `json:"expires_in_days,omitempty" minimum:"0" maximum:"3650" doc:"0: never expires."`
+		ExpiresInDays int    `json:"expires_in_days,omitempty" minimum:"0" maximum:"3650" doc:"0: never expires. A token that expires can't create one that outlives it: the expiry is capped at the creator's."`
 	}
 }
 
@@ -163,24 +164,24 @@ func (s *Server) registerTokens(api huma.API) {
 			if !p.Covers(scope, dbID, branchID, in.Body.Access) {
 				return nil, toProblem(ctx, apierr.New(apierr.Forbidden, "a token can only create tokens within its own admin scope"))
 			}
-			return idempotent(ctx, s, "create-token", in.IdempotencyKey, in.Body, func() (*createTokenOut, error) {
-				id, secret := auth.New()
-				t := meta.Token{ID: id, Name: in.Body.Name, SecretHash: auth.Hash(secret), Scope: scope,
-					DatabaseID: dbID, BranchID: branchID, Access: in.Body.Access}
-				if n := in.Body.ExpiresInDays; n > 0 {
-					at := time.Now().Add(time.Duration(n) * 24 * time.Hour)
-					t.ExpiresAt = &at
-				}
-				rec, err := s.store.CreateToken(ctx, t)
-				if err != nil {
-					return nil, toProblem(ctx, err)
-				}
-				setTarget(ctx, rec.ID)
-				out := &createTokenOut{}
-				out.Body.TokenOut = tokenOut(rec)
-				out.Body.Token = secret
-				return out, nil
-			})
+			id, secret := auth.New()
+			t := meta.Token{ID: id, Name: in.Body.Name, SecretHash: auth.Hash(secret), Scope: scope,
+				DatabaseID: dbID, BranchID: branchID, Access: in.Body.Access}
+			var requested *time.Time
+			if n := in.Body.ExpiresInDays; n > 0 {
+				at := time.Now().Add(time.Duration(n) * 24 * time.Hour)
+				requested = &at
+			}
+			t.ExpiresAt = p.ChildExpiry(requested)
+			rec, err := s.store.CreateToken(ctx, t)
+			if err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			setTarget(ctx, rec.ID)
+			out := &createTokenOut{}
+			out.Body.TokenOut = tokenOut(rec)
+			out.Body.Token = secret
+			return out, nil
 		})
 
 	huma.Register(api, noContent(op("revoke-token", http.MethodDelete, "/v1/tokens/{token_id}", "Revoke a token", "Tokens", "token.revoke")),
