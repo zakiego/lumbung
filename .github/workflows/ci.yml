@@ -58,6 +58,25 @@ jobs:
       - run: pnpm --filter @lumbung/engine lint
       - run: pnpm --filter @lumbung/engine test
       - run: pnpm --filter @lumbung/engine vulncheck
+      - name: Generated docs match the code
+        run: |
+          pnpm --filter @lumbung/engine docs:gen
+          git diff --exit-code -- apps/site/src/content/docs/docs/reference
+
+  fuzz:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/engine
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/engine/go.mod
+          cache-dependency-path: apps/engine/go.sum
+      # PLAN 6.2: statements through the query path must never create or
+      # change a file outside the attacking branch.
+      - run: go test -run '^$' -fuzz '^FuzzQueryPath$' -fuzztime 60s ./internal/engine
 
   web:
     runs-on: ubuntu-latest
