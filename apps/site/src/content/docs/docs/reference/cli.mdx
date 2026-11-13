@@ -66,7 +66,7 @@ lumbung branch diff BRANCH [flags]
 ```
 
 ```text
-      --against string   branch to compare with (default main)
+      --against string   branch to compare with (default: the default branch)
       --db string        database name or id (default: the profile's)
 ```
 
@@ -204,15 +204,14 @@ lumbung import dump.sql --db app --branch staging --mode replace
 
 Save the engine URL and a token as a profile.
 
-Saves the engine URL and a token (and optionally a default database) to the config file, mode 600. The token is read from --token, LUMBUNG_TOKEN, or one line on standard input.
+Saves the engine URL and a token (and optionally a default database) to the config file, mode 600, as the profile named by --profile (default "default"), and makes it current. The token is read from --token, LUMBUNG_TOKEN, or one line on standard input.
 
 ```text
 lumbung login [flags]
 ```
 
 ```text
-      --db string     default database for commands that need one
-      --name string   profile name (default "default")
+      --db string   default database for commands that need one
 ```
 
 ```sh
@@ -283,7 +282,7 @@ lumbung query "INSERT INTO users (name) VALUES (?)" --db app --branch dev --arg 
 
 An interactive SQL prompt.
 
-Reads SQL until a statement ends with a semicolon, runs it, and prints the result. Commands: .tables, .schema [TABLE], .branch NAME, .help, .quit.
+Reads SQL until a statement ends with a semicolon, runs it, and prints the result. Ctrl-C cancels a running statement or clears the line; Ctrl-D or .quit leaves. Commands: .tables, .schema [TABLE], .branch NAME, .help, .quit.
 
 ```text
 lumbung shell [flags]

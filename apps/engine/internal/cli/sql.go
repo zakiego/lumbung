@@ -2,16 +2,19 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -21,14 +24,21 @@ import (
 	"github.com/zakiego/lumbung/apps/engine/internal/value"
 )
 
-// parseArg reads a --arg: JSON (42, 1.5, true, null, "text") when it parses,
-// otherwise the literal text.
-func parseArg(s string) value.Value {
-	var v value.Value
-	if err := json.Unmarshal([]byte(s), &v); err == nil {
-		return v
+// parseArg reads a --arg. Anything that looks like JSON (a number, true,
+// false, null, a quoted string or a typed object) must be valid JSON;
+// anything else is the literal text.
+func parseArg(s string) (value.Value, error) {
+	t := strings.TrimSpace(s)
+	jsonish := t == "true" || t == "false" || t == "null" ||
+		(t != "" && (strings.ContainsRune("-0123456789\"{[", rune(t[0]))))
+	if !jsonish {
+		return value.TextValue(s), nil
 	}
-	return value.TextValue(s)
+	var v value.Value
+	if err := json.Unmarshal([]byte(t), &v); err != nil {
+		return value.Value{}, fmt.Errorf("--arg %s: %w (quote text that starts like a number: '\"%s\"')", s, err, s)
+	}
+	return v, nil
 }
 
 // show renders a value for a table cell.
@@ -99,7 +109,11 @@ func (a *app) queryCmd() *cobra.Command {
 			}
 			st := client.Statement{SQL: pos[0]}
 			for _, s := range args {
-				st.Args = append(st.Args, parseArg(s))
+				v, err := parseArg(s)
+				if err != nil {
+					return err
+				}
+				st.Args = append(st.Args, v)
 			}
 			start := time.Now()
 			r, err := c.Query(cmd.Context(), db, a.flagBranch, st, readOnly)
@@ -123,7 +137,7 @@ func (a *app) shellCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "shell",
 		Short: "An interactive SQL prompt",
-		Long:  "Reads SQL until a statement ends with a semicolon, runs it, and prints the result. Commands: .tables, .schema [TABLE], .branch NAME, .help, .quit.",
+		Long:  "Reads SQL until a statement ends with a semicolon, runs it, and prints the result. Ctrl-C cancels a running statement or clears the line; Ctrl-D or .quit leaves. Commands: .tables, .schema [TABLE], .branch NAME, .help, .quit.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, p, err := a.client()
@@ -135,6 +149,29 @@ func (a *app) shellCmd() *cobra.Command {
 				return err
 			}
 			branch := a.flagBranch
+			// Ctrl-C cancels the statement in flight; at the prompt it clears
+			// the buffer. It never ends the shell.
+			sig := make(chan os.Signal, 1)
+			signal.Notify(sig, os.Interrupt)
+			defer signal.Stop(sig)
+			var mu sync.Mutex
+			var cancelRun context.CancelFunc
+			cleared := make(chan struct{}, 1)
+			go func() {
+				for range sig {
+					mu.Lock()
+					if cancelRun != nil {
+						cancelRun()
+					} else {
+						select {
+						case cleared <- struct{}{}:
+						default:
+						}
+					}
+					mu.Unlock()
+				}
+			}()
+
 			prompt := func(cont bool) {
 				name := branch
 				if name == "" {
@@ -147,9 +184,23 @@ func (a *app) shellCmd() *cobra.Command {
 				}
 			}
 			run := func(sql string) {
+				ctx, cancel := context.WithCancel(context.Background())
+				mu.Lock()
+				cancelRun = cancel
+				mu.Unlock()
+				defer func() {
+					mu.Lock()
+					cancelRun = nil
+					mu.Unlock()
+					cancel()
+				}()
 				start := time.Now()
-				r, err := c.Query(cmd.Context(), db, branch, client.Statement{SQL: sql}, false)
+				r, err := c.Query(ctx, db, branch, client.Statement{SQL: sql}, false)
 				if err != nil {
+					if ctx.Err() != nil {
+						fmt.Fprintln(a.errOut, "cancelled")
+						return
+					}
 					fmt.Fprintln(a.errOut, "error:", err)
 					return
 				}
@@ -164,6 +215,11 @@ func (a *app) shellCmd() *cobra.Command {
 			var buf strings.Builder
 			prompt(false)
 			for sc.Scan() {
+				select {
+				case <-cleared:
+					buf.Reset()
+				default:
+				}
 				line := sc.Text()
 				if buf.Len() == 0 && strings.HasPrefix(strings.TrimSpace(line), ".") {
 					f := strings.Fields(strings.TrimSpace(line))
@@ -192,22 +248,24 @@ func (a *app) shellCmd() *cobra.Command {
 				}
 				buf.WriteString(line)
 				buf.WriteByte('\n')
-				text := buf.String()
-				stmts := sqlsplit.Statements(text)
-				complete := strings.HasSuffix(strings.TrimSpace(text), ";") && len(stmts) > 0 &&
-					strings.HasSuffix(stmts[len(stmts)-1], ";")
-				if !complete {
-					prompt(true)
-					continue
-				}
-				for _, s := range stmts {
-					run(s)
+				stmts, rest := sqlsplit.Split(buf.String())
+				for _, st := range stmts {
+					run(st)
 				}
 				buf.Reset()
-				prompt(false)
+				buf.WriteString(rest)
+				prompt(rest != "")
+			}
+			if err := sc.Err(); err != nil {
+				return err
+			}
+			// Input ended mid-statement (piped SQL without a final
+			// semicolon): run what's there instead of dropping it.
+			if rest := strings.TrimSpace(buf.String()); rest != "" {
+				run(rest)
 			}
 			fmt.Fprintln(a.errOut)
-			return sc.Err()
+			return nil
 		},
 	}
 	a.dbFlags(cmd, true)
@@ -221,6 +279,9 @@ const migrationsTable = `CREATE TABLE IF NOT EXISTS _lumbung_migrations (
   checksum   TEXT NOT NULL,
   applied_at TEXT NOT NULL
 )`
+
+// maxBatch is the API's limit on statements in one batch.
+const maxBatch = 1000
 
 type migration struct {
 	Name     string `json:"name"`
@@ -259,16 +320,20 @@ func (a *app) migrationStatus(cmd *cobra.Command, c *client.Client, db, dir stri
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.Query(cmd.Context(), db, a.flagBranch, client.Statement{SQL: migrationsTable}, false); err != nil {
-		return nil, err
-	}
-	r, err := c.Query(cmd.Context(), db, a.flagBranch, client.Statement{SQL: "SELECT name, checksum FROM _lumbung_migrations"}, true)
+	// Read-only: a missing table means nothing has been applied yet.
+	exists, err := c.Query(cmd.Context(), db, a.flagBranch, client.Statement{SQL: "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = '_lumbung_migrations'"}, true)
 	if err != nil {
 		return nil, err
 	}
 	applied := map[string]string{}
-	for _, row := range r.Rows {
-		applied[row[0].Text] = row[1].Text
+	if len(exists.Rows) == 1 && exists.Rows[0][0].Int == 1 {
+		r, err := c.Query(cmd.Context(), db, a.flagBranch, client.Statement{SQL: "SELECT name, checksum FROM _lumbung_migrations"}, true)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range r.Rows {
+			applied[row[0].Text] = row[1].Text
+		}
 	}
 	for i := range files {
 		sum, ok := applied[files[i].Name]
@@ -325,7 +390,12 @@ func (a *app) migrateCmd() *cobra.Command {
 					SQL:  "INSERT INTO _lumbung_migrations (name, checksum, applied_at) VALUES (?, ?, ?)",
 					Args: []value.Value{value.TextValue(f.Name), value.TextValue(f.Checksum), value.TextValue(time.Now().UTC().Format(time.RFC3339))},
 				})
-				if _, err := c.Batch(cmd.Context(), db, a.flagBranch, stmts); err != nil {
+				if len(stmts) > maxBatch {
+					return fmt.Errorf("%s has %d statements; one migration file can hold at most %d (a batch's limit), so split it", f.Name, len(stmts)-2, maxBatch-2)
+				}
+				// Migration mode: foreign keys are checked once at the end, so
+				// a table rebuild doesn't cascade-delete child rows.
+				if _, err := c.Batch(cmd.Context(), db, a.flagBranch, stmts, true); err != nil {
 					return fmt.Errorf("%s: %w (it was rolled back; %d applied before it)", f.Name, err, len(done))
 				}
 				done = append(done, f.Name)

@@ -64,10 +64,7 @@ func (s *Reader) Next() (string, error) {
 	}
 }
 
-var (
-	triggerStart = regexp.MustCompile(`(?is)^\s*CREATE\s+(TEMP\s+|TEMPORARY\s+)?TRIGGER\b`)
-	endKeyword   = regexp.MustCompile(`(?is)\bEND\s*;\s*$`)
-)
+var triggerStart = regexp.MustCompile(`(?is)^\s*CREATE\s+(TEMP\s+|TEMPORARY\s+)?TRIGGER\b`)
 
 // StripComments removes leading comments and whitespace, to look at how a
 // statement starts.
@@ -93,9 +90,63 @@ func StripComments(s string) string {
 	}
 }
 
-// Statements splits text into statements, dropping ones that hold only
-// comments and whitespace.
-func Statements(text string) []string {
+// blockClosed reports whether a CREATE TRIGGER statement's body has ended:
+// every BEGIN and CASE outside quotes and comments is matched by an END.
+func blockClosed(stmt string) bool {
+	depth, opened := 0, false
+	for _, w := range words(stmt) {
+		switch strings.ToUpper(w) {
+		case "BEGIN":
+			depth++
+			opened = true
+		case "CASE":
+			depth++
+		case "END":
+			depth--
+		}
+	}
+	return opened && depth <= 0
+}
+
+// words returns the bare words of SQL text, skipping quoted strings,
+// quoted identifiers and comments.
+func words(s string) []string {
+	var out []string
+	rs := []rune(s)
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		switch {
+		case c == '\'' || c == '"' || c == '`' || c == '[':
+			end := c
+			if c == '[' {
+				end = ']'
+			}
+			for i++; i < len(rs) && rs[i] != end; i++ {
+			}
+		case c == '-' && i+1 < len(rs) && rs[i+1] == '-':
+			for ; i < len(rs) && rs[i] != '\n'; i++ {
+			}
+		case c == '/' && i+1 < len(rs) && rs[i+1] == '*':
+			for i += 2; i+1 < len(rs) && !(rs[i] == '*' && rs[i+1] == '/'); i++ {
+			}
+			i++
+		case c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z':
+			j := i
+			for j < len(rs) && (rs[j] == '_' || rs[j] == '$' || rs[j] >= 'a' && rs[j] <= 'z' || rs[j] >= 'A' && rs[j] <= 'Z' || rs[j] >= '0' && rs[j] <= '9') {
+				j++
+			}
+			out = append(out, string(rs[i:j]))
+			i = j - 1
+		}
+	}
+	return out
+}
+
+// Split returns the complete statements at the start of text, and the rest:
+// an unfinished statement, or "" when only whitespace and comments remain.
+// A statement is complete at a semicolon outside quotes and comments, and a
+// CREATE TRIGGER only once its body's END is reached.
+func Split(text string) ([]string, string) {
 	r := NewReader(strings.NewReader(text))
 	var out []string
 	var pending strings.Builder
@@ -103,17 +154,30 @@ func Statements(text string) []string {
 		chunk, err := r.Next()
 		pending.WriteString(chunk)
 		cur := pending.String()
-		body := StripComments(cur)
-		done := err != nil
-		inTrigger := triggerStart.MatchString(body) && !endKeyword.MatchString(strings.TrimRight(cur, " \t\r\n"))
-		if !inTrigger || done {
-			if strings.TrimSpace(body) != "" {
-				out = append(out, strings.TrimSpace(cur))
+		if err != nil {
+			if strings.TrimSpace(StripComments(cur)) == "" {
+				return out, ""
 			}
-			pending.Reset()
+			return out, cur
 		}
-		if done {
-			return out
+		body := StripComments(cur)
+		if triggerStart.MatchString(body) && !blockClosed(cur) {
+			continue
 		}
+		if strings.TrimSpace(body) != "" {
+			out = append(out, strings.TrimSpace(cur))
+		}
+		pending.Reset()
 	}
+}
+
+// Statements splits text into statements, dropping ones that hold only
+// comments and whitespace. Unfinished text at the end becomes the last
+// statement, so the server reports what's wrong with it.
+func Statements(text string) []string {
+	out, rest := Split(text)
+	if rest != "" {
+		out = append(out, strings.TrimSpace(rest))
+	}
+	return out
 }

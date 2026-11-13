@@ -28,7 +28,9 @@ type Client struct {
 
 // New returns a client.
 func New(baseURL, token string) *Client {
-	return &Client{URL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: &http.Client{Timeout: 10 * time.Minute}, UserAgent: "lumbung-cli"}
+	// No overall timeout: imports and downloads can take as long as they
+	// take. Requests end with their context (Ctrl-C).
+	return &Client{URL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: &http.Client{}, UserAgent: "lumbung-cli"}
 }
 
 // Error is a problem response from the API.
@@ -243,8 +245,9 @@ func (c *Client) Query(ctx context.Context, db, branch string, st Statement, rea
 	return &r, nil
 }
 
-// Batch runs statements in one transaction.
-func (c *Client) Batch(ctx context.Context, db, branch string, sts []Statement) ([]Result, error) {
+// Batch runs statements in one transaction. migration turns foreign key
+// enforcement off for the batch and checks it once before commit.
+func (c *Client) Batch(ctx context.Context, db, branch string, sts []Statement, migration bool) ([]Result, error) {
 	path := DBPath(db) + "/batch"
 	if branch != "" {
 		path = BranchPath(db, branch) + "/batch"
@@ -252,7 +255,11 @@ func (c *Client) Batch(ctx context.Context, db, branch string, sts []Statement) 
 	var r struct {
 		Results []Result `json:"results"`
 	}
-	if err := c.Do(ctx, http.MethodPost, path, nil, map[string]any{"statements": sts}, &r); err != nil {
+	body := map[string]any{"statements": sts}
+	if migration {
+		body["migration"] = true
+	}
+	if err := c.Do(ctx, http.MethodPost, path, nil, body, &r); err != nil {
 		return nil, err
 	}
 	return r.Results, nil

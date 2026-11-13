@@ -4,10 +4,12 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,19 +148,31 @@ func (a *app) profile() (Profile, error) {
 	if name == "" {
 		name = cfg.Current
 	}
-	p := cfg.Profiles[name]
-	pick := func(flag, env, saved string) string {
+	saved, ok := cfg.Profiles[name]
+	if a.flagProfile != "" && !ok {
+		return Profile{}, fmt.Errorf("no saved profile %q; run `lumbung login --profile %s`", a.flagProfile, a.flagProfile)
+	}
+	override := func(flag, env string) string {
 		if flag != "" {
 			return flag
 		}
-		if v := a.getenv(env); v != "" {
-			return v
-		}
-		return saved
+		return a.getenv(env)
 	}
-	p.URL = pick(a.flagURL, "LUMBUNG_URL", p.URL)
-	p.Token = pick(a.flagToken, "LUMBUNG_TOKEN", p.Token)
-	p.Database = pick("", "LUMBUNG_DATABASE", p.Database)
+	p := Profile{URL: override(a.flagURL, "LUMBUNG_URL"), Token: override(a.flagToken, "LUMBUNG_TOKEN"), Database: a.getenv("LUMBUNG_DATABASE")}
+	// The saved token only goes to the saved URL, so a --url pointing
+	// elsewhere (or a typo) never receives it.
+	if p.Token == "" {
+		if p.URL != "" && strings.TrimRight(p.URL, "/") != strings.TrimRight(saved.URL, "/") {
+			return Profile{}, errors.New("--url or LUMBUNG_URL points somewhere other than the saved profile: pass --token or LUMBUNG_TOKEN for it too")
+		}
+		p.Token = saved.Token
+	}
+	if p.URL == "" {
+		p.URL = saved.URL
+	}
+	if p.Database == "" {
+		p.Database = saved.Database
+	}
 	if p.URL == "" || p.Token == "" {
 		return Profile{}, errors.New("not logged in: run `lumbung login`, or set LUMBUNG_URL and LUMBUNG_TOKEN")
 	}
@@ -184,6 +198,23 @@ func (a *app) database(p Profile) (string, error) {
 		return p.Database, nil
 	}
 	return "", errors.New("no database: pass --db, set LUMBUNG_DATABASE, or log in with --db")
+}
+
+// branchName is --branch, or else the database's current default branch,
+// looked up so a promoted branch is honored.
+func (a *app) branchName(ctx context.Context, c *client.Client, db string) (string, error) {
+	if a.flagBranch != "" {
+		return a.flagBranch, nil
+	}
+	var d client.Database
+	if err := c.Do(ctx, http.MethodGet, client.DBPath(db), nil, nil, &d); err != nil {
+		var apiErr *client.Error
+		if errors.As(err, &apiErr) && apiErr.Code == "forbidden" {
+			return "", errors.New("this token is limited to one branch: pass --branch")
+		}
+		return "", err
+	}
+	return d.DefaultBranch, nil
 }
 
 func (a *app) dbFlags(cmd *cobra.Command, branch bool) {

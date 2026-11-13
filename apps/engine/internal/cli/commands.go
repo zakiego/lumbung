@@ -27,11 +27,11 @@ func tsPtr(t *time.Time) string {
 }
 
 func (a *app) loginCmd() *cobra.Command {
-	var name, db string
+	var db string
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Save the engine URL and a token as a profile",
-		Long:  "Saves the engine URL and a token (and optionally a default database) to the config file, mode 600. The token is read from --token, LUMBUNG_TOKEN, or one line on standard input.",
+		Long:  "Saves the engine URL and a token (and optionally a default database) to the config file, mode 600, as the profile named by --profile (default \"default\"), and makes it current. The token is read from --token, LUMBUNG_TOKEN, or one line on standard input.",
 		Example: "  lumbung login --url http://127.0.0.1:4870 --db app < token.txt\n" +
 			"  lumbung login --url https://db.example.com --token lmb_... --profile prod",
 		Args: cobra.NoArgs,
@@ -63,6 +63,7 @@ func (a *app) loginCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			name := a.flagProfile
 			if name == "" {
 				name = "default"
 			}
@@ -78,7 +79,6 @@ func (a *app) loginCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&name, "name", "", "profile name (default \"default\")")
 	cmd.Flags().StringVar(&db, "db", "", "default database for commands that need one")
 	return cmd
 }
@@ -338,7 +338,14 @@ func (a *app) branchCmd() *cobra.Command {
 				return err
 			}
 			if against == "" {
-				against = "main"
+				saved := a.flagBranch
+				a.flagBranch = ""
+				def, err := a.branchName(cmd.Context(), c, db)
+				a.flagBranch = saved
+				if err != nil {
+					return err
+				}
+				against = def
 			}
 			var d client.Diff
 			if err := c.Do(cmd.Context(), http.MethodGet, client.BranchPath(db, args[0])+"/diff", url.Values{"against": {against}}, nil, &d); err != nil {
@@ -364,7 +371,7 @@ func (a *app) branchCmd() *cobra.Command {
 		},
 	}
 	a.dbFlags(diff, false)
-	diff.Flags().StringVar(&against, "against", "", "branch to compare with (default main)")
+	diff.Flags().StringVar(&against, "against", "", "branch to compare with (default: the default branch)")
 
 	cmd.AddCommand(list, create,
 		simple("delete", "Delete a branch", "delete", http.MethodDelete, "", true),
@@ -391,7 +398,11 @@ func (a *app) snapshotCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sns, err := client.List[client.Snapshot](cmd.Context(), c, client.BranchPath(db, a.branchOr("main"))+"/snapshots")
+			branch, err := a.branchName(cmd.Context(), c, db)
+			if err != nil {
+				return err
+			}
+			sns, err := client.List[client.Snapshot](cmd.Context(), c, client.BranchPath(db, branch)+"/snapshots")
 			if err != nil {
 				return err
 			}
@@ -419,8 +430,12 @@ func (a *app) snapshotCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			branch, err := a.branchName(cmd.Context(), c, db)
+			if err != nil {
+				return err
+			}
 			var s client.Snapshot
-			if err := c.Do(cmd.Context(), http.MethodPost, client.BranchPath(db, a.branchOr("main"))+"/snapshots", nil, map[string]string{"label": label}, &s); err != nil {
+			if err := c.Do(cmd.Context(), http.MethodPost, client.BranchPath(db, branch)+"/snapshots", nil, map[string]string{"label": label}, &s); err != nil {
 				return err
 			}
 			if a.json {
@@ -463,13 +478,6 @@ func (a *app) snapshotCmd() *cobra.Command {
 	restore.Flags().StringVar(&into, "into", "", "name of the new branch")
 	cmd.AddCommand(list, create, restore)
 	return cmd
-}
-
-func (a *app) branchOr(def string) string {
-	if a.flagBranch != "" {
-		return a.flagBranch
-	}
-	return def
 }
 
 // ---- tokens
@@ -582,6 +590,10 @@ func (a *app) importCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			branch, err := a.branchName(cmd.Context(), c, db)
+			if err != nil {
+				return err
+			}
 			f, err := os.Open(args[0])
 			if err != nil {
 				return err
@@ -599,7 +611,7 @@ func (a *app) importCmd() *cobra.Command {
 				}
 			}
 			if mode == "replace" {
-				if err := a.confirm("replace everything in branch "+a.branchOr("main"), a.branchOr("main")); err != nil {
+				if err := a.confirm("replace everything in branch "+branch, branch); err != nil {
 					return err
 				}
 			}
@@ -607,7 +619,7 @@ func (a *app) importCmd() *cobra.Command {
 			if format == "sql" {
 				ct = "application/sql"
 			}
-			res, err := c.Raw(cmd.Context(), http.MethodPost, client.BranchPath(db, a.branchOr("main"))+"/import", url.Values{"format": {format}, "mode": {mode}}, f, ct)
+			res, err := c.Raw(cmd.Context(), http.MethodPost, client.BranchPath(db, branch)+"/import", url.Values{"format": {format}, "mode": {mode}}, f, ct)
 			if err != nil {
 				return err
 			}
@@ -616,7 +628,7 @@ func (a *app) importCmd() *cobra.Command {
 			if a.json {
 				return a.printJSON(map[string]string{"imported": args[0], "format": format})
 			}
-			fmt.Fprintf(a.out, "Imported %s into %s/%s\n", args[0], db, a.branchOr("main"))
+			fmt.Fprintf(a.out, "Imported %s into %s/%s\n", args[0], db, branch)
 			return nil
 		},
 	}
@@ -642,7 +654,14 @@ func (a *app) exportCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := c.Raw(cmd.Context(), http.MethodGet, client.BranchPath(db, a.branchOr("main"))+"/export", url.Values{"format": {format}}, nil, "")
+			if a.json && (output == "" || output == "-") {
+				return errors.New("--json needs -o FILE: the download itself goes to standard output otherwise")
+			}
+			branch, err := a.branchName(cmd.Context(), c, db)
+			if err != nil {
+				return err
+			}
+			res, err := c.Raw(cmd.Context(), http.MethodGet, client.BranchPath(db, branch)+"/export", url.Values{"format": {format}}, nil, "")
 			if err != nil {
 				return err
 			}
@@ -654,7 +673,8 @@ func (a *app) exportCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if _, err := io.Copy(f, res.Body); err != nil {
+				n, err := io.Copy(f, res.Body)
+				if err != nil {
 					f.Close()
 					os.Remove(tmp)
 					return fmt.Errorf("download cut off: %w", err)
@@ -665,7 +685,10 @@ func (a *app) exportCmd() *cobra.Command {
 				if err := os.Rename(tmp, output); err != nil {
 					return err
 				}
-				fmt.Fprintf(a.errOut, "Saved %s\n", output)
+				if a.json {
+					return a.printJSON(map[string]any{"saved": output, "bytes": n, "format": format})
+				}
+				fmt.Fprintf(a.errOut, "Saved %s (%s)\n", output, humanBytes(n))
 				return nil
 			}
 			_, err = io.Copy(w, res.Body)

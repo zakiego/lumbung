@@ -305,3 +305,86 @@ func TestBranchesSnapshotsTokensTransfer(t *testing.T) {
 	must(t, lumbung(t, cfg, "", "token", "revoke", ciID, "--yes"))
 	fails(t, lumbung(t, reader, "", "query", "SELECT 1"), "unauthorized")
 }
+
+func TestReviewFixesCLI(t *testing.T) {
+	cfg := loggedIn(t, "")
+	must(t, lumbung(t, cfg, "", "db", "create", "cli-r"))
+	cfg = loggedIn(t, "cli-r")
+	must(t, lumbung(t, cfg, "", "query", "CREATE TABLE t(x)"))
+
+	// After promoting a branch, commands without --branch follow the new default.
+	must(t, lumbung(t, cfg, "", "branch", "create", "next"))
+	must(t, lumbung(t, cfg, "", "query", "INSERT INTO t VALUES (42)", "--branch", "next"))
+	must(t, lumbung(t, cfg, "", "branch", "promote", "next"))
+	dump := must(t, lumbung(t, cfg, "", "export", "--format", "sql"))
+	if !strings.Contains(dump.stdout, "42") {
+		t.Fatalf("export used the old default branch: %s", dump.stdout)
+	}
+	snap := must(t, lumbung(t, cfg, "", "snapshot", "create", "--json"))
+	if !strings.Contains(snap.stdout, `"branch_name": "next"`) {
+		t.Fatalf("snapshot of the wrong branch: %s", snap.stdout)
+	}
+	if o := must(t, lumbung(t, cfg, "", "branch", "diff", "main")); !strings.Contains(o.stdout, "No schema changes") {
+		t.Fatalf("diff against the default: %s", o.stdout)
+	}
+
+	// A --url that isn't the saved one never gets the saved token.
+	fails(t, lumbung(t, cfg, "", "db", "list", "--url", "http://127.0.0.1:1"), "pass --token")
+	// An unknown profile is an error, not a silent fallback.
+	fails(t, lumbung(t, cfg, "", "db", "list", "--profile", "prdo"), "no saved profile")
+	// login --profile saves under that name (and makes it current).
+	other := loggedIn(t, "")
+	must(t, lumbung(t, other, adminTok+"\n", "login", "--url", baseURL, "--profile", "second"))
+	must(t, lumbung(t, other, "", "db", "list", "--profile", "second"))
+	must(t, lumbung(t, other, "", "db", "list", "--profile", "default"))
+
+	// The shell runs a final statement without a semicolon, and keeps a
+	// multi-line trigger together.
+	shell := must(t, lumbung(t, cfg, "CREATE TABLE log(x);\nCREATE TRIGGER tr AFTER INSERT ON t BEGIN\n  INSERT INTO log VALUES (new.x);\nEND;\nINSERT INTO t VALUES (7)", "shell"))
+	if strings.Contains(shell.stderr, "error") {
+		t.Fatalf("shell: %s", shell.stderr)
+	}
+	if o := must(t, lumbung(t, cfg, "", "query", "SELECT count(*) FROM log")); !strings.Contains(o.stdout, "1") {
+		t.Fatalf("trigger or final statement didn't run: %s", o.stdout)
+	}
+
+	// --arg: JSON-shaped values must be valid.
+	fails(t, lumbung(t, cfg, "", "query", "SELECT ?", "--arg", "99999999999999999999"), "64 bits")
+	must(t, lumbung(t, cfg, "", "query", "SELECT ?", "--arg", "hello"))
+
+	// export --json with -o reports the file.
+	file := filepath.Join(t.TempDir(), "x.db")
+	if o := must(t, lumbung(t, cfg, "", "export", "-o", file, "--json")); !strings.Contains(o.stdout, `"saved"`) {
+		t.Fatalf("export --json: %s", o.stdout)
+	}
+	fails(t, lumbung(t, cfg, "", "export", "--json"), "-o FILE")
+}
+
+// A drizzle-kit table rebuild keeps child rows (migration mode), and
+// migrate status works read-only on a fresh database.
+func TestMigrateTableRebuild(t *testing.T) {
+	cfg := loggedIn(t, "")
+	must(t, lumbung(t, cfg, "", "db", "create", "cli-fk"))
+	cfg = loggedIn(t, "cli-fk")
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "0000_init.sql"), []byte("CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT);\n--> statement-breakpoint\nCREATE TABLE posts(id INTEGER PRIMARY KEY, author INTEGER REFERENCES users(id) ON DELETE CASCADE);"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "0001_rebuild.sql"), []byte("PRAGMA foreign_keys=OFF;--> statement-breakpoint\nCREATE TABLE `__new_users` (`id` integer PRIMARY KEY, `name` text, `email` text);\n--> statement-breakpoint\nINSERT INTO `__new_users`(\"id\", \"name\") SELECT \"id\", \"name\" FROM `users`;--> statement-breakpoint\nDROP TABLE `users`;--> statement-breakpoint\nALTER TABLE `__new_users` RENAME TO `users`;--> statement-breakpoint\nPRAGMA foreign_keys=ON;"), 0o644)
+
+	reader := filepath.Join(t.TempDir(), "config.json")
+	tok := must(t, lumbung(t, cfg, "", "token", "create", "--name", "r", "--db", "cli-fk", "--access", "read"))
+	must(t, lumbung(t, reader, strings.TrimSpace(tok.stdout)+"\n", "login", "--url", baseURL, "--db", "cli-fk"))
+	if o := must(t, lumbung(t, reader, "", "migrate", "status", "--dir", dir)); !strings.Contains(o.stdout, "pending") {
+		t.Fatalf("read-only status: %s", o.stdout)
+	}
+
+	// Apply the first file, add data, then the rebuild.
+	_ = os.Rename(filepath.Join(dir, "0001_rebuild.sql"), filepath.Join(dir, "later.txt"))
+	must(t, lumbung(t, cfg, "", "migrate", "apply", "--dir", dir))
+	must(t, lumbung(t, cfg, "", "query", "INSERT INTO users VALUES (1, 'ana')"))
+	must(t, lumbung(t, cfg, "", "query", "INSERT INTO posts VALUES (1, 1)"))
+	_ = os.Rename(filepath.Join(dir, "later.txt"), filepath.Join(dir, "0001_rebuild.sql"))
+	must(t, lumbung(t, cfg, "", "migrate", "apply", "--dir", dir))
+	if o := must(t, lumbung(t, cfg, "", "query", "SELECT count(*) FROM posts")); !strings.Contains(o.stdout, "1") {
+		t.Fatalf("the rebuild deleted posts: %s", o.stdout)
+	}
+}
