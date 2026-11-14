@@ -397,8 +397,16 @@
             ],
             "type": "string"
           },
+          "access_key": {
+            "description": "Also make an S3 access key for this token. Its secret is shown once, like the token.",
+            "type": "boolean"
+          },
           "branch": {
             "description": "Branch name or id, to limit a database token to one branch.",
+            "type": "string"
+          },
+          "bucket": {
+            "description": "Bucket name or id, for a bucket token. Not with database.",
             "type": "string"
           },
           "database": {
@@ -435,8 +443,16 @@
             ],
             "type": "string"
           },
+          "access_key_id": {
+            "description": "The S3 access key id, when the token has an access key.",
+            "type": "string"
+          },
           "branch_id": {
             "description": "When set, the token only reaches this branch.",
+            "type": "string"
+          },
+          "bucket_id": {
+            "description": "For a bucket token, the bucket it reaches.",
             "type": "string"
           },
           "created_at": {
@@ -470,8 +486,13 @@
           "scope": {
             "enum": [
               "instance",
-              "database"
+              "database",
+              "bucket"
             ],
+            "type": "string"
+          },
+          "secret_access_key": {
+            "description": "The S3 secret access key, when access_key was set. Shown once.",
             "type": "string"
           },
           "service": {
@@ -490,6 +511,8 @@
           "scope",
           "database_id",
           "branch_id",
+          "bucket_id",
+          "access_key_id",
           "access",
           "service",
           "created_at",
@@ -1815,8 +1838,16 @@
             ],
             "type": "string"
           },
+          "access_key_id": {
+            "description": "The S3 access key id, when the token has an access key.",
+            "type": "string"
+          },
           "branch_id": {
             "description": "When set, the token only reaches this branch.",
+            "type": "string"
+          },
+          "bucket_id": {
+            "description": "For a bucket token, the bucket it reaches.",
             "type": "string"
           },
           "created_at": {
@@ -1850,7 +1881,8 @@
           "scope": {
             "enum": [
               "instance",
-              "database"
+              "database",
+              "bucket"
             ],
             "type": "string"
           },
@@ -1865,6 +1897,8 @@
           "scope",
           "database_id",
           "branch_id",
+          "bucket_id",
+          "access_key_id",
           "access",
           "service",
           "created_at",
@@ -2068,6 +2102,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -2077,6 +2131,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -2245,6 +2309,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -2254,6 +2338,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -2416,6 +2510,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -2425,6 +2539,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -2579,6 +2703,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -2588,6 +2732,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -2740,6 +2894,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -2749,6 +2923,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -2911,6 +3095,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -2920,6 +3124,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -3083,6 +3297,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -3092,6 +3326,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -3270,6 +3514,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -3279,6 +3543,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -3449,6 +3723,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -3458,6 +3752,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -3615,6 +3919,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -3624,6 +3948,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -3786,6 +4120,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -3795,6 +4149,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -3967,6 +4331,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -3976,6 +4360,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -4147,6 +4541,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -4156,6 +4570,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -4331,6 +4755,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -4340,6 +4784,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -4526,6 +4980,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -4535,6 +5009,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -4747,6 +5231,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -4756,6 +5260,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -4920,6 +5434,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -4929,6 +5463,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -5100,6 +5644,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -5109,6 +5673,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -5273,6 +5847,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -5282,6 +5876,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -5446,6 +6050,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -5455,6 +6079,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -5612,6 +6246,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -5621,6 +6275,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -5783,6 +6447,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -5792,6 +6476,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -5964,6 +6658,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -5973,6 +6687,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -6161,6 +6885,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -6170,6 +6914,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -6349,6 +7103,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -6358,6 +7132,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -6537,6 +7321,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -6546,6 +7350,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -6709,6 +7523,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -6718,6 +7552,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -6881,6 +7725,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -6890,6 +7754,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -7047,6 +7921,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -7056,6 +7950,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -7230,6 +8134,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -7239,6 +8163,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -7407,6 +8341,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -7416,6 +8370,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -7566,6 +8530,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -7575,6 +8559,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -7720,6 +8714,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -7729,6 +8743,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {
@@ -7897,6 +8921,26 @@
             },
             "description": "Conflict"
           },
+          "411": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Length Required"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -7906,6 +8950,16 @@
               }
             },
             "description": "Request Entity Too Large"
+          },
+          "416": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
           },
           "422": {
             "content": {

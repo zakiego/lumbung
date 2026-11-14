@@ -28,6 +28,7 @@ const (
 const (
 	ScopeInstance = "instance"
 	ScopeDatabase = "database"
+	ScopeBucket   = "bucket"
 
 	AccessRead  = "read"
 	AccessWrite = "write"
@@ -102,6 +103,7 @@ type Principal struct {
 	Scope      string
 	DatabaseID string
 	BranchID   string
+	BucketID   string
 	Access     string
 	Service    bool
 	ExpiresAt  *time.Time // nil: never
@@ -119,7 +121,7 @@ func FromToken(t meta.Token, now time.Time) (Principal, error) {
 	}
 	return Principal{
 		TokenID: t.ID, Name: t.Name, Scope: t.Scope, DatabaseID: t.DatabaseID,
-		BranchID: t.BranchID, Access: t.Access, Service: t.Service, ExpiresAt: t.ExpiresAt,
+		BranchID: t.BranchID, BucketID: t.BucketID, Access: t.Access, Service: t.Service, ExpiresAt: t.ExpiresAt,
 	}, nil
 }
 
@@ -151,7 +153,7 @@ func (p Principal) AtLeast(access, dbID, branchID string) bool {
 	if p.Scope == ScopeInstance {
 		return true
 	}
-	if p.DatabaseID != dbID {
+	if p.Scope != ScopeDatabase || dbID == "" || p.DatabaseID != dbID {
 		return false
 	}
 	if p.BranchID == "" {
@@ -162,11 +164,21 @@ func (p Principal) AtLeast(access, dbID, branchID string) bool {
 
 // SeesDatabase reports whether the principal may know a database exists.
 func (p Principal) SeesDatabase(dbID string) bool {
-	return p.Scope == ScopeInstance || p.DatabaseID == dbID
+	return p.Scope == ScopeInstance || (p.Scope == ScopeDatabase && dbID != "" && p.DatabaseID == dbID)
 }
 
-// Covers reports whether p's grant includes everything q's grant has, so p
-// may mint q without escalating. Expiry is handled by ChildExpiry.
+// SeesBucket reports whether the principal may know a bucket exists.
+// Instance tokens see every bucket; database tokens see none.
+func (p Principal) SeesBucket(bucketID string) bool {
+	return p.Scope == ScopeInstance || (p.Scope == ScopeBucket && bucketID != "" && p.BucketID == bucketID)
+}
+
+// BucketAtLeast reports whether the principal has at least the given access
+// to a bucket.
+func (p Principal) BucketAtLeast(access, bucketID string) bool {
+	return rank(p.Access) >= rank(access) && p.SeesBucket(bucketID)
+}
+
 // ChildExpiry caps a requested expiry (nil: never) at the principal's own,
 // so a token can't outlive the token that created it.
 func (p Principal) ChildExpiry(requested *time.Time) *time.Time {
@@ -180,18 +192,24 @@ func (p Principal) ChildExpiry(requested *time.Time) *time.Time {
 	return requested
 }
 
-func (p Principal) Covers(scope, dbID, branchID, access string) bool {
-	if !p.InstanceAdmin() && (rank(p.Access) < rank(AccessAdmin)) {
+// Covers reports whether p's grant includes everything a grant of the given
+// scope has, so p may mint or manage such a token without escalating. Only
+// admins cover anything; a database admin covers tokens of its database (and
+// its branch, when limited), a bucket admin tokens of its bucket.
+func (p Principal) Covers(scope, dbID, branchID, bucketID, access string) bool {
+	if rank(p.Access) < rank(AccessAdmin) || rank(p.Access) < rank(access) {
 		return false
 	}
-	if rank(p.Access) < rank(access) {
-		return false
-	}
-	if p.Scope == ScopeInstance {
+	switch p.Scope {
+	case ScopeInstance:
 		return true
+	case ScopeDatabase:
+		if scope != ScopeDatabase || dbID == "" || dbID != p.DatabaseID {
+			return false
+		}
+		return p.BranchID == "" || p.BranchID == branchID
+	case ScopeBucket:
+		return scope == ScopeBucket && bucketID != "" && bucketID == p.BucketID
 	}
-	if scope != ScopeDatabase || dbID != p.DatabaseID {
-		return false
-	}
-	return p.BranchID == "" || p.BranchID == branchID
+	return false
 }

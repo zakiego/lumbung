@@ -127,8 +127,12 @@ export interface CreateSnapshotInBody {
 
 export interface CreateTokenInBody {
   access: "read" | "write" | "admin";
+  /** Also make an S3 access key for this token. Its secret is shown once, like the token. */
+  access_key?: boolean;
   /** Branch name or id, to limit a database token to one branch. */
   branch?: string;
+  /** Bucket name or id, for a bucket token. Not with database. */
+  bucket?: string;
   /** Database name or id. Omit for an instance token. */
   database?: string;
   /** 0: never expires. A token that expires can't create one that outlives it: the expiry is capped at the creator's. */
@@ -138,8 +142,12 @@ export interface CreateTokenInBody {
 
 export interface CreateTokenOutBody {
   access: "read" | "write" | "admin";
+  /** The S3 access key id, when the token has an access key. */
+  access_key_id: string;
   /** When set, the token only reaches this branch. */
   branch_id: string;
+  /** For a bucket token, the bucket it reaches. */
+  bucket_id: string;
   created_at: string;
   /** For a database token, the database it reaches. */
   database_id: string;
@@ -147,7 +155,9 @@ export interface CreateTokenOutBody {
   id: string;
   last_used_at: string | null;
   name: string;
-  scope: "instance" | "database";
+  scope: "instance" | "database" | "bucket";
+  /** The S3 secret access key, when access_key was set. Shown once. */
+  secret_access_key?: string;
   /** The dashboard's service token. */
   service: boolean;
   /** The full token. Shown once; only its hash is stored. */
@@ -342,8 +352,12 @@ export interface TokenListBody {
 
 export interface TokenOut {
   access: "read" | "write" | "admin";
+  /** The S3 access key id, when the token has an access key. */
+  access_key_id: string;
   /** When set, the token only reaches this branch. */
   branch_id: string;
+  /** For a bucket token, the bucket it reaches. */
+  bucket_id: string;
   created_at: string;
   /** For a database token, the database it reaches. */
   database_id: string;
@@ -351,7 +365,7 @@ export interface TokenOut {
   id: string;
   last_used_at: string | null;
   name: string;
-  scope: "instance" | "database";
+  scope: "instance" | "database" | "bucket";
   /** The dashboard's service token. */
   service: boolean;
 }

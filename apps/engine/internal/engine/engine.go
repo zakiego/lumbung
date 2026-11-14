@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
+	"github.com/zakiego/lumbung/apps/engine/internal/auth"
 	"github.com/zakiego/lumbung/apps/engine/internal/config"
 	"github.com/zakiego/lumbung/apps/engine/internal/ids"
 	"github.com/zakiego/lumbung/apps/engine/internal/meta"
@@ -59,6 +60,14 @@ type Engine struct {
 
 	// freeBytes reports free disk space; replaced in tests.
 	freeBytes func(path string) (int64, error)
+
+	// Object storage (objects.go).
+	objMu            sync.Mutex
+	objReserved      map[string]int64 // bytes promised to writes in flight, by bucket
+	objReservedTotal int64
+	objCommit        sync.RWMutex // writers share it; the orphan sweep takes it alone
+	sealer           *auth.Sealer
+	lastSweep        time.Time // janitor goroutine only
 }
 
 // Open opens the data directory, creating it on first start.
@@ -95,6 +104,16 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*Engine, er
 		stop:      make(chan struct{}),
 		done:      make(chan struct{}),
 		freeBytes: storage.FreeBytes,
+
+		objReserved: map[string]int64{},
+		lastSweep:   time.Now(),
+	}
+	key, err := auth.LoadOrCreateKey(layout.AccessKeyFile())
+	if err != nil {
+		return nil, err
+	}
+	if e.sealer, err = auth.NewSealer(key); err != nil {
+		return nil, err
 	}
 	e.meta, err = meta.Open(ctx, layout.Meta())
 	if errors.Is(err, meta.ErrNewerSchema) {
@@ -106,6 +125,9 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*Engine, er
 		_ = e.meta.Close()
 		return nil, err
 	} else if err := e.removeOrphans(ctx); err != nil {
+		_ = e.meta.Close()
+		return nil, err
+	} else if err := e.sweepObjects(ctx, time.Now(), 0); err != nil {
 		_ = e.meta.Close()
 		return nil, err
 	}
@@ -287,6 +309,7 @@ func (e *Engine) tick(now time.Time) {
 	e.deleteExpiredBranches(ctx)
 	e.runSchedules(ctx, now)
 	e.purgeTrash(ctx, now)
+	e.objectHousekeeping(ctx, now)
 }
 
 // removeStaleTemp deletes files a crash left mid-copy: the tmp folder's

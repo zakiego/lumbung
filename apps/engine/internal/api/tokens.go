@@ -17,21 +17,27 @@ import (
 
 // TokenOut is a token, without its secret.
 type TokenOut struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
-	Scope      string     `json:"scope" enum:"instance,database"`
-	DatabaseID string     `json:"database_id" doc:"For a database token, the database it reaches."`
-	BranchID   string     `json:"branch_id" doc:"When set, the token only reaches this branch."`
-	Access     string     `json:"access" enum:"read,write,admin"`
-	Service    bool       `json:"service" doc:"The dashboard's service token."`
-	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt  *time.Time `json:"expires_at"`
-	LastUsedAt *time.Time `json:"last_used_at"`
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Scope       string     `json:"scope" enum:"instance,database,bucket"`
+	DatabaseID  string     `json:"database_id" doc:"For a database token, the database it reaches."`
+	BranchID    string     `json:"branch_id" doc:"When set, the token only reaches this branch."`
+	BucketID    string     `json:"bucket_id" doc:"For a bucket token, the bucket it reaches."`
+	AccessKeyID string     `json:"access_key_id" doc:"The S3 access key id, when the token has an access key."`
+	Access      string     `json:"access" enum:"read,write,admin"`
+	Service     bool       `json:"service" doc:"The dashboard's service token."`
+	CreatedAt   time.Time  `json:"created_at"`
+	ExpiresAt   *time.Time `json:"expires_at"`
+	LastUsedAt  *time.Time `json:"last_used_at"`
 }
 
 func tokenOut(t meta.Token) TokenOut {
-	return TokenOut{ID: t.ID, Name: t.Name, Scope: t.Scope, DatabaseID: t.DatabaseID, BranchID: t.BranchID,
+	out := TokenOut{ID: t.ID, Name: t.Name, Scope: t.Scope, DatabaseID: t.DatabaseID, BranchID: t.BranchID, BucketID: t.BucketID,
 		Access: t.Access, Service: t.Service, CreatedAt: t.CreatedAt, ExpiresAt: t.ExpiresAt, LastUsedAt: t.LastUsedAt}
+	if len(t.AccessSecret) > 0 {
+		out.AccessKeyID = auth.AccessKeyID(t.ID)
+	}
+	return out
 }
 
 type tokenList struct {
@@ -48,6 +54,8 @@ type createTokenIn struct {
 		Name          string `json:"name" minLength:"1" maxLength:"100"`
 		Database      string `json:"database,omitempty" doc:"Database name or id. Omit for an instance token."`
 		Branch        string `json:"branch,omitempty" doc:"Branch name or id, to limit a database token to one branch."`
+		Bucket        string `json:"bucket,omitempty" doc:"Bucket name or id, for a bucket token. Not with database."`
+		AccessKey     bool   `json:"access_key,omitempty" doc:"Also make an S3 access key for this token. Its secret is shown once, like the token."`
 		Access        string `json:"access" enum:"read,write,admin"`
 		ExpiresInDays int    `json:"expires_in_days,omitempty" minimum:"0" maximum:"3650" doc:"0: never expires. A token that expires can't create one that outlives it: the expiry is capped at the creator's."`
 	}
@@ -56,7 +64,8 @@ type createTokenIn struct {
 type createTokenOut struct {
 	Body struct {
 		TokenOut
-		Token string `json:"token" doc:"The full token. Shown once; only its hash is stored."`
+		Token           string `json:"token" doc:"The full token. Shown once; only its hash is stored."`
+		SecretAccessKey string `json:"secret_access_key,omitempty" doc:"The S3 secret access key, when access_key was set. Shown once."`
 	}
 }
 
@@ -123,7 +132,7 @@ func (s *Server) registerTokens(api huma.API) {
 			}
 			visible := []meta.Token{}
 			for _, t := range all {
-				if p.InstanceAdmin() || p.Covers(t.Scope, t.DatabaseID, t.BranchID, t.Access) {
+				if p.InstanceAdmin() || p.Covers(t.Scope, t.DatabaseID, t.BranchID, t.BucketID, t.Access) {
 					visible = append(visible, t)
 				}
 			}
@@ -143,8 +152,18 @@ func (s *Server) registerTokens(api huma.API) {
 	huma.Register(api, created(op("create-token", http.MethodPost, "/v1/tokens", "Create a token", "Tokens", "token.create")),
 		func(ctx context.Context, in *createTokenIn) (*createTokenOut, error) {
 			p := principalFrom(ctx)
-			scope, dbID, branchID := auth.ScopeInstance, "", ""
-			if in.Body.Database != "" {
+			scope, dbID, branchID, bucketID := auth.ScopeInstance, "", "", ""
+			if in.Body.Bucket != "" {
+				if in.Body.Database != "" || in.Body.Branch != "" {
+					return nil, toProblem(ctx, apierr.New(apierr.BadRequest, "a token reaches a database or a bucket, not both"))
+				}
+				scope = auth.ScopeBucket
+				b, err := s.eng.GetBucket(ctx, in.Body.Bucket)
+				if err != nil || !p.SeesBucket(b.ID) {
+					return nil, toProblem(ctx, apierr.Newf(apierr.BucketNotFound, "no bucket %q", in.Body.Bucket))
+				}
+				bucketID = b.ID
+			} else if in.Body.Database != "" {
 				scope = auth.ScopeDatabase
 				d, err := s.eng.GetDatabase(ctx, in.Body.Database)
 				if err != nil || !p.SeesDatabase(d.ID) {
@@ -161,12 +180,17 @@ func (s *Server) registerTokens(api huma.API) {
 			} else if in.Body.Branch != "" {
 				return nil, toProblem(ctx, apierr.New(apierr.BadRequest, "a branch needs a database"))
 			}
-			if !p.Covers(scope, dbID, branchID, in.Body.Access) {
+			if !p.Covers(scope, dbID, branchID, bucketID, in.Body.Access) {
 				return nil, toProblem(ctx, apierr.New(apierr.Forbidden, "a token can only create tokens within its own admin scope"))
 			}
 			id, secret := auth.New()
 			t := meta.Token{ID: id, Name: in.Body.Name, SecretHash: auth.Hash(secret), Scope: scope,
-				DatabaseID: dbID, BranchID: branchID, Access: in.Body.Access}
+				DatabaseID: dbID, BranchID: branchID, BucketID: bucketID, Access: in.Body.Access}
+			var accessSecret string
+			if in.Body.AccessKey {
+				accessSecret = auth.NewAccessSecret()
+				t.AccessSecret = s.eng.Sealer().Seal(id, accessSecret)
+			}
 			var requested *time.Time
 			if n := in.Body.ExpiresInDays; n > 0 {
 				at := time.Now().Add(time.Duration(n) * 24 * time.Hour)
@@ -181,6 +205,7 @@ func (s *Server) registerTokens(api huma.API) {
 			out := &createTokenOut{}
 			out.Body.TokenOut = tokenOut(rec)
 			out.Body.Token = secret
+			out.Body.SecretAccessKey = accessSecret
 			return out, nil
 		})
 
@@ -195,7 +220,7 @@ func (s *Server) registerTokens(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			if !p.InstanceAdmin() && !p.Covers(t.Scope, t.DatabaseID, t.BranchID, t.Access) {
+			if !p.InstanceAdmin() && !p.Covers(t.Scope, t.DatabaseID, t.BranchID, t.BucketID, t.Access) {
 				return nil, toProblem(ctx, apierr.New(apierr.TokenNotFound, "no live token with that id"))
 			}
 			if t.Service {

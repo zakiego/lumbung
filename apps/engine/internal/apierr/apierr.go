@@ -77,6 +77,22 @@ const (
 	TransactionAborted    = "transaction_aborted"
 	InvalidBaton          = "invalid_baton"
 	TooManyStreams        = "too_many_streams"
+	BucketNotFound        = "bucket_not_found"
+	BucketNotEmpty        = "bucket_not_empty"
+	ObjectNotFound        = "object_not_found"
+	InvalidKey            = "invalid_key"
+	ObjectTooLarge        = "object_too_large"
+	BucketSizeLimit       = "bucket_size_limit"
+	ObjectQuotaExceeded   = "object_storage_quota_exceeded"
+	UploadNotFound        = "upload_not_found"
+	InvalidPart           = "invalid_part"
+	PartTooSmall          = "part_too_small"
+	BadDigest             = "bad_digest"
+	IncompleteBody        = "incomplete_body"
+	LengthRequired        = "length_required"
+	PreconditionFailed    = "precondition_failed"
+	InvalidRange          = "invalid_range"
+	NoAccessKey           = "no_access_key"
 	Busy                  = "busy"
 	Unavailable           = "unavailable"
 	Internal              = "internal"
@@ -85,7 +101,7 @@ const (
 // Codes lists every code with its status, for the Error codes docs page.
 var Codes = []CodeInfo{
 	{BadRequest, http.StatusBadRequest, "The request body or a parameter is malformed."},
-	{InvalidName, http.StatusBadRequest, "A name doesn't match `[a-z0-9][a-z0-9-]{0,62}`."},
+	{InvalidName, http.StatusBadRequest, "A database or branch name doesn't match `[a-z0-9][a-z0-9-]{0,62}`, or a bucket name doesn't match `[a-z0-9][a-z0-9-]{1,61}[a-z0-9]`."},
 	{EmptyStatement, http.StatusBadRequest, "The SQL text holds no statement."},
 	{MultipleStatements, http.StatusBadRequest, "`query` got more than one statement. Use `batch` for several."},
 	{InvalidParams, http.StatusBadRequest, "The parameters don't match the statement's placeholders."},
@@ -102,8 +118,8 @@ var Codes = []CodeInfo{
 	{DiskFull, http.StatusInsufficientStorage, "The host disk has less free space than the configured minimum."},
 	{DatabaseNotFound, http.StatusNotFound, "No database with that name or id."},
 	{BranchNotFound, http.StatusNotFound, "No branch with that name or id in this database."},
-	{NameTaken, http.StatusConflict, "Another database or branch already has that name."},
-	{LimitReached, http.StatusConflict, "The instance already has the most databases, or the database the most branches, allowed."},
+	{NameTaken, http.StatusConflict, "Another database, branch or bucket already has that name."},
+	{LimitReached, http.StatusConflict, "The instance already has the most databases or buckets, the database the most branches, or the bucket the most multipart uploads in progress, allowed."},
 	{SnapshotNotFound, http.StatusNotFound, "No snapshot with that id in this database."},
 	{BranchProtected, http.StatusConflict, "The branch is protected, so it can't be deleted, reset or overwritten by an import. The default branch is always protected."},
 	{ParentGone, http.StatusConflict, "The branch can't be reset because the branch or snapshot it was made from no longer exists."},
@@ -123,6 +139,22 @@ var Codes = []CodeInfo{
 	{TransactionAborted, http.StatusConflict, "The open transaction was rolled back: SQLite ended it after an error, or it hit a limit or the transaction timeout. Send ROLLBACK, then start again. Interactive transactions only."},
 	{InvalidBaton, http.StatusBadRequest, "The baton names no open stream: it was already used, belongs to another token or branch, or the stream was closed or expired and its transaction rolled back. libSQL protocol only."},
 	{TooManyStreams, http.StatusTooManyRequests, "The token or the instance already has the most open libSQL streams allowed. Close streams, or wait for idle ones to expire."},
+	{BucketNotFound, http.StatusNotFound, "No bucket with that name or id."},
+	{BucketNotEmpty, http.StatusConflict, "The bucket still holds objects. Delete them first."},
+	{ObjectNotFound, http.StatusNotFound, "No object with that key in this bucket."},
+	{InvalidKey, http.StatusBadRequest, "An object key must be 1 to 1024 bytes of UTF-8 without control characters."},
+	{ObjectTooLarge, http.StatusRequestEntityTooLarge, "The object, or a part of a multipart upload, is larger than its limit."},
+	{BucketSizeLimit, http.StatusInsufficientStorage, "The write would grow the bucket past its size limit."},
+	{ObjectQuotaExceeded, http.StatusInsufficientStorage, "The write would grow all buckets together past the object storage quota."},
+	{UploadNotFound, http.StatusNotFound, "No multipart upload with that id for this bucket and key. It may have been completed, aborted or expired."},
+	{InvalidPart, http.StatusBadRequest, "A listed part wasn't uploaded, its ETag doesn't match, or the parts aren't in ascending order."},
+	{PartTooSmall, http.StatusBadRequest, "Every part but the last must be at least 5 MiB."},
+	{BadDigest, http.StatusBadRequest, "The body doesn't match its declared hash or checksum. Nothing was stored."},
+	{IncompleteBody, http.StatusBadRequest, "The body is shorter or longer than its declared length. Nothing was stored."},
+	{LengthRequired, http.StatusLengthRequired, "An upload needs a Content-Length (or x-amz-decoded-content-length for a chunked body)."},
+	{PreconditionFailed, http.StatusPreconditionFailed, "An If-Match or If-Unmodified-Since condition doesn't hold."},
+	{InvalidRange, http.StatusRequestedRangeNotSatisfiable, "The Range starts past the end of the object."},
+	{NoAccessKey, http.StatusBadRequest, "Presigning needs a token created with an access key."},
 	{Busy, http.StatusServiceUnavailable, "The branch stayed locked longer than the busy timeout. Retry."},
 	{Unavailable, http.StatusServiceUnavailable, "The engine can't serve: for example meta.db is newer than this binary."},
 	{Internal, http.StatusInternalServerError, "Something failed inside the engine. The log has details."},

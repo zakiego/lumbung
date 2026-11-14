@@ -120,4 +120,88 @@ CREATE TABLE idempotency (
   PRIMARY KEY (token_id, key)
 ) STRICT;
 `,
+	// 4: object storage (PLAN 16, ADR 0006): buckets, objects, multipart
+	// uploads, delayed file removal, and tokens with the bucket scope and an
+	// encrypted S3 access key secret. The tokens table names its scopes in
+	// CHECK constraints, so it is rebuilt.
+	`
+CREATE TABLE buckets (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  public_read  INTEGER NOT NULL DEFAULT 0,
+  cors_origins TEXT NOT NULL DEFAULT '[]',
+  size_bytes   INTEGER NOT NULL DEFAULT 0 CHECK (size_bytes >= 0),
+  object_count INTEGER NOT NULL DEFAULT 0 CHECK (object_count >= 0),
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+) STRICT;
+CREATE UNIQUE INDEX buckets_name ON buckets(name);
+
+CREATE TABLE objects (
+  bucket_id    TEXT NOT NULL REFERENCES buckets(id),
+  key          TEXT NOT NULL,
+  blob_id      TEXT NOT NULL,
+  size         INTEGER NOT NULL CHECK (size >= 0),
+  etag         TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  headers      TEXT NOT NULL DEFAULT '{}',
+  metadata     TEXT NOT NULL DEFAULT '{}',
+  parts        INTEGER NOT NULL DEFAULT 0,
+  modified_at  TEXT NOT NULL,
+  PRIMARY KEY (bucket_id, key)
+) STRICT, WITHOUT ROWID;
+CREATE UNIQUE INDEX objects_blob ON objects(blob_id);
+
+CREATE TABLE uploads (
+  id           TEXT PRIMARY KEY,
+  bucket_id    TEXT NOT NULL REFERENCES buckets(id),
+  key          TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  headers      TEXT NOT NULL DEFAULT '{}',
+  metadata     TEXT NOT NULL DEFAULT '{}',
+  token_id     TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL
+) STRICT;
+CREATE INDEX uploads_bucket ON uploads(bucket_id, key, created_at);
+
+CREATE TABLE upload_parts (
+  upload_id   TEXT NOT NULL REFERENCES uploads(id) ON DELETE CASCADE,
+  part_number INTEGER NOT NULL CHECK (part_number BETWEEN 1 AND 10000),
+  file        TEXT NOT NULL,
+  size        INTEGER NOT NULL CHECK (size >= 0),
+  etag        TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  PRIMARY KEY (upload_id, part_number)
+) STRICT;
+
+CREATE TABLE blob_gc (
+  path         TEXT PRIMARY KEY,
+  delete_after TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE tokens_new (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  secret_hash   BLOB NOT NULL,
+  scope         TEXT NOT NULL CHECK (scope IN ('instance', 'database', 'bucket')),
+  database_id   TEXT REFERENCES databases(id),
+  branch_id     TEXT,
+  bucket_id     TEXT,
+  access        TEXT NOT NULL CHECK (access IN ('read', 'write', 'admin')),
+  service       INTEGER NOT NULL DEFAULT 0,
+  access_secret BLOB,
+  created_at    TEXT NOT NULL,
+  expires_at    TEXT,
+  last_used_at  TEXT,
+  revoked_at    TEXT,
+  CHECK ((scope = 'database') = (database_id IS NOT NULL)),
+  CHECK ((scope = 'bucket') = (bucket_id IS NOT NULL)),
+  CHECK (branch_id IS NULL OR database_id IS NOT NULL)
+) STRICT;
+INSERT INTO tokens_new (id, name, secret_hash, scope, database_id, branch_id, access, service, created_at, expires_at, last_used_at, revoked_at)
+  SELECT id, name, secret_hash, scope, database_id, branch_id, access, service, created_at, expires_at, last_used_at, revoked_at FROM tokens;
+DROP TABLE tokens;
+ALTER TABLE tokens_new RENAME TO tokens;
+CREATE INDEX tokens_bucket ON tokens(bucket_id) WHERE bucket_id IS NOT NULL;
+`,
 }
