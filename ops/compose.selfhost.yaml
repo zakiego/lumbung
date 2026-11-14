@@ -2,7 +2,7 @@
 #
 #   COMPOSE_FILE=compose.yaml:ops/compose.selfhost.yaml docker compose ...
 #
-# scripts/deploy-up.sh, pre-deploy.sh and backup.sh set COMPOSE_FILE
+# scripts/deploy-up.sh, scripts/pre-deploy.sh and ops/backup.sh set COMPOSE_FILE
 # themselves. Ports stay on 127.0.0.1, so the tunnel (cloudflared on the
 # same machine) is the only way in from outside. See ops/README.md.
 

@@ -155,7 +155,7 @@ A branch is a full copy of its parent at the moment it was made, taken with the 
 ### 6.10 Health and upgrades
 
 - `GET /health` returns 200 only when the engine can serve. It fails when `meta.db` is newer than the binary, so a bad rollback shows up as failed.
-- Meta migrations are embedded, forward-only, and run at start. `scripts/pre-deploy.sh` backs up `meta.db` before a deploy.
+- Meta migrations are embedded, forward-only, and run at start. `scripts/deploy-up.sh` backs up `meta.db` right before the swap.
 
 ## 7. REST API
 
@@ -272,7 +272,7 @@ Ours (in `ops/`, done with the `zaki-selfhost` skill):
 
 - Checkout at `~/selfhost/lumbung`, two ports from `free-port.sh`, `mem_limit` on both services.
 - One public hostname, `lumbung.zakiego.com`, through an edge Worker like palui's: `/` and `/docs` to Pages, `/app` to the dashboard, `/v1`, `/mcp` and `/health` to the engine.
-- `scripts/pre-deploy.sh` backs up `meta.db`. A nightly job copies every default branch and the meta database to a backup folder with retention. Test a restore from that backup once before calling it done.
+- `scripts/deploy-up.sh` backs up `meta.db` right before the swap. A nightly job copies every default branch and the meta database to a backup folder with retention. Test a restore from that backup once before calling it done.
 - Add the health URL to `m4-alerts`, the row to the Apps table in the `zaki-selfhost` skill, and the repo to the auto-deploy allowlist.
 - Docker build memory: the OrbStack VM has 3 GB. Keep the Go build and the Nitro build in separate stages and never run them in parallel.
 

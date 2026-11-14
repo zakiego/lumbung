@@ -6,16 +6,18 @@
 #      branch, meta.db and the service token, with `lumbungd backup --to
 #      /data/backups/nightly --keep 7` (consistent while the engine runs)
 #   2. dashboard.db inside its volume with VACUUM INTO, to
-#      /data/backups/nightly-dashboard-<UTC time>.db, keeping 7
+#      /data/backups/nightly-dashboard-<UTC time>.db, with the dashboard's
+#      generated sign-in secret next to it (.auth-secret), keeping 7
 #   3. copy the newest of each out of the volumes with `docker compose cp` to
 #      ~/selfhost/lumbung-backups/{engine,dashboard}/, check the copies
 #      (SHA-256 against the manifest, integrity_check) and keep 7 of each
 #
 # A copy outside the volume survives a deleted volume, not a dead disk: copy
-# ~/selfhost/lumbung-backups somewhere else too. It holds the service token,
-# so it is private to this user (mode 700).
+# ~/selfhost/lumbung-backups somewhere else too. It holds the service token
+# and the dashboard's sign-in secret, so it is private to this user (mode
+# 700, the secret files 600).
 #
-# scripts/restore-drill.sh proves the newest host copy restores.
+# ops/restore-drill.sh proves the newest host copy restores.
 set -euo pipefail
 
 LUMBUNG_DIR="${LUMBUNG_DIR:-$HOME/selfhost/lumbung}"
@@ -80,8 +82,9 @@ retry() {
   done
 }
 
-# Prints the value of a top-level string field from one line of JSON.
-json_field() { python3 -c 'import json,sys; print(json.loads(sys.stdin.read())[sys.argv[1]])' "$1"; }
+# Prints the value of a top-level string field from one line of JSON, or
+# nothing when it's null.
+json_field() { python3 -c 'import json,sys; v = json.loads(sys.stdin.read())[sys.argv[1]]; print("" if v is None else v)' "$1"; }
 
 # Deletes all but the newest $KEEP entries matching a glob in a folder. Names
 # carry UTC timestamps, and a glob expands sorted, so the oldest come first.
@@ -94,9 +97,24 @@ prune() {
   for ((i = 0; i < drop; i++)); do rm -rf "${dir:?}/${names[i]}"; done
 }
 
+# A backup whose retention failed is complete: report it at the end, but
+# never retry it, or every retry takes one more full backup.
+retention_failed=""
+
 # --- 1. engine ----------------------------------------------------------------
 engine_backup() {
-  engine_json=$(docker compose exec -T engine lumbungd backup --to /data/backups/nightly --keep "$KEEP" </dev/null)
+  local rc=0 done_path
+  engine_json=$(docker compose exec -T engine lumbungd backup --to /data/backups/nightly --keep "$KEEP" </dev/null) || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  # When only retention fails, lumbungd still prints the JSON with the
+  # finished backup's folder, then exits 1.
+  done_path=$(printf '%s' "$engine_json" | tail -n 1 | json_field backup 2>/dev/null) || done_path=""
+  if [ -n "$done_path" ]; then
+    log "engine: $done_path is complete, but retention failed (exit $rc); not taking another"
+    retention_failed="$retention_failed engine"
+    return 0
+  fi
+  return "$rc"
 }
 retry engine_backup
 log "engine: $engine_json"
@@ -109,17 +127,25 @@ esac
 
 # --- 2. dashboard -------------------------------------------------------------
 dash_remote=""
+dash_secret=""
 dashboard_backup() {
   local rc=0
-  dash_json=$(docker compose exec -T dashboard node - /data/backups nightly-dashboard "$KEEP" <scripts/dashboard-backup.mjs) || rc=$?
+  dash_json=$(docker compose exec -T dashboard node - /data/backups nightly-dashboard "$KEEP" <ops/dashboard-backup.mjs) || rc=$?
   # 2 means there's no dashboard.db yet: nothing to keep, not worth a retry.
   [ "$rc" -eq 2 ] && { dash_json=""; return 0; }
+  # 3 means the copy is complete but retention failed.
+  if [ "$rc" -eq 3 ]; then
+    log "dashboard: the copy is complete, but retention failed; not taking another"
+    retention_failed="$retention_failed dashboard"
+    return 0
+  fi
   return "$rc"
 }
 retry dashboard_backup
 if [ -n "$dash_json" ]; then
   log "dashboard: $dash_json"
   dash_remote=$(printf '%s' "$dash_json" | tail -n 1 | json_field backup)
+  dash_secret=$(printf '%s' "$dash_json" | tail -n 1 | json_field auth_secret)
 else
   log "dashboard: no dashboard.db yet, skipped"
 fi
@@ -164,5 +190,23 @@ if [ -n "$dash_remote" ]; then
   mv "$partial" "$dash_dest"
   partial=""
   log "dashboard copy: $dash_dest ($(stat -f %z "$dash_dest") bytes)"
+  if [ -n "$dash_secret" ]; then
+    secret_dest="$OUT/dashboard/$(basename "$dash_secret")"
+    partial="$secret_dest.partial"
+    docker compose cp "dashboard:$dash_secret" "$partial" >/dev/null
+    chmod 600 "$partial"
+    [ -s "$partial" ] || { log "the copied auth secret is empty"; exit 1; }
+    mv "$partial" "$secret_dest"
+    partial=""
+    log "dashboard auth secret: $secret_dest"
+  else
+    log "dashboard: no generated auth secret (LUMBUNG_AUTH_SECRET set?), none copied"
+  fi
   prune "$OUT/dashboard" 'nightly-dashboard-*.db'
+  prune "$OUT/dashboard" 'nightly-dashboard-*.auth-secret'
+fi
+
+if [ -n "$retention_failed" ]; then
+  log "retention failed in the volume for:$retention_failed (old backups pile up there; see the lines above)"
+  exit 1
 fi

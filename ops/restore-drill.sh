@@ -2,8 +2,8 @@
 # Restore drill: prove the newest nightly backup on the host restores into a
 # working engine. Our deployment (zaki-selfhost); run on the Docker host.
 #
-#   scripts/restore-drill.sh            newest backup in ~/selfhost/lumbung-backups/engine
-#   scripts/restore-drill.sh <folder>   one backup folder (holds manifest.json)
+#   ops/restore-drill.sh            newest backup in ~/selfhost/lumbung-backups/engine
+#   ops/restore-drill.sh <folder>   one backup folder (holds manifest.json)
 #
 #   1. copy the backup into a scratch volume, owned by the engine's user
 #      (65532), with the dashboard image (the engine image has no shell)
