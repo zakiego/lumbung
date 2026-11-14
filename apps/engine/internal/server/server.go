@@ -168,6 +168,7 @@ func OpenAPI() ([]byte, error) {
 	}
 	defer eng.Close()
 	a := api.New(eng, nil)
+	defer a.Close()
 	b, err := json.MarshalIndent(a.API().OpenAPI(), "", "  ")
 	if err != nil {
 		return nil, err
@@ -190,5 +191,7 @@ func WithThrowawayAPI(f func(*api.Server) error) error {
 		return err
 	}
 	defer eng.Close()
-	return f(api.New(eng, nil))
+	a := api.New(eng, nil)
+	defer a.Close()
+	return f(a)
 }

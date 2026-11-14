@@ -52,6 +52,10 @@ type Server struct {
 
 	mcpServer *mcp.Server
 	libsql    *libsqlStreams
+
+	slowQ     chan slowEntry // slow-query rows for the background writer
+	stop      chan struct{}  // closed by Close
+	closeOnce sync.Once
 }
 
 // Option changes a server at construction.
@@ -76,6 +80,8 @@ func New(eng *engine.Engine, log *slog.Logger, opts ...Option) *Server {
 		failures: ratelimit.New(float64(cfg.AuthFailuresPerMin)/60, cfg.AuthFailuresPerMin),
 		now:      time.Now,
 		touched:  map[string]time.Time{},
+		slowQ:    make(chan slowEntry, 64),
+		stop:     make(chan struct{}),
 		ipHeader: cfg.ClientIPHeader,
 	}
 	for _, o := range opts {
@@ -87,6 +93,7 @@ func New(eng *engine.Engine, log *slog.Logger, opts ...Option) *Server {
 	s.register()
 	s.mountMCP()
 	s.mountLibSQL()
+	go s.slowWorker()
 	s.mux.HandleFunc("GET /health", s.health)
 	return s
 }

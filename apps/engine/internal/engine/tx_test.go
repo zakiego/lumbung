@@ -181,8 +181,14 @@ func TestTxEndsOnTimeoutAndCaps(t *testing.T) {
 		t.Fatalf("rows kept after the timeout: %d", got)
 	}
 
+	// A read past the caps fails alone: the transaction goes on.
 	tx = beginTx(t, e, "app", Write)
 	txExec(t, e, tx, "INSERT INTO t VALUES (1)")
+	_, err = tx.Exec(context.Background(), stmt("SELECT value FROM json_each('[1,2,3,4,5,6,7]')"), e.NewBudget())
+	wantCode(t, err, apierr.ResultTooLarge, "select past the cap")
+	if tx.Done() {
+		t.Fatal("a read past the cap ended the transaction")
+	}
 	_, err = tx.Exec(context.Background(), stmt("INSERT INTO t SELECT value FROM json_each('[1,2,3,4,5,6,7]') RETURNING x"), e.NewBudget())
 	wantCode(t, err, apierr.ResultTooLarge, "returning past the cap")
 	if !tx.Done() {
@@ -340,7 +346,7 @@ func TestQueryWithReadsBesideATransaction(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	r, err := e.QueryWith(ctx, Target{Database: "app"}, Write, stmt("SELECT count(*) FROM t"), e.NewBudget())
+	r, err := e.QueryWith(ctx, Target{Database: "app"}, Write, stmt("SELECT count(*) FROM t"), e.NewBudget(), nil)
 	if err != nil {
 		t.Fatalf("read beside a transaction: %v", err)
 	}
@@ -349,13 +355,131 @@ func TestQueryWithReadsBesideATransaction(t *testing.T) {
 	}
 	short, cancel2 := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel2()
-	_, err = e.QueryWith(short, Target{Database: "app"}, Write, stmt("INSERT INTO t VALUES (2)"), e.NewBudget())
+	_, err = e.QueryWith(short, Target{Database: "app"}, Write, stmt("INSERT INTO t VALUES (2)"), e.NewBudget(), nil)
 	wantCode(t, err, apierr.Busy, "write beside a transaction")
-	_, err = e.QueryWith(context.Background(), Target{Database: "app"}, Write, stmt("SELECT nope FROM t"), e.NewBudget())
+	_, err = e.QueryWith(context.Background(), Target{Database: "app"}, Write, stmt("SELECT nope FROM t"), e.NewBudget(), nil)
 	wantCode(t, err, apierr.SQLError, "bad SQL")
 	tx.Rollback()
-	r, err = e.QueryWith(context.Background(), Target{Database: "app"}, Write, stmt("INSERT INTO t VALUES (3) RETURNING x"), e.NewBudget())
+	r, err = e.QueryWith(context.Background(), Target{Database: "app"}, Write, stmt("INSERT INTO t VALUES (3) RETURNING x"), e.NewBudget(), nil)
 	if err != nil || scalar(t, r).Int != 3 {
 		t.Fatalf("write: %v", err)
+	}
+}
+
+// last_insert_rowid() sees the session's last insert across statements, as
+// in SQLite, while results report a rowid only for the statement that set
+// it, and a new request never sees an earlier one's.
+func TestLastInsertRowID(t *testing.T) {
+	e := newEngine(t, nil)
+	mustCreate(t, e, "app")
+	mustQuery(t, e, "app", Write, "CREATE TABLE t(id INTEGER PRIMARY KEY, x)")
+
+	tx := beginTx(t, e, "app", Write)
+	if r := txExec(t, e, tx, "INSERT INTO t (x) VALUES ('a')"); r.LastInsertRowID != 1 {
+		t.Fatalf("insert result rowid %d", r.LastInsertRowID)
+	}
+	r := txExec(t, e, tx, "SELECT last_insert_rowid()")
+	if scalar(t, r).Int != 1 || r.LastInsertRowID != 0 {
+		t.Fatalf("last_insert_rowid() in the transaction: %d, result rowid %d", scalar(t, r).Int, r.LastInsertRowID)
+	}
+	txExec(t, e, tx, "UPDATE t SET x = 'b'")
+	// An insert that gets the same rowid again still reports it.
+	txExec(t, e, tx, "DELETE FROM t")
+	if r := txExec(t, e, tx, "INSERT INTO t (x) VALUES ('c')"); r.LastInsertRowID != 1 {
+		t.Fatalf("reused rowid reported as %d", r.LastInsertRowID)
+	}
+	if err := tx.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	rs, err := e.Batch(context.Background(), Target{Database: "app"}, Write, []Statement{
+		stmt("INSERT INTO t (x) VALUES ('d')"), stmt("SELECT last_insert_rowid()"), stmt("UPDATE t SET x = x"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rs[0].LastInsertRowID != 2 || scalar(t, rs[1]).Int != 2 || rs[1].LastInsertRowID != 0 || rs[2].LastInsertRowID != 0 {
+		t.Fatalf("batch rowids: %d %d %d %d", rs[0].LastInsertRowID, scalar(t, rs[1]).Int, rs[1].LastInsertRowID, rs[2].LastInsertRowID)
+	}
+	if v := scalar(t, mustQuery(t, e, "app", Write, "SELECT last_insert_rowid()")).Int; v != 0 {
+		t.Fatalf("a new request sees rowid %d from an earlier one", v)
+	}
+}
+
+// The deadline interrupts a running statement and ends the transaction, and
+// with no request at all it still rolls back and frees the writer.
+func TestTxDeadline(t *testing.T) {
+	e := newEngine(t, nil)
+	mustCreate(t, e, "app")
+	mustQuery(t, e, "app", Write, "CREATE TABLE t(x)")
+
+	tx, err := e.BeginTx(context.Background(), Target{Database: "app"}, Write, TxOptions{Deadline: time.Now().Add(300 * time.Millisecond)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	txExec(t, e, tx, "INSERT INTO t VALUES (1)")
+	start := time.Now()
+	_, err = tx.Exec(context.Background(), stmt("SELECT count(*) FROM (WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c) SELECT n FROM c)"), e.NewBudget())
+	wantCode(t, err, apierr.TransactionAborted, "statement past the deadline")
+	if time.Since(start) > 5*time.Second || !tx.Done() {
+		t.Fatalf("the deadline didn't end the transaction (%v)", time.Since(start))
+	}
+
+	tx, err = e.BeginTx(context.Background(), Target{Database: "app"}, Write, TxOptions{Deadline: time.Now().Add(200 * time.Millisecond)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	txExec(t, e, tx, "INSERT INTO t VALUES (1)")
+	time.Sleep(400 * time.Millisecond)
+	if !tx.Done() {
+		t.Fatal("an idle transaction outlived its deadline")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := e.Query(ctx, Target{Database: "app"}, Write, stmt("INSERT INTO t VALUES (2)")); err != nil {
+		t.Fatalf("writer after the deadline: %v", err)
+	}
+	if got := count(t, e, "app", "t"); got != 1 {
+		t.Fatalf("rows: %d", got)
+	}
+}
+
+// A transaction that begins during a reset's priority break is rolled back
+// at the reset's next attempt instead of making it time out.
+func TestTxBegunDuringPriorityBreak(t *testing.T) {
+	oldWindow, oldBreak := priorityWindow, priorityBreak
+	priorityWindow, priorityBreak = 100*time.Millisecond, 400*time.Millisecond
+	t.Cleanup(func() { priorityWindow, priorityBreak = oldWindow, oldBreak })
+
+	e := newEngine(t, nil)
+	mustCreate(t, e, "app")
+	mustQuery(t, e, "app", Write, "CREATE TABLE t(x)")
+	b, err := e.CreateBranch(context.Background(), "app", "dev", BranchSource{}, NewBranchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A long request holds the branch, so the reset's first attempt fails.
+	g := e.gates.get(b.ID)
+	if err := g.share(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := e.ResetBranch(ctx, "app", b.ID)
+		done <- err
+	}()
+	time.Sleep(200 * time.Millisecond) // past the window, inside the break
+	tx, err := e.BeginTx(context.Background(), Target{Database: "app", Branch: "dev"}, Write, TxOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.unshare()
+	if err := <-done; err != nil {
+		t.Fatalf("reset with a transaction begun during its break: %v", err)
+	}
+	if !tx.Done() {
+		t.Fatal("the transaction survived the reset")
 	}
 }

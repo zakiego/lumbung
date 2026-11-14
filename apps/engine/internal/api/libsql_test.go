@@ -510,8 +510,6 @@ func TestLibSQLIsolation(t *testing.T) {
 
 	h = e.libsql(e.admin, "app", "main")
 	h.ok(h.pipeline(exec("BEGIN"))[0])
-	// result_too_large ends the transaction, so run that check last in its
-	// own transaction.
 	for _, sql := range denied {
 		if sql == "SAVEPOINT s" {
 			continue // allowed inside a transaction
@@ -521,7 +519,11 @@ func TestLibSQLIsolation(t *testing.T) {
 			t.Errorf("in a transaction: %s: got %s", sql, code)
 		}
 	}
-	wantErr(t, h.pipeline(exec("WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c LIMIT 1000) SELECT n FROM c"))[0], "result_too_large", "rows past the cap in a transaction")
+	// A read past the cap fails alone; a write past it ends the
+	// transaction, since part of it ran.
+	wantErr(t, h.pipeline(exec("WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c LIMIT 1000) SELECT n FROM c"))[0], "result_too_large", "read past the cap in a transaction")
+	h.run("SELECT 1")
+	wantErr(t, h.pipeline(exec("INSERT INTO t WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c LIMIT 1000) SELECT n FROM c RETURNING x"))[0], "result_too_large", "write past the cap in a transaction")
 	wantErr(t, h.pipeline(exec("SELECT 1"))[0], "transaction_aborted", "after the transaction ended")
 	h.ok(h.pipeline(exec("ROLLBACK"))[0])
 	h.run("SELECT 1")
@@ -740,5 +742,128 @@ func TestLibSQLCursor(t *testing.T) {
 	}
 	if got := strings.Join(types, ","); got != "step_begin,row,row,step_end,step_error" {
 		t.Fatalf("entries: %s", got)
+	}
+}
+
+// Review fixes: FK-off writes outside a transaction, conditions checked
+// before any step runs, the transaction deadline during a statement, the
+// autocommit state after an abort, and which statements count in stats.
+func TestLibSQLForeignKeysOffNeedsATransaction(t *testing.T) {
+	e := newEnv(t, nil)
+	e.createDB("app")
+	h := e.libsql(e.admin, "app", "main")
+	h.ok(h.pipeline(map[string]any{"type": "sequence", "sql": "CREATE TABLE p(id INTEGER PRIMARY KEY); CREATE TABLE c(id INTEGER PRIMARY KEY, p INTEGER REFERENCES p(id) ON DELETE CASCADE); INSERT INTO p VALUES (1); INSERT INTO c VALUES (1, 1);"})[0])
+
+	rebuild := "CREATE TABLE p2(id INTEGER PRIMARY KEY); INSERT INTO p2 SELECT id FROM p; DROP TABLE p; ALTER TABLE p2 RENAME TO p;"
+	// Without a transaction the writes are refused, before anything runs.
+	wantErr(t, h.pipeline(map[string]any{"type": "sequence", "sql": "PRAGMA foreign_keys=OFF; " + rebuild})[0], "bad_request", "rebuild without BEGIN")
+	h.run("SELECT count(*) FROM c") // reads still work
+	h.run("PRAGMA foreign_keys=ON")
+	if got := restCount(e, "app", "c"); got != "1" {
+		t.Fatalf("children after the refused rebuild: %s", got)
+	}
+	if r := e.do(e.admin, "POST", pQuery, "/v1/databases/app/query", map[string]any{"sql": "SELECT count(*) FROM sqlite_schema WHERE name = 'p2'", "read_only": true}); !strings.Contains(string(r.body), `"value":"0"`) {
+		t.Fatalf("the refused rebuild left p2: %s", r.body)
+	}
+	// The same rebuild inside BEGIN ... COMMIT keeps the children.
+	h.ok(h.pipeline(map[string]any{"type": "sequence", "sql": "PRAGMA foreign_keys=OFF; BEGIN; " + rebuild + " COMMIT; PRAGMA foreign_keys=ON;"})[0])
+	if got := restCount(e, "app", "c"); got != "1" {
+		t.Fatalf("children after the rebuild in a transaction: %s", got)
+	}
+	h.run("DELETE FROM p")
+	if got := restCount(e, "app", "c"); got != "0" {
+		t.Fatalf("foreign keys not back on: %s children", got)
+	}
+}
+
+func TestLibSQLBadConditionRunsNothing(t *testing.T) {
+	e := newEnv(t, nil)
+	e.createDB("app")
+	e.ok(e.sql(e.admin, "app", "CREATE TABLE t(x)"), 200)
+	h := e.libsql(e.admin, "app", "main")
+	steps := []any{
+		map[string]any{"stmt": stmtOf("BEGIN")},
+		map[string]any{"stmt": stmtOf("INSERT INTO t VALUES (1)")},
+		map[string]any{"stmt": stmtOf("SELECT 1"), "condition": map[string]any{"type": "and", "conds": []any{map[string]any{"type": "ok", "step": 9}}}},
+	}
+	res := h.pipeline(map[string]any{"type": "batch", "batch": map[string]any{"steps": steps}}, map[string]any{"type": "get_autocommit"})
+	wantErr(t, res[0], "bad_request", "condition on a later step")
+	if h.ok(res[1])["is_autocommit"] != true || h.baton == nil {
+		t.Fatalf("a refused batch opened a transaction or lost the stream: %v %v", res[1], h.baton)
+	}
+
+	// On the cursor endpoint the error is HTTP-level, so the stream, with
+	// its open transaction, is closed and the writer freed at once.
+	h.ok(h.pipeline(exec("BEGIN"))[0])
+	h.run("INSERT INTO t VALUES (2)")
+	status, _, _ := h.post("/libsql/app/main/v3/cursor", map[string]any{"baton": h.baton, "batch": map[string]any{"steps": steps}})
+	if status != 400 {
+		t.Fatalf("cursor with a bad condition: %d", status)
+	}
+	start := time.Now()
+	e.ok(e.sql(e.admin, "app", "INSERT INTO t VALUES (3)"), 200)
+	if time.Since(start) > 2*time.Second {
+		t.Fatal("the writer stayed held after the cursor error")
+	}
+	if got := restCount(e, "app", "t"); got != "1" {
+		t.Fatalf("rows: %s", got)
+	}
+}
+
+func TestLibSQLDeadlineAndAutocommitState(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) { c.LibSQLTxTimeout = 1500 * time.Millisecond })
+	e.createDB("app")
+	e.ok(e.sql(e.admin, "app", "CREATE TABLE t(x)"), 200)
+	e.ok(e.do(e.admin, "POST", pBranches, "/v1/databases/app/branches", map[string]any{"name": "dev"}), 201)
+	autocommit := func(h *hrana) any {
+		return h.ok(h.pipeline(map[string]any{"type": "get_autocommit"})[0])["is_autocommit"]
+	}
+
+	// The transaction timeout interrupts a statement in flight, well before
+	// the 30 s statement timeout.
+	h := e.libsql(e.admin, "app", "main")
+	h.ok(h.pipeline(exec("BEGIN"))[0])
+	start := time.Now()
+	r := h.pipeline(exec("SELECT count(*) FROM (WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c) SELECT n FROM c)"))[0]
+	if time.Since(start) > 10*time.Second {
+		t.Fatalf("the statement outlived the transaction timeout: %v", time.Since(start))
+	}
+	wantErr(t, r, "transaction_aborted", "statement past the transaction timeout")
+	h.pipeline(closeReq)
+
+	// A transaction SQLite ended: not autocommit until ROLLBACK, matching
+	// what the stream accepts.
+	h = e.libsql(e.admin, "app", "dev")
+	h.ok(h.pipeline(exec("BEGIN"))[0])
+	h.run("INSERT INTO t VALUES (1)")
+	e.ok(e.do(e.admin, "POST", pBranch+"/reset", "/v1/databases/app/branches/dev/reset", nil), 200)
+	if got := autocommit(h); got != false {
+		t.Fatalf("get_autocommit after a reset aborted the transaction: %v", got)
+	}
+	wantErr(t, h.pipeline(exec("SELECT 1"))[0], "transaction_aborted", "statement after the reset")
+	h.ok(h.pipeline(exec("ROLLBACK"))[0])
+	if got := autocommit(h); got != true {
+		t.Fatalf("get_autocommit after ROLLBACK: %v", got)
+	}
+	h.pipeline(closeReq)
+}
+
+func TestLibSQLStatsCountStatementsOnly(t *testing.T) {
+	e := newEnv(t, nil)
+	d := e.createDB("app")
+	branch := d["default_branch_id"].(string)
+	queries := func() int64 {
+		var n int64
+		for _, b := range e.srv.API.Recorder().Pending(branch) {
+			n += b.Queries
+		}
+		return n
+	}
+	before := queries()
+	h := e.libsql(e.admin, "app", "main")
+	h.pipeline(exec("BEGIN"), exec("CREATE TABLE t(x)"), exec("COMMIT"), exec("PRAGMA foreign_keys=ON"),
+		map[string]any{"type": "sequence", "sql": "INSERT INTO t VALUES (1); INSERT INTO t VALUES (2);"}, closeReq)
+	if got := queries() - before; got != 3 {
+		t.Fatalf("counted %d statements, want 3 (CREATE and two INSERTs)", got)
 	}
 }

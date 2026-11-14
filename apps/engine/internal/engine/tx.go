@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlitex"
@@ -43,6 +44,9 @@ type TxOptions struct {
 	// Migration is BatchOptions.Migration for the whole transaction:
 	// foreign keys off, and every foreign key checked once before COMMIT.
 	Migration bool
+	// Deadline, when set, ends the transaction: a statement running then is
+	// interrupted, and the transaction is rolled back and released.
+	Deadline time.Time
 }
 
 // Budget caps what one request may return: rows per statement and bytes
@@ -94,6 +98,9 @@ func (e *Engine) begin(ctx context.Context, t Target, access Access, hooks sessi
 		return nil, mapAcquire(err)
 	}
 	tx.conn = conn
+	// Start each session from a clean last-insert rowid, so nothing left on
+	// the pooled connection by an earlier request shows through.
+	conn.SetLastInsertRowID(0)
 	if access == Write {
 		if tx.grant, err = e.applySizeLimit(conn); err != nil {
 			return nil, err
@@ -200,7 +207,16 @@ func (e *Engine) BeginTx(ctx context.Context, t Target, access Access, opts TxOp
 	}
 	tx.conn.SetInterrupt(context.Background())
 	tx.conn.AllowSavepoints(true)
-	tx.ctx, tx.cancel = context.WithCancel(context.Background())
+	if opts.Deadline.IsZero() {
+		tx.ctx, tx.cancel = context.WithCancel(context.Background())
+	} else {
+		tx.ctx, tx.cancel = context.WithDeadline(context.Background(), opts.Deadline)
+		context.AfterFunc(tx.ctx, func() {
+			if errors.Is(tx.ctx.Err(), context.DeadlineExceeded) {
+				tx.Rollback()
+			}
+		})
+	}
 
 	e.txMu.Lock()
 	if e.txClosed {
@@ -231,21 +247,31 @@ func errTxDone() error {
 	return apierr.New(apierr.TransactionAborted, "the transaction has ended; send ROLLBACK and start again")
 }
 
-// Exec runs one statement in the transaction, within the statement timeout
-// and the budget. If SQLite ends the transaction because of the error (an
-// interrupt, a full branch), or the result is too large, so that part of the
-// statement may have run, the transaction is rolled back and released, and
-// Done reports true.
+func errTxDeadline() error {
+	return apierr.New(apierr.TransactionAborted, "the transaction passed its time limit and was rolled back")
+}
+
+// Exec runs one statement in the transaction, within the statement timeout,
+// the transaction's deadline and the budget. The transaction is rolled back
+// and released, and Done reports true, when SQLite ended it because of the
+// error (an interrupt, a full branch), when the deadline passed, or when a
+// statement that changed rows failed with result_too_large, since part of it
+// ran. A read past the caps fails alone.
 func (tx *Tx) Exec(ctx context.Context, stmt Statement, b *Budget) (*Result, error) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 	if tx.finished {
 		return nil, errTxDone()
 	}
+	if tx.ctx.Err() != nil {
+		tx.finishLocked()
+		return nil, errTxDeadline()
+	}
 	ctx, cancel := context.WithTimeout(ctx, tx.e.cfg.StatementTimeout)
 	defer cancel()
 	stop := context.AfterFunc(tx.ctx, cancel)
 	defer stop()
+	changesBefore := tx.conn.TotalChanges()
 	tx.conn.SetInterrupt(ctx)
 	res, err := runOne(tx.conn, stmt, &b.b)
 	tx.conn.SetInterrupt(context.Background())
@@ -253,8 +279,12 @@ func (tx *Tx) Exec(ctx context.Context, stmt Statement, b *Budget) (*Result, err
 		return res, nil
 	}
 	mapped := tx.e.sqlErr(err, tx.grant.quotaLimited)
-	if apierr.As(mapped).Code == apierr.ResultTooLarge || tx.conn.GetAutocommit() {
+	tooLarge := apierr.As(mapped).Code == apierr.ResultTooLarge && tx.conn.TotalChanges() > changesBefore
+	if tooLarge || tx.conn.GetAutocommit() || tx.ctx.Err() != nil {
 		tx.finishLocked()
+	}
+	if errors.Is(tx.ctx.Err(), context.DeadlineExceeded) {
+		return nil, errTxDeadline()
 	}
 	return nil, mapped
 }
@@ -342,7 +372,10 @@ func (e *Engine) abortTxs(branchID string) {
 // With write access, a statement that only reads runs on a read-only
 // connection, so it doesn't wait for an interactive transaction holding the
 // writer. It sees the same committed data either way.
-func (e *Engine) QueryWith(ctx context.Context, t Target, access Access, stmt Statement, b *Budget) (*Result, error) {
+//
+// A non-nil refuseWrites is returned, without running anything, for a
+// statement that would write.
+func (e *Engine) QueryWith(ctx context.Context, t Target, access Access, stmt Statement, b *Budget, refuseWrites error) (*Result, error) {
 	var res *Result
 	run := func(conn *sqlitex.Conn, _ target) error {
 		var err error
@@ -364,6 +397,9 @@ func (e *Engine) QueryWith(ctx context.Context, t Target, access Access, stmt St
 		})
 		if !needsWriter {
 			return res, err
+		}
+		if refuseWrites != nil {
+			return nil, refuseWrites
 		}
 	}
 	err := e.session(ctx, t, access, e.cfg.StatementTimeout, run)
@@ -428,10 +464,6 @@ func describe(conn *sqlitex.Conn, sql string) (*Description, error) {
 		d.Columns = append(d.Columns, Column{Name: stmt.ColumnName(i), DeclType: stmt.ColumnDeclType(i)})
 	}
 	start := strings.ToUpper(sqlsplit.StripComments(sql))
-	d.Explain = strings.HasPrefix(start, "EXPLAIN") && (len(start) == 7 || !isWordChar(start[7]))
+	d.Explain = strings.HasPrefix(start, "EXPLAIN") && (len(start) == 7 || !sqlsplit.IsWordByte(start[7]))
 	return d, nil
-}
-
-func isWordChar(c byte) bool {
-	return c == '_' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9'
 }

@@ -48,7 +48,10 @@ func (s *Server) mountLibSQL() {
 // Close closes every libSQL stream, rolling back open transactions. Call it
 // before closing the engine.
 func (s *Server) Close() {
-	s.libsql.closeAll()
+	s.closeOnce.Do(func() {
+		s.libsql.closeAll()
+		close(s.stop)
+	})
 }
 
 // libsqlVersion answers the protocol's version check. It needs no token and
@@ -78,9 +81,7 @@ func writeHranaHTTP(w http.ResponseWriter, e *apierr.Error) {
 type hranaCall struct {
 	ctx       context.Context
 	p         auth.Principal
-	target    engine.Target
-	dbID      string
-	branchID  string
+	target    engine.Target // database and branch ids
 	budget    *engine.Budget
 	requestID string
 }
@@ -144,15 +145,20 @@ func (s *Server) libsqlHandler(cursor bool) http.Handler {
 		}
 		c := &hranaCall{
 			ctx: ctx, p: p, target: engine.Target{Database: d.ID, Branch: b.ID},
-			dbID: d.ID, branchID: b.ID, budget: s.eng.NewBudget(), requestID: id,
+			budget: s.eng.NewBudget(), requestID: id,
 		}
 		if cursor {
 			res, berr := s.hranaBatch(c, st, cur.Batch)
-			next := s.libsql.finish(st, s.eng.Config())
 			if berr != nil {
+				// An HTTP error carries no baton, so the client loses the
+				// stream: close it now rather than leave a transaction
+				// holding the writer until the idle timeout.
+				s.libsql.closeStream(st)
+				st.mu.Unlock()
 				writeHranaHTTP(w, s.publicErr(berr, id))
 				return
 			}
+			next := s.libsql.finish(st, s.eng.Config())
 			writeCursor(w, next, cur.Batch, res)
 			return
 		}
@@ -290,7 +296,7 @@ func (s *Server) hranaRequest(c *hranaCall, st *libsqlStream, req *hStreamReq) (
 		}
 		return &hStreamResponse{Type: "close_sql"}, nil
 	case "get_autocommit":
-		auto := st.tx == nil
+		auto := st.autocommit()
 		return &hStreamResponse{Type: "get_autocommit", IsAutocommit: &auto}, nil
 	case "close":
 		s.libsql.closeStream(st)
@@ -315,11 +321,6 @@ func (s *Server) hranaStmt(c *hranaCall, st *libsqlStream, hs *hStmt) (*hStmtRes
 	}
 	start := time.Now()
 	r, err := s.hranaRun(c, st, es)
-	var results []*engine.Result
-	if r != nil {
-		results = []*engine.Result{r}
-	}
-	s.record(c.branchID, []StatementIn{{SQL: sql}}, start, results, err)
 	if err != nil {
 		return nil, err
 	}
@@ -349,18 +350,20 @@ func (s *Server) hranaRun(c *hranaCall, st *libsqlStream, es engine.Statement) (
 	if ctl.kind != ctlNone && (len(es.Args) > 0 || len(es.Named) > 0) {
 		return nil, apierr.New(apierr.InvalidParams, "the statement has 0 parameters")
 	}
+	st.syncTx()
 	switch ctl.kind {
 	case ctlBegin:
 		if st.tx != nil || st.aborted {
 			return nil, apierr.New(apierr.SQLError, "SQL error").WithDetail("cannot start a transaction within a transaction")
 		}
-		acc := access(c.p, c.dbID, c.branchID, ctl.readOnly)
-		tx, err := s.eng.BeginTx(c.ctx, c.target, acc, engine.TxOptions{Migration: st.fkOff && acc == engine.Write})
+		acc := access(c.p, c.target.Database, c.target.Branch, ctl.readOnly)
+		deadline := time.Now().Add(s.eng.Config().LibSQLTxTimeout)
+		tx, err := s.eng.BeginTx(c.ctx, c.target, acc, engine.TxOptions{Migration: st.fkOff && acc == engine.Write, Deadline: deadline})
 		if err != nil {
 			return nil, err
 		}
 		st.tx = tx
-		st.txDeadline = time.Now().Add(s.eng.Config().LibSQLTxTimeout)
+		st.txDeadline = deadline
 		return emptyResult, nil
 	case ctlCommit:
 		if st.aborted {
@@ -398,18 +401,34 @@ func (s *Server) hranaRun(c *hranaCall, st *libsqlStream, es engine.Statement) (
 	if st.aborted {
 		return nil, apierr.New(apierr.TransactionAborted, "the transaction was rolled back after an error; send ROLLBACK")
 	}
+	// Only statements that reach the engine count in the branch's stats.
+	// The slow-query log is written off the request path, since an open
+	// transaction may be holding the branch's writer meanwhile.
+	start := time.Now()
+	var r *engine.Result
+	var err error
 	if st.tx != nil {
-		r, err := st.tx.Exec(c.ctx, es, c.budget)
-		if err != nil && st.tx.Done() {
-			// SQLite, a limit or maintenance on the branch ended it. Later
-			// statements must not run outside the transaction the client
-			// thinks it has.
-			st.tx = nil
-			st.aborted = true
+		r, err = st.tx.Exec(c.ctx, es, c.budget)
+		// SQLite, a limit, the deadline or maintenance on the branch may
+		// have ended it. Later statements must not run outside the
+		// transaction the client thinks it has.
+		st.syncTx()
+	} else {
+		// After PRAGMA foreign_keys = OFF, a write outside a transaction
+		// would either cascade or, with the check before each commit, fail
+		// halfway through a table rebuild. So writes need a transaction.
+		var refuse error
+		if st.fkOff {
+			refuse = apierr.New(apierr.BadRequest, "PRAGMA foreign_keys = OFF on this stream applies to the next transaction only: send BEGIN before the writes, or PRAGMA foreign_keys = ON")
 		}
-		return r, err
+		r, err = s.eng.QueryWith(c.ctx, c.target, access(c.p, c.target.Database, c.target.Branch, false), es, c.budget, refuse)
 	}
-	return s.eng.QueryWith(c.ctx, c.target, access(c.p, c.dbID, c.branchID, false), es, c.budget)
+	var results []*engine.Result
+	if r != nil {
+		results = []*engine.Result{r}
+	}
+	s.recordQueued(c.target.Branch, []StatementIn{{SQL: es.SQL}}, start, results, err)
+	return r, err
 }
 
 func (s *Server) hranaDescribe(c *hranaCall, st *libsqlStream, sql string) (*hDescribeResult, error) {
@@ -422,6 +441,7 @@ func (s *Server) hranaDescribe(c *hranaCall, st *libsqlStream, sql string) (*hDe
 	}
 	var d *engine.Description
 	var err error
+	st.syncTx()
 	if st.tx != nil {
 		d, err = st.tx.Describe(sql)
 	} else {
@@ -447,18 +467,21 @@ func (s *Server) hranaBatch(c *hranaCall, st *libsqlStream, b *hBatch) (*hBatchR
 	if len(b.Steps) > hranaMaxSteps {
 		return nil, apierr.Newf(apierr.BadRequest, "a batch holds at most %d steps", hranaMaxSteps)
 	}
+	// Check every condition before running any step, so a bad one can't
+	// fail the batch after earlier steps ran.
+	for i := range b.Steps {
+		if c := b.Steps[i].Condition; c != nil {
+			if err := checkCond(c, i, 0); err != nil {
+				return nil, apierr.Newf(apierr.BadRequest, "step %d: %s", i, apierr.As(err).Message)
+			}
+		}
+	}
 	n := len(b.Steps)
 	res := &hBatchResult{StepResults: make([]*hStmtResult, n), StepErrors: make([]*hError, n)}
 	for i := range b.Steps {
 		step := &b.Steps[i]
-		if step.Condition != nil {
-			ok, err := evalCond(step.Condition, i, res, st, 0)
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				continue
-			}
+		if step.Condition != nil && !evalCond(step.Condition, res, st) {
+			continue
 		}
 		r, err := s.hranaStmt(c, st, &step.Stmt)
 		if err != nil {
@@ -470,45 +493,56 @@ func (s *Server) hranaBatch(c *hranaCall, st *libsqlStream, b *hBatch) (*hBatchR
 	return res, nil
 }
 
-func evalCond(cond *hCond, current int, res *hBatchResult, st *libsqlStream, depth int) (bool, error) {
+// checkCond validates a condition for the step at index current: known
+// types, their fields, step references to earlier steps, and the nesting.
+func checkCond(cond *hCond, current, depth int) error {
 	if depth > hranaMaxCondDepth {
-		return false, apierr.Newf(apierr.BadRequest, "batch conditions nest at most %d deep", hranaMaxCondDepth)
-	}
-	step := func() (int, error) {
-		if cond.Step == nil || int64(*cond.Step) >= int64(current) {
-			return 0, apierr.New(apierr.BadRequest, "a condition must name an earlier step")
-		}
-		return int(*cond.Step), nil
+		return apierr.Newf(apierr.BadRequest, "conditions nest at most %d deep", hranaMaxCondDepth)
 	}
 	switch cond.Type {
-	case "ok":
-		i, err := step()
-		return err == nil && res.StepResults[i] != nil, err
-	case "error":
-		i, err := step()
-		return err == nil && res.StepErrors[i] != nil, err
+	case "ok", "error":
+		if cond.Step == nil || int64(*cond.Step) >= int64(current) {
+			return apierr.New(apierr.BadRequest, "a condition must name an earlier step")
+		}
 	case "not":
 		if cond.Cond == nil {
-			return false, apierr.New(apierr.BadRequest, "a not condition needs cond")
+			return apierr.New(apierr.BadRequest, "a not condition needs cond")
 		}
-		v, err := evalCond(cond.Cond, current, res, st, depth+1)
-		return !v, err
+		return checkCond(cond.Cond, current, depth+1)
+	case "and", "or":
+		for i := range cond.Conds {
+			if err := checkCond(&cond.Conds[i], current, depth+1); err != nil {
+				return err
+			}
+		}
+	case "is_autocommit":
+	default:
+		return apierr.Newf(apierr.BadRequest, "unknown condition type %q", cond.Type)
+	}
+	return nil
+}
+
+// evalCond evaluates a condition checkCond accepted.
+func evalCond(cond *hCond, res *hBatchResult, st *libsqlStream) bool {
+	switch cond.Type {
+	case "ok":
+		return res.StepResults[*cond.Step] != nil
+	case "error":
+		return res.StepErrors[*cond.Step] != nil
+	case "not":
+		return !evalCond(cond.Cond, res, st)
 	case "and", "or":
 		all := cond.Type == "and"
 		for i := range cond.Conds {
-			v, err := evalCond(&cond.Conds[i], current, res, st, depth+1)
-			if err != nil {
-				return false, err
-			}
-			if v != all {
-				return v, nil
+			if evalCond(&cond.Conds[i], res, st) != all {
+				return !all
 			}
 		}
-		return all, nil
+		return all
 	case "is_autocommit":
-		return st.tx == nil, nil
+		return st.autocommit()
 	}
-	return false, apierr.Newf(apierr.BadRequest, "unknown condition type %q", cond.Type)
+	return false
 }
 
 // ---- transaction control
@@ -594,42 +628,27 @@ func classify(sql string) control {
 // classify recognizes contains.
 func controlWords(sql string) ([]string, bool) {
 	var out []string
-	end := false
-	for i := 0; i < len(sql); {
-		c := sql[i]
+	rest := sqlsplit.StripComments(sql)
+	for rest != "" {
+		c := rest[0]
 		switch {
-		case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f':
-			i++
-		case strings.HasPrefix(sql[i:], "--"):
-			j := strings.IndexByte(sql[i:], '\n')
-			if j < 0 {
-				return out, true
-			}
-			i += j + 1
-		case strings.HasPrefix(sql[i:], "/*"):
-			j := strings.Index(sql[i+2:], "*/")
-			if j < 0 {
-				return out, true
-			}
-			i += j + 4
-		case end:
-			return nil, false
 		case c == ';':
-			end = true
-			i++
+			// Only comments and whitespace may follow.
+			return out, sqlsplit.StripComments(rest[1:]) == ""
 		case c == '=':
 			out = append(out, "=")
-			i++
-		case c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9':
-			j := i
-			for j < len(sql) && (sql[j] == '_' || sql[j] >= 'a' && sql[j] <= 'z' || sql[j] >= 'A' && sql[j] <= 'Z' || sql[j] >= '0' && sql[j] <= '9') {
+			rest = rest[1:]
+		case sqlsplit.IsWordByte(c):
+			j := 1
+			for j < len(rest) && sqlsplit.IsWordByte(rest[j]) {
 				j++
 			}
-			out = append(out, strings.ToUpper(sql[i:j]))
-			i = j
+			out = append(out, strings.ToUpper(rest[:j]))
+			rest = rest[j:]
 		default:
 			return nil, false
 		}
+		rest = sqlsplit.StripComments(rest)
 	}
 	return out, true
 }
@@ -791,6 +810,24 @@ func (r *libsqlStreams) closeAll() {
 		r.closeStream(st)
 		st.mu.Unlock()
 	}
+}
+
+// syncTx notices a transaction the engine ended on its own (its deadline,
+// maintenance on the branch, SQLite after an error): the stream then refuses
+// statements until ROLLBACK, as if inside a failed transaction. Call with mu.
+func (st *libsqlStream) syncTx() {
+	if st.tx != nil && st.tx.Done() {
+		st.tx = nil
+		st.aborted = true
+	}
+}
+
+// autocommit is what get_autocommit and is_autocommit report: false while a
+// transaction is open or a failed one waits for ROLLBACK, matching what the
+// stream accepts. Call with mu.
+func (st *libsqlStream) autocommit() bool {
+	st.syncTx()
+	return st.tx == nil && !st.aborted
 }
 
 // text resolves a statement's SQL: exactly one of the text and a stored id.

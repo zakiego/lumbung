@@ -273,10 +273,10 @@ func (e *Engine) withExclusive(ctx context.Context, tg target, recheck func(targ
 	ctx, cancel := context.WithTimeout(ctx, maintenanceTimeout)
 	defer cancel()
 	// The file is about to be replaced or removed, so an interactive
-	// transaction left open on it would only hold the gate up.
-	e.abortTxs(tg.branch.ID)
+	// transaction left open on it would only hold the gate up. Roll them back
+	// before every attempt, since one can begin during a priority break.
 	g := e.gates.get(tg.branch.ID)
-	if err := g.exclusive(ctx); err != nil {
+	if err := g.exclusiveWith(ctx, func() { e.abortTxs(tg.branch.ID) }); err != nil {
 		return apierr.New(apierr.Busy, "timed out waiting for requests on the branch to finish")
 	}
 	defer g.release()

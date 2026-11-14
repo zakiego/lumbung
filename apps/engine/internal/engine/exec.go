@@ -12,6 +12,7 @@ import (
 
 	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlitex"
+	"github.com/zakiego/lumbung/apps/engine/internal/sqlsplit"
 	"github.com/zakiego/lumbung/apps/engine/internal/value"
 )
 
@@ -306,10 +307,13 @@ func runOne(conn *sqlitex.Conn, st Statement, budget *resultBudget) (*Result, er
 		return nil, err
 	}
 
-	// Start from a clean last-insert rowid so a statement never reports one
-	// left on the pooled connection by an earlier request.
-	conn.SetLastInsertRowID(0)
+	// The session reset the last-insert rowid when it began, so a statement
+	// never reports one left on the pooled connection by an earlier request.
+	// It isn't reset between statements: last_insert_rowid() in SQL sees the
+	// session's last insert, as in SQLite. The result reports a rowid only
+	// when this statement set one.
 	before := conn.TotalChanges()
+	rowidBefore := conn.LastInsertRowID()
 
 	n := stmt.ColumnCount()
 	res := &Result{Columns: make([]Column, n), Rows: [][]value.Value{}}
@@ -347,11 +351,22 @@ func runOne(conn *sqlitex.Conn, st Statement, budget *resultBudget) (*Result, er
 	// changes() keeps the count of the last INSERT, UPDATE or DELETE, so
 	// only read it when this statement changed rows (total_changes moved).
 	// It excludes rows changed by triggers, which is the documented meaning.
-	if conn.TotalChanges() > before {
+	changed := conn.TotalChanges() > before
+	if changed {
 		res.RowsAffected = conn.Changes()
 	}
-	res.LastInsertRowID = conn.LastInsertRowID()
+	if rowid := conn.LastInsertRowID(); rowid != rowidBefore || changed && rowid != 0 && insertsRows(st.SQL) {
+		res.LastInsertRowID = rowid
+	}
 	return res, nil
+}
+
+// insertsRows reports whether a statement starts with INSERT or REPLACE. It
+// settles the one case the rowid comparison can't: an insert that reuses the
+// rowid the session's previous insert got (after deleting that row).
+func insertsRows(sql string) bool {
+	start := strings.ToUpper(sqlsplit.StripComments(sql))
+	return strings.HasPrefix(start, "INSERT") || strings.HasPrefix(start, "REPLACE")
 }
 
 // checkTail refuses SQL text with a second statement after the first.
