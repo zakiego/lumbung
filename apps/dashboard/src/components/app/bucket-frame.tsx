@@ -83,7 +83,9 @@ export function BucketFrame({
       <Tabs value={section}>
         <div className="shadow-[inset_0_-1px_0_var(--border)]">
           <div className={CONTAINER}>
-            <ScrollArea axis="x" fade>
+            {/* No drawn scrollbar: on touch it stays up after a tap and reads
+                as a second tab indicator on the hairline. */}
+            <ScrollArea axis="x" fade bare>
               <TabsList aria-label="Bucket pages" className="w-full min-w-max shadow-none">
                 {sections.map((s) => (
                   <TabsTab key={s.value} value={s.value} icon={<s.icon />} render={<Link to={s.to} params={{ bucket }} />}>

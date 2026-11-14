@@ -91,7 +91,7 @@ export function ConnectDetails({ rows }: { rows: DetailRow[] }) {
 export function SnippetTabs({ snippets, label }: { snippets: Snippet[]; label: string }) {
   return (
     <Tabs defaultValue={snippets[0]?.value} className="flex min-w-0 flex-col gap-3">
-      <ScrollArea axis="x" fade>
+      <ScrollArea axis="x" fade bare>
         <TabsList aria-label={label} className="w-full min-w-max gap-4">
           {snippets.map((t) => (
             <TabsTab key={t.value} value={t.value} className="h-9">

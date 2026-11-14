@@ -53,7 +53,7 @@ function ConnectPage() {
               Create token
             </Link>
           ) : (
-            <p className="text-[13px] text-muted-foreground">Ask an admin for a token.</p>
+            <p className="text-[13px] text-muted-foreground">Ask an owner for a token.</p>
           )}
         </SettingsSection>
         <SettingsSection title="Code">

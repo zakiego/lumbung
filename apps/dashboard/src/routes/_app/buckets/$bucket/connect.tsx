@@ -68,14 +68,14 @@ function ConnectPage() {
         <SettingsSection title="Details">
           <ConnectDetails rows={rows} />
         </SettingsSection>
-        <SettingsSection title="Access key" description="Snippets read it from LUMBUNG_TOKEN and LUMBUNG_ACCESS_KEY_*.">
+        <SettingsSection title="Access key">
           {can(viewer.role, "admin") ? (
             <Link to="/tokens" className={buttonVariants({ variant: "secondary", className: "self-start" })}>
               <KeyRoundIcon aria-hidden="true" />
               Create access key
             </Link>
           ) : (
-            <p className="text-[13px] text-muted-foreground">Ask an admin for an access key.</p>
+            <p className="text-[13px] text-muted-foreground">Ask an owner for an access key.</p>
           )}
         </SettingsSection>
         <SettingsSection title="Code">
