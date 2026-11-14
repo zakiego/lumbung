@@ -73,6 +73,9 @@ var fuzzSeeds = []string{
 	"ATTACH '{VICTIM}' AS v",
 	"ATTACH 'file:{VICTIM}?vfs=os' AS v",
 	"ATTACH '{META}' AS m",
+	"ATTACH '{OTHER}' AS o",
+	"ATTACH 'file:{OTHER}?mode=ro' AS o",
+	"VACUUM INTO '{OTHER}'",
 	"ATTACH '{ROOT}/x.db' AS x",
 	"VACUUM INTO '{ROOT}/copy.db'",
 	"VACUUM INTO 'relative.db'",
@@ -110,10 +113,27 @@ func FuzzQueryPath(f *testing.F) {
 	victim := mustCreate(f, e, "victim")
 	mustQuery(f, e, "victim", Write, "CREATE TABLE secret(x)")
 	mustQuery(f, e, "victim", Write, "INSERT INTO secret VALUES ('do not touch')")
+	// A second victim, in another workspace and under the same name (PLAN
+	// 17.9). A statement reaches a workspace no more than it reaches a file:
+	// its file must stay as it is too.
+	otherWS, err := e.CreateWorkspace(context.Background(), "other", NewWorkspaceLimits{})
+	if err != nil {
+		f.Fatal(err)
+	}
+	otherVictim, err := e.CreateDatabase(context.Background(), otherWS.ID, "victim")
+	if err != nil {
+		f.Fatal(err)
+	}
+	for _, sql := range []string{"CREATE TABLE secret(x)", "INSERT INTO secret VALUES ('do not touch either')"} {
+		if _, err := e.Query(context.Background(), Target{Workspace: otherWS.ID, Database: "victim"}, Write, stmt(sql)); err != nil {
+			f.Fatal(err)
+		}
+	}
 	attacker := mustCreate(f, e, "attacker")
-	// Close the victim's connections so its files only change if an attack
-	// reaches them.
+	// Close the victims' connections so their files only change if an
+	// attack reaches them.
 	e.dropPool(victim.DefaultBranchID)
+	e.dropPool(otherVictim.DefaultBranchID)
 
 	victimFile := e.Layout().BranchFile(victim.ID, victim.DefaultBranchID)
 	own := map[string]bool{}
@@ -128,7 +148,8 @@ func FuzzQueryPath(f *testing.F) {
 	cwdBefore := snapshotTree(f, cwd)
 
 	expand := func(sql string) string {
-		r := strings.NewReplacer("{VICTIM}", victimFile, "{META}", e.Layout().Meta(), "{ROOT}", root)
+		r := strings.NewReplacer("{VICTIM}", victimFile, "{OTHER}", e.Layout().BranchFile(otherVictim.ID, otherVictim.DefaultBranchID),
+			"{META}", e.Layout().Meta(), "{ROOT}", root)
 		return r.Replace(sql)
 	}
 

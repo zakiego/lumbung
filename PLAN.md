@@ -485,7 +485,8 @@ GET                  /v1/instance/audit                     (every workspace and
 - A qualified URL never redirects to a short one: a path with empty, `.` or `..` segments is not found.
 - Database, bucket and token bodies gain `workspace_id`. A token's `scope` may be `workspace`.
 - The database list gives a token limited to some branches a limited view: counts, size, default branch and last activity cover only the branches it reaches. `GET /v1/databases/{db}` still refuses such a token, as before. MCP `list_databases` follows the same rule.
-- Moving revokes every token that reached the moved database or bucket.
+- Moving revokes every token that reached the moved database or bucket, and is refused when the name is taken in the target or one of the target's limits would be passed. `{db}` and `{bucket}` resolve in the request's workspace, like everywhere else.
+- `GET /v1/workspaces?trashed=true` lists the trash, for an instance admin.
 
 ### 17.5 Limits and quotas
 
@@ -535,7 +536,7 @@ Each row is a named test through the real handlers, for every door it applies to
 | Anonymous read of a public bucket of B through a short URL; of a private or missing bucket through a qualified URL | denied, private, missing and other-workspace look the same |
 | `X-Lumbung-Actor-Access` sent with a token that isn't the service token, or asking for more than the token has | ignored; never more than the token's own level |
 
-The two fuzz tests gain a second workspace and fail if a request with one workspace's token reads or changes anything of the other.
+`FuzzQueryPath` gains a victim database in a second workspace. A third fuzz test, `FuzzWorkspaceRequests`, sends random methods, paths, bodies and headers with one workspace's tokens through every door and fails if a response holds another workspace's data or anything in another workspace changes. CI runs it for a bounded time.
 
 ### 17.10 Upgrade
 

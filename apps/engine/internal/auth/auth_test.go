@@ -415,3 +415,61 @@ func TestAccessKeyIDs(t *testing.T) {
 		t.Fatalf("secret %q", s)
 	}
 }
+
+// Narrow lowers the service principal to a workspace principal, and never
+// does anything else (PLAN 17.8).
+func TestNarrow(t *testing.T) {
+	dbA, dbB := meta.Database{ID: "db_a", WorkspaceID: wsA}, meta.Database{ID: "db_b", WorkspaceID: wsB}
+	service := in(Principal{TokenID: "tok_s", Scope: ScopeInstance, Access: AccessAdmin, Service: true, Actor: "dashboard:a@b.c"})
+	for _, level := range []string{AccessRead, AccessWrite, AccessAdmin} {
+		p, ok := service.Narrow(level)
+		if !ok || p.Scope != ScopeWorkspace || p.WorkspaceID != wsA || p.Access != level || !p.Bound() || p.TokenID != "tok_s" || p.Actor != service.Actor {
+			t.Fatalf("narrowed to %s: %+v %v", level, p, ok)
+		}
+		if p.InstanceAdmin() || p.SeesWorkspace(wsB) || p.SeesDatabase(dbB) || p.AtLeast(AccessRead, dbB, "") {
+			t.Fatalf("narrowed to %s still reaches the instance or workspace B", level)
+		}
+		if p.CoversToken(meta.Token{Scope: ScopeInstance, Access: AccessRead}) || p.CoversToken(meta.Token{Scope: ScopeWorkspace, WorkspaceID: wsB, Access: AccessRead}) {
+			t.Fatalf("narrowed to %s covers a token outside workspace A", level)
+		}
+		if got := p.AtLeast(AccessWrite, dbA, ""); got != (level != AccessRead) {
+			t.Fatalf("narrowed to %s: write on its own workspace = %v", level, got)
+		}
+		if got := p.WorkspaceAtLeast(AccessAdmin); got != (level == AccessAdmin) {
+			t.Fatalf("narrowed to %s: workspace admin = %v", level, got)
+		}
+		// It can't act in another workspace afterwards.
+		if _, ok := p.In(wsB); ok {
+			t.Fatalf("narrowed to %s acts in workspace B", level)
+		}
+	}
+	// It only lowers, only for the service token, and only once a workspace
+	// is chosen.
+	for name, p := range map[string]Principal{
+		"an unknown level":          service,
+		"an instance token":         in(Principal{Scope: ScopeInstance, Access: AccessAdmin}),
+		"a workspace token":         in(Principal{Scope: ScopeWorkspace, Access: AccessAdmin}),
+		"a workspace service token": in(Principal{Scope: ScopeWorkspace, Access: AccessRead, Service: true}),
+		"no workspace chosen":       {Scope: ScopeInstance, Access: AccessAdmin, Service: true},
+	} {
+		level := AccessRead
+		if name == "an unknown level" {
+			level = "owner"
+		}
+		if q, ok := p.Narrow(level); ok || q.Scope != "" || q.WorkspaceID != "" {
+			t.Errorf("%s was narrowed: %+v", name, q)
+		}
+	}
+	for _, level := range []string{"", "ADMIN", "instance", "*"} {
+		if _, ok := service.Narrow(level); ok {
+			t.Errorf("narrowed to %q", level)
+		}
+	}
+	readService := in(Principal{Scope: ScopeInstance, Access: AccessRead, Service: true})
+	if _, ok := readService.Narrow(AccessWrite); ok {
+		t.Fatal("narrowing raised a level")
+	}
+	if p, ok := readService.Narrow(AccessRead); !ok || p.Access != AccessRead {
+		t.Fatal("narrowing to its own level failed")
+	}
+}

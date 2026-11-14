@@ -440,6 +440,26 @@ func (s *Server) act(ctx context.Context, p auth.Principal, sel string) (auth.Pr
 	return acting, nil
 }
 
+// actorAccessHeader carries the level of the dashboard user the service
+// token acts for (PLAN 17.8).
+const actorAccessHeader = "X-Lumbung-Actor-Access"
+
+// narrowed lowers the service token's principal to the level its
+// X-Lumbung-Actor-Access header names, in the workspace the request acts
+// in, so the engine enforces a dashboard user's role and not only the
+// dashboard. The header is ignored on every other token: it can only take
+// reach away, and only the service token is trusted to say who it acts for.
+func narrowed(p auth.Principal, level string) (auth.Principal, error) {
+	if level == "" || !p.Service {
+		return p, nil
+	}
+	q, ok := p.Narrow(level)
+	if !ok {
+		return auth.Principal{}, apierr.New(apierr.BadRequest, actorAccessHeader+" must be read, write or admin")
+	}
+	return q, nil
+}
+
 // requestWorkspace finds the workspace a request names or implies.
 func (s *Server) requestWorkspace(ctx context.Context, bound bool, own, sel string) (meta.Workspace, error) {
 	switch {
@@ -517,6 +537,9 @@ func (s *Server) middleware(ctx huma.Context, next func(huma.Context)) {
 	}
 	// Every operation runs as a principal acting in exactly one workspace.
 	p, err = s.act(ctx.Context(), p, selFrom(ctx.Context()))
+	if err == nil {
+		p, err = narrowed(p, ctx.Header(actorAccessHeader))
+	}
 	if err != nil {
 		ae := apierr.As(err)
 		if ae.Code == apierr.Internal {

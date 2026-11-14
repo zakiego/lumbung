@@ -85,6 +85,9 @@ jobs:
       # PLAN 16.5: requests through the S3 handler must never create or
       # change a file outside object storage.
       - run: go test -run '^$' -fuzz '^FuzzS3Path$' -fuzztime 60s ./internal/api
+      # PLAN 17.9: requests with one workspace's token must never read or
+      # change anything of another workspace.
+      - run: go test -run '^$' -fuzz '^FuzzWorkspaceRequests$' -fuzztime 60s ./internal/api
 
   web:
     runs-on: ubuntu-latest

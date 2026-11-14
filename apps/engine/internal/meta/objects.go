@@ -159,7 +159,8 @@ func (s *Store) GetBucket(ctx context.Context, wsID, ref string) (Bucket, error)
 	} else if !ids.ValidBucketName(ref) {
 		return Bucket{}, apierr.Newf(apierr.BucketNotFound, "no bucket %q", ref)
 	}
-	b, err := scanBucket(s.db.QueryRowContext(ctx, `SELECT `+bucketCols+` FROM buckets WHERE workspace_id = ? AND `+col+` = ?`, wsID, ref))
+	b, err := scanBucket(s.db.QueryRowContext(ctx, `SELECT `+bucketCols+` FROM buckets WHERE workspace_id = ? AND `+col+` = ?
+		AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id = buckets.workspace_id AND w.deleted_at IS NULL)`, wsID, ref))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Bucket{}, apierr.Newf(apierr.BucketNotFound, "no bucket %q", ref)
 	}

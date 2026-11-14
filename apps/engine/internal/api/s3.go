@@ -146,6 +146,13 @@ func (s *Server) s3Workspace(req *s3Req) *s3proto.Error {
 	if err != nil {
 		return fail(err)
 	}
+	if req.bearer {
+		// The dashboard reaches this API with the service token as a bearer
+		// token, for a user whose level it names.
+		if p, err = narrowed(p, req.r.Header.Get(actorAccessHeader)); err != nil {
+			return s3proto.Errf("InvalidRequest", http.StatusBadRequest, "%s", apierr.As(err).Message)
+		}
+	}
 	req.p, req.ws = p, p.WorkspaceID
 	return nil
 }

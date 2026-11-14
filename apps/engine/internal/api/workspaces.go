@@ -93,6 +93,32 @@ type createWorkspaceIn struct {
 	}
 }
 
+type listWorkspacesIn struct {
+	PageIn
+	Trashed bool `query:"trashed" doc:"List the workspaces in the trash instead. Needs an instance admin."`
+}
+
+type restoreWorkspaceIn struct {
+	WorkspacePath
+	Body *struct {
+		Name string `json:"name,omitempty" pattern:"^[a-z0-9][a-z0-9-]{0,62}$" doc:"Restore under this name instead of the old one."`
+	}
+}
+
+type moveIn struct {
+	Workspace string `json:"workspace" minLength:"1" doc:"The workspace to move it to, by name or id."`
+}
+
+type moveDatabaseIn struct {
+	DBPath
+	Body moveIn
+}
+
+type moveBucketIn struct {
+	BucketPath
+	Body moveIn
+}
+
 type updateWorkspaceIn struct {
 	WorkspacePath
 	Body struct {
@@ -134,9 +160,20 @@ func (s *Server) registerWorkspaces(api huma.API) {
 		})
 
 	huma.Register(api, op("list-workspaces", http.MethodGet, "/v1/workspaces", "List workspaces", "Workspaces", ""),
-		func(ctx context.Context, in *PageIn) (*workspaceList, error) {
+		func(ctx context.Context, in *listWorkspacesIn) (*workspaceList, error) {
 			p := principalFrom(ctx)
-			all, err := s.eng.ListWorkspaces(ctx)
+			var all []meta.Workspace
+			var err error
+			if in.Trashed {
+				// The check comes first, so a workspace token learns nothing
+				// about what was deleted.
+				if err := requireInstanceAdmin(p); err != nil {
+					return nil, toProblem(ctx, err)
+				}
+				all, err = s.eng.ListDeletedWorkspaces(ctx)
+			} else {
+				all, err = s.eng.ListWorkspaces(ctx)
+			}
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -147,7 +184,7 @@ func (s *Server) registerWorkspaces(api huma.API) {
 					visible = append(visible, w)
 				}
 			}
-			items, next, err := page(visible, func(w meta.Workspace) string { return w.Name }, *in)
+			items, next, err := page(visible, func(w meta.Workspace) string { return w.Name + "\x00" + w.ID }, in.PageIn)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -224,5 +261,85 @@ func (s *Server) registerWorkspaces(api huma.API) {
 				return nil, toProblem(ctx, err)
 			}
 			return &workspaceBody{Body: o}, nil
+		})
+
+	huma.Register(api, instanceOp(op("delete-workspace", http.MethodDelete, "/v1/workspaces/{ws}", "Move a workspace to the trash", "Workspaces", "workspace.delete")),
+		func(ctx context.Context, in *WorkspacePath) (*workspaceBody, error) {
+			p := principalFrom(ctx)
+			if err := requireInstanceAdmin(p); err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			w, err := s.workspace(ctx, in.Workspace)
+			if err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			setTarget(ctx, w.ID)
+			if w, err = s.eng.DeleteWorkspace(ctx, w.ID); err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			o, err := s.workspaceOut(ctx, p, w)
+			if err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			return &workspaceBody{Body: o}, nil
+		})
+
+	huma.Register(api, instanceOp(op("restore-workspace", http.MethodPost, "/v1/workspaces/{ws}/restore", "Restore a workspace from the trash", "Workspaces", "workspace.restore")),
+		func(ctx context.Context, in *restoreWorkspaceIn) (*workspaceBody, error) {
+			p := principalFrom(ctx)
+			if err := requireInstanceAdmin(p); err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			name := ""
+			if in.Body != nil {
+				name = in.Body.Name
+			}
+			w, err := s.eng.RestoreWorkspace(ctx, in.Workspace, name)
+			if err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			setTarget(ctx, w.ID)
+			o, err := s.workspaceOut(ctx, p, w)
+			if err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			return &workspaceBody{Body: o}, nil
+		})
+
+	// Moves take an instance admin: they cross the boundary a workspace
+	// token can't see past. The database or bucket is resolved in the
+	// workspace the request acts in, like any other.
+	huma.Register(api, instanceOp(op("move-database", http.MethodPost, "/v1/databases/{db}/move", "Move a database to another workspace", "Databases", "database.move")),
+		func(ctx context.Context, in *moveDatabaseIn) (*databaseBody, error) {
+			p := principalFrom(ctx)
+			if err := requireInstanceAdmin(p); err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			d, err := s.eng.MoveDatabase(ctx, p.WorkspaceID, in.DB, in.Body.Workspace)
+			if err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			setTarget(ctx, d.ID+"/"+p.WorkspaceID+"/"+d.WorkspaceID)
+			// Describe it as the instance admin sees it where it now lives.
+			there, _ := p.In(d.WorkspaceID)
+			o, err := s.databaseOut(ctx, there, d)
+			if err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			return &databaseBody{Body: o}, nil
+		})
+
+	huma.Register(api, instanceOp(op("move-bucket", http.MethodPost, "/v1/buckets/{bucket}/move", "Move a bucket to another workspace", "Buckets", "bucket.move")),
+		func(ctx context.Context, in *moveBucketIn) (*bucketBody, error) {
+			p := principalFrom(ctx)
+			if err := requireInstanceAdmin(p); err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			b, err := s.eng.MoveBucket(ctx, p.WorkspaceID, in.Bucket, in.Body.Workspace)
+			if err != nil {
+				return nil, toProblem(ctx, err)
+			}
+			setTarget(ctx, b.ID+"/"+p.WorkspaceID+"/"+b.WorkspaceID)
+			return &bucketBody{Body: bucketOut(b)}, nil
 		})
 }

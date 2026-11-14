@@ -324,6 +324,7 @@ func (e *Engine) tick(now time.Time) {
 	}
 	e.runSchedules(ctx, now)
 	e.purgeTrash(ctx, now)
+	e.purgeWorkspaces(ctx, now)
 	e.objectHousekeeping(ctx, now)
 }
 

@@ -10,6 +10,8 @@ description: What changed in each version of Lumbung.
 - **Workspaces** own databases, buckets and tokens. A workspace token manages what is inside its workspace and can't tell that anything outside exists. Database and bucket names are unique per workspace. Every instance has a `default` workspace, and an upgrade puts everything that exists into it.
 - **Workspace tokens**: read, write or admin on everything in one workspace. Admin creates and deletes databases and buckets, which used to need an instance admin.
 - **Addressing**: URLs don't change for a workspace token. `/v1/workspaces/{workspace}/...` names a workspace on REST, the S3 API, the libSQL endpoint and MCP.
+- **Deleting a workspace** moves it to the trash with everything in it, restorable for 7 days. **Moving** a database or a bucket to another workspace takes an instance admin and revokes the tokens that reached it.
+- **MCP**: `get_workspace`, `delete_database`, `restore_database`, `delete_bucket`, `restore_snapshot` and `delete_snapshot`.
 - **Limits per workspace** on databases, buckets, the bytes its databases and its buckets take, and live tokens. An audit log per workspace.
 - The database list no longer tells a token limited to some branches about the branches it can't reach.
 

@@ -102,6 +102,46 @@ PALUI_TOKEN=$(cat palui.token)
 curl -s http://127.0.0.1:4870/v1/workspace -H "Authorization: Bearer $PALUI_TOKEN" | jq '{name, limits, usage}'
 ```
 
+## Deleting and restoring
+
+Deleting a workspace takes an instance admin and moves it to the trash:
+
+```sh
+curl -s -X POST http://127.0.0.1:4870/v1/workspaces \
+  -H "Authorization: Bearer $LUMBUNG_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "scratch"}' | jq -r .name
+curl -s -X DELETE http://127.0.0.1:4870/v1/workspaces/scratch \
+  -H "Authorization: Bearer $LUMBUNG_TOKEN" | jq -r .purge_after
+```
+
+At once its tokens stop working, its databases and buckets stop answering (public links and presigned URLs too), and open connections are closed. A token of a deleted workspace gets the answer a token that doesn't exist gets. The name is free to reuse.
+
+Until the trash retention passes (`LUMBUNG_TRASH_RETENTION`, 7 days by default) it can be restored with everything in it, tokens included. Pass a `name` if the old one was taken in the meantime:
+
+```sh
+curl -s "http://127.0.0.1:4870/v1/workspaces?trashed=true" -H "Authorization: Bearer $LUMBUNG_TOKEN" | jq -r '.data[].name'
+curl -s -X POST http://127.0.0.1:4870/v1/workspaces/scratch/restore \
+  -H "Authorization: Bearer $LUMBUNG_TOKEN" -H "Content-Type: application/json" -d '{}' | jq -r .name
+```
+
+After the retention the workspace is removed for good: its databases, snapshots, objects and tokens. Its audit entries stay in the instance log. The default workspace can't be deleted.
+
+## Moving a database or a bucket
+
+An instance admin can move a database or a bucket into another workspace, for example to give something that started in the default workspace a workspace of its own:
+
+```sh
+curl -s -X POST http://127.0.0.1:4870/v1/databases/app/move \
+  -H "Authorization: Bearer $LUMBUNG_TOKEN" -H "Content-Type: application/json" \
+  -d '{"workspace": "palui"}' | jq -r .workspace_id
+```
+
+The URL names the database where it is now (here the default workspace; use `/v1/workspaces/<workspace>/databases/<db>/move` for another). `POST /v1/buckets/<bucket>/move` does the same for a bucket.
+
+- The move fails if the name is taken in the new workspace, or one of its limits would be passed.
+- Every token that reached the database or bucket is revoked, whole: a token of the old workspace can't reach across. Make new ones in the new workspace.
+- Branches, snapshots, objects and unfinished uploads move with it. Nothing is copied.
+
 ## Audit log
 
 Every management action is recorded in the workspace it happened in. `GET /v1/audit` is that workspace's log, for its admins. An instance admin reads everything, with the actions that belong to no workspace (making workspaces and instance tokens), at `GET /v1/instance/audit`.

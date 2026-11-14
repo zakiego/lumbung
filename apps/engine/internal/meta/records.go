@@ -134,6 +134,11 @@ func (s *Store) CreateDatabase(ctx context.Context, wsID, name, dbID, branchID s
 	return d, b, err
 }
 
+// inLiveWorkspace keeps a database lookup to workspaces that aren't in the
+// trash: nothing in a trashed workspace resolves, for a request or for the
+// engine's own jobs (PLAN 17.6).
+const inLiveWorkspace = ` AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id = databases.workspace_id AND w.deleted_at IS NULL)`
+
 // GetDatabase finds a live database of a workspace by name or id. A
 // database of another workspace is not found, by id as much as by name.
 func (s *Store) GetDatabase(ctx context.Context, wsID, ref string) (Database, error) {
@@ -143,7 +148,7 @@ func (s *Store) GetDatabase(ctx context.Context, wsID, ref string) (Database, er
 	} else if !ids.ValidName(ref) {
 		return Database{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q", ref)
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT `+dbCols+` FROM databases WHERE workspace_id = ? AND `+col+` = ? AND deleted_at IS NULL`, wsID, ref)
+	row := s.db.QueryRowContext(ctx, `SELECT `+dbCols+` FROM databases WHERE workspace_id = ? AND `+col+` = ? AND deleted_at IS NULL`+inLiveWorkspace, wsID, ref)
 	d, err := scanDatabase(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Database{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q", ref)
@@ -155,7 +160,7 @@ func (s *Store) GetDatabase(ctx context.Context, wsID, ref string) (Database, er
 // for the engine's own jobs (schedules, expiry, usage), which start from
 // ids in meta.db. A request never resolves a database this way.
 func (s *Store) DatabaseByID(ctx context.Context, id string) (Database, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+dbCols+` FROM databases WHERE id = ? AND deleted_at IS NULL`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT `+dbCols+` FROM databases WHERE id = ? AND deleted_at IS NULL`+inLiveWorkspace, id)
 	d, err := scanDatabase(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Database{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q", id)

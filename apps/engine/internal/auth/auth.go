@@ -202,6 +202,24 @@ func (p Principal) In(wsID string) (Principal, bool) {
 	return p, true
 }
 
+// Narrow lowers the service principal to a workspace principal at the given
+// level, in the workspace the request acts in (PLAN 17.8). The dashboard
+// sends the level of the signed-in user, so the engine enforces that
+// user's role in the workspace and not only the dashboard.
+//
+// It only ever lowers: the level can't pass the token's own, the result is
+// bound to one workspace, and it no longer reaches the instance's own
+// endpoints. Any principal but the service token's is refused.
+func (p Principal) Narrow(access string) (Principal, bool) {
+	if !p.Service || p.Scope != ScopeInstance || p.WorkspaceID == "" || rank(access) == 0 || rank(access) > rank(p.Access) {
+		return Principal{}, false
+	}
+	return Principal{
+		TokenID: p.TokenID, Name: p.Name, Scope: ScopeWorkspace, WorkspaceID: p.WorkspaceID,
+		Access: access, Service: true, ExpiresAt: p.ExpiresAt, Actor: p.Actor,
+	}, true
+}
+
 // in reports whether a record of the given workspace is in the workspace
 // this principal acts in. Every check on a record starts here.
 func (p Principal) in(wsID string) bool {

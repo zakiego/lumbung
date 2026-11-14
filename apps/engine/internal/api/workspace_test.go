@@ -63,12 +63,15 @@ func (e *env) mint(caller string, body map[string]any) key {
 	return k
 }
 
-func newWSWorld(t *testing.T, mod func(*config.Config)) *wsWorld {
+func newWSWorld(t testing.TB, mod func(*config.Config)) *wsWorld {
 	t.Helper()
 	// These tests send hundreds of requests per token in a moment; the
 	// per-token rate limit isn't what they are about.
 	e := newEnv(t, func(c *config.Config) {
 		c.RateLimit, c.RateBurst = 100000, 100000
+		// Nor is the limit on failed logins: a deleted workspace's tokens
+		// fail on purpose, many times.
+		c.AuthFailuresPerMin = 100000
 		if mod != nil {
 			mod(c)
 		}
