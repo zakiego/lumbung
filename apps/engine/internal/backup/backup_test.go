@@ -90,7 +90,7 @@ func TestBackupAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(m.Files) != 4 { // meta.db, app/main, other/main, the service token
+	if len(m.Files) != 5 { // meta.db, app/main, other/main, the service token, the access key encryption key
 		t.Fatalf("manifest: %+v", m.Files)
 	}
 
@@ -141,7 +141,7 @@ func TestBackupAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(lm.Files) != 5 || !lm.AllBranches {
+	if len(lm.Files) != 6 || !lm.AllBranches { // 3 branches, meta.db and two secrets
 		t.Fatalf("all-branches backup: %+v", lm.Files)
 	}
 	metaDir := filepath.Join(t.TempDir(), "meta")
