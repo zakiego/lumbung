@@ -38,9 +38,31 @@ export default defineConfig({
     starlight({
       title: "Lumbung",
       description: "Self-hosted SQLite databases with branches.",
+      logo: { dark: "./src/assets/mark-dark.svg", light: "./src/assets/mark-light.svg", alt: "" },
+      social: [{ icon: "github", label: "GitHub", href: "https://github.com/zakiego/lumbung" }],
+      customCss: ["@fontsource-variable/inter", "@fontsource-variable/jetbrains-mono", "./src/styles/docs.css"],
+      // Code blocks: vesper on dark (the landing's code colors), lines that
+      // wrap instead of scrolling sideways, and no terminal title bar. A block
+      // with a title= still gets its file tab.
+      expressiveCode: {
+        themes: ["vesper", "github-light"],
+        defaultProps: { wrap: true, frame: "code" },
+        styleOverrides: {
+          borderRadius: "8px",
+          codeFontSize: "0.8125rem",
+          codeLineHeight: "1.7",
+          codePaddingBlock: "0.875rem",
+          codePaddingInline: "1rem",
+          uiFontFamily: "var(--__sl-font)",
+          uiFontSize: "0.8125rem",
+          // One per theme, in the order above: a step off each page color.
+          codeBackground: ["#101010", "#f9f8f9"],
+          frames: { frameBoxShadowCssValue: "none" },
+        },
+      },
       head: [
-        // Starlight's page backgrounds (--sl-color-black in each theme).
-        { tag: "meta", attrs: { name: "theme-color", content: "#17181c", media: "(prefers-color-scheme: dark)" } },
+        // The page backgrounds in src/styles/docs.css (--sl-color-black).
+        { tag: "meta", attrs: { name: "theme-color", content: "#08090a", media: "(prefers-color-scheme: dark)" } },
         { tag: "meta", attrs: { name: "theme-color", content: "#ffffff", media: "(prefers-color-scheme: light)" } },
         { tag: "link", attrs: { rel: "icon", href: "/favicon.ico", sizes: "32x32" } },
         { tag: "link", attrs: { rel: "apple-touch-icon", href: "/apple-touch-icon.png" } },
