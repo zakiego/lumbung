@@ -10,7 +10,7 @@ export const Route = createFileRoute("/_app")({
     const session = await loadSession()
     if (session.needsSetup) throw redirect({ to: "/setup" })
     if (!session.viewer) throw redirect({ to: "/login", search: { next: `${APP_BASE}${location.href}` } })
-    return { viewer: session.viewer }
+    return { viewer: session.viewer, engineUrl: session.engineUrl ?? "" }
   },
   // The sidebar still renders when the engine is down; pages show their own errors.
   loader: async () => {

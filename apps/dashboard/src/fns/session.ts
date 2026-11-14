@@ -3,7 +3,7 @@ import { createServerFn } from "@tanstack/react-start"
 import { getRequest } from "@tanstack/react-start/server"
 import { z } from "zod"
 import { authHeaders, getAuth } from "@/server/auth"
-import { engineToken } from "@/server/config"
+import { config, engineToken } from "@/server/config"
 import { requireSameOrigin, getViewer } from "@/server/session"
 import { UserError, acceptInvite as accept, createOwner, findInvite, sameSecret, userCount } from "@/server/users"
 
@@ -14,7 +14,9 @@ const token = z.string().min(10).max(200)
 
 export const getSession = createServerFn({ method: "GET" }).handler(async () => {
   const [viewer, users] = await Promise.all([getViewer(), userCount()])
-  return { viewer, needsSetup: users === 0 }
+  // The engine URL for connect snippets rides along, so the database overview
+  // doesn't need a round trip of its own. Tokens never leave the server.
+  return { viewer, needsSetup: users === 0, engineUrl: viewer ? config().publicEngineUrl : null }
 })
 
 async function signIn(emailValue: string, passwordValue: string) {

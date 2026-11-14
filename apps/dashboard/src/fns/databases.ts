@@ -3,7 +3,6 @@ import type { BranchOut, DatabaseOut, Diff, Schema, StatsOutBody } from "@lumbun
 import { createServerFn } from "@tanstack/react-start"
 import { z } from "zod"
 import { WINDOWS, type WorkspaceStats, mergeStats } from "@/lib/stats"
-import { config } from "@/server/config"
 import { allPages, call, engineFor } from "@/server/engine"
 import { requireCan } from "@/server/session"
 
@@ -144,9 +143,3 @@ export const getWorkspaceStats = createServerFn({ method: "GET" })
     if (dbs.length > 0 && merged.failed.length === dbs.length) throw new Error("Couldn't load stats for any database.")
     return merged
   })
-
-// The engine URL for connect snippets. Tokens never leave the server; snippets read $LUMBUNG_TOKEN.
-export const getConnectInfo = createServerFn({ method: "GET" }).handler(async () => {
-  await requireCan("read")
-  return { engineUrl: config().publicEngineUrl }
-})
