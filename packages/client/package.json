@@ -4,7 +4,7 @@
   "private": true,
   "description": "TypeScript client for Lumbung: query, batch and manage self-hosted SQLite databases with branches. No runtime dependencies; works in Node, Bun, Workers and the browser.",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "sideEffects": false,
   "exports": {
     ".": {
