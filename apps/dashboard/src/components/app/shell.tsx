@@ -217,7 +217,7 @@ function NavItem({ to, params, label, icon, exact, rail, onNavigate }: NavLink &
   )
 }
 
-function UserMenu({ viewer }: { viewer: Viewer }) {
+export function UserMenu({ viewer }: { viewer: Viewer }) {
   const router = useRouter()
   const [theme, setTheme] = useState<Theme>("system")
   useEffect(() => setTheme(readTheme()), [])
@@ -250,11 +250,13 @@ function UserMenu({ viewer }: { viewer: Viewer }) {
         </span>
       </MenuTrigger>
       <MenuContent side="top" align="start" className="w-56">
-        <MenuGroupLabel className="truncate font-normal">{viewer.email}</MenuGroupLabel>
-        <MenuItem render={<Link to="/account" />}>
-          <UserIcon aria-hidden="true" />
-          Account
-        </MenuItem>
+        <MenuGroup>
+          <MenuGroupLabel className="truncate font-normal">{viewer.email}</MenuGroupLabel>
+          <MenuItem render={<Link to="/account" />}>
+            <UserIcon aria-hidden="true" />
+            Account
+          </MenuItem>
+        </MenuGroup>
         <MenuSeparator />
         <MenuGroup>
           <MenuGroupLabel>Theme</MenuGroupLabel>
