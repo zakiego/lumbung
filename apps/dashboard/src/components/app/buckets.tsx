@@ -1,15 +1,17 @@
 import type { BucketOut, ObjectOut } from "@lumbung/client"
 import { Link, useRouter } from "@tanstack/react-router"
 import { DrawerTrigger, createDrawerController } from "@ui-sdk/react/drawer"
-import { ArchiveIcon, DownloadIcon, FileIcon, FolderIcon, GlobeIcon, Trash2Icon, UploadIcon } from "lucide-react"
+import { ArchiveIcon, ArrowDownIcon, ArrowUpIcon, DownloadIcon, FileIcon, FolderIcon, GlobeIcon, Trash2Icon, UploadIcon } from "lucide-react"
 import { type ReactNode, useRef, useState } from "react"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { Menu, MenuContent, MenuGroup, MenuGroupLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu"
 import { Badge, Empty, Table, TableCell, TableHead, TableRow } from "@/components/ui/surface"
 import { toast } from "@/components/ui/toast"
 import { createBucket } from "@/fns/buckets"
 import { TruncatedTip } from "@/components/ui/tooltip"
 import { formatBytes, number, timeAgo } from "@/lib/format"
 import { objectURL } from "@/lib/objects"
+import { cn } from "@/lib/utils"
 import { Confirm, errorText } from "./form-dialog"
 import { NameDialog, type TriggerSlot } from "./name-dialog"
 import { type ObjectAccess, ObjectDetails } from "./object-details"
@@ -194,6 +196,134 @@ export function UploadButton({ bucket, prefix, onDone }: { bucket: string; prefi
 
 type Row = { kind: "folder"; prefix: string } | { kind: "object"; object: ObjectOut }
 
+export const OBJECT_SORT_KEYS = ["name", "size", "type", "modified"] as const
+export type ObjectSortKey = (typeof OBJECT_SORT_KEYS)[number]
+export type SortDir = "asc" | "desc"
+export type ObjectSort = { key: ObjectSortKey; dir: SortDir }
+export const DEFAULT_OBJECT_SORT: ObjectSort = { key: "name", dir: "asc" }
+const SORT_LABEL: Record<ObjectSortKey, string> = { name: "Name", size: "Size", type: "Type", modified: "Modified" }
+
+// A column starts where people look first: A to Z for text, biggest and
+// newest for numbers.
+export function defaultSortDir(key: ObjectSortKey): SortDir {
+  return key === "size" || key === "modified" ? "desc" : "asc"
+}
+
+// A header press flips the order on the active column.
+export function nextObjectSort(current: ObjectSort, key: ObjectSortKey): ObjectSort {
+  if (current.key === key) return { key, dir: current.dir === "asc" ? "desc" : "asc" }
+  return { key, dir: defaultSortDir(key) }
+}
+
+// Natural order, so IMG_9 comes before IMG_10.
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
+const byName = (a: string, b: string) => collator.compare(a, b) || (a < b ? -1 : a > b ? 1 : 0)
+
+// Sorts what is loaded. Ties fall back to the name, A to Z.
+export function sortObjects(objects: ObjectOut[], sort: ObjectSort): ObjectOut[] {
+  const sign = sort.dir === "asc" ? 1 : -1
+  const by = (a: ObjectOut, b: ObjectOut) => {
+    switch (sort.key) {
+      case "size":
+        return a.size - b.size
+      case "modified":
+        return Date.parse(a.last_modified) - Date.parse(b.last_modified)
+      case "type":
+        return collator.compare(a.content_type, b.content_type)
+      default:
+        return byName(a.key, b.key)
+    }
+  }
+  return [...objects].sort((a, b) => sign * by(a, b) || byName(a.key, b.key))
+}
+
+// Folders stay on top. They have no size or date, so only a name sort moves them.
+export function sortFolders(prefixes: string[], sort: ObjectSort): string[] {
+  const sorted = [...prefixes].sort(byName)
+  return sort.key === "name" && sort.dir === "desc" ? sorted.reverse() : sorted
+}
+
+// The URL leaves the default out, so a plain bucket link stays plain.
+export function sortSearch(sort: ObjectSort): { sort?: ObjectSortKey; dir?: SortDir } {
+  return sort.key === DEFAULT_OBJECT_SORT.key && sort.dir === DEFAULT_OBJECT_SORT.dir ? {} : { sort: sort.key, dir: sort.dir }
+}
+
+function SortIcon({ dir, className }: { dir: SortDir; className?: string }) {
+  const Icon = dir === "asc" ? ArrowUpIcon : ArrowDownIcon
+  return <Icon aria-hidden="true" className={className} />
+}
+
+function SortHead({
+  column,
+  sort,
+  onSortChange,
+  align = "left",
+  className,
+}: {
+  column: ObjectSortKey
+  sort: ObjectSort
+  onSortChange?: (sort: ObjectSort) => void
+  align?: "left" | "right"
+  className?: string
+}) {
+  const active = sort.key === column
+  const label = SORT_LABEL[column]
+  if (!onSortChange) return <TableHead className={cn(align === "right" && "text-right", className)}>{label}</TableHead>
+  return (
+    <TableHead aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined} className={cn(align === "right" && "text-right", className)}>
+      <Button
+        variant="ghost"
+        size="sm"
+        // A block body: a returned Promise would put the button in its pending state.
+        onClick={() => {
+          onSortChange(nextObjectSort(sort, column))
+        }}
+        // Text-only like the data grid header, so nothing pokes past the table edge.
+        className={cn("px-0 hover:bg-transparent focus-visible:-outline-offset-1", active && "text-foreground")}
+      >
+        {/* The arrow sits on the outer side, so the label lines up with the values. */}
+        {active && align === "right" && <SortIcon dir={sort.dir} className="size-3.5" />}
+        {label}
+        {active && align === "left" && <SortIcon dir={sort.dir} className="size-3.5" />}
+      </Button>
+    </TableHead>
+  )
+}
+
+export function ObjectSortMenu({ sort, onSortChange, className }: { sort: ObjectSort; onSortChange: (sort: ObjectSort) => void; className?: string }) {
+  return (
+    <Menu>
+      <MenuTrigger
+        aria-label={`Sort by ${SORT_LABEL[sort.key]}, ${sort.dir === "asc" ? "ascending" : "descending"}`}
+        className={buttonVariants({ variant: "ghost", size: "sm", className })}
+      >
+        <SortIcon dir={sort.dir} />
+        {SORT_LABEL[sort.key]}
+      </MenuTrigger>
+      <MenuContent align="end">
+        <MenuGroup>
+          <MenuGroupLabel>Sort by</MenuGroupLabel>
+          <MenuRadioGroup value={sort.key} onValueChange={(v) => onSortChange(nextObjectSort(sort, v as ObjectSortKey))}>
+            {OBJECT_SORT_KEYS.map((k) => (
+              <MenuRadioItem key={k} value={k}>
+                {SORT_LABEL[k]}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </MenuGroup>
+        <MenuSeparator />
+        <MenuGroup>
+          <MenuGroupLabel>Order</MenuGroupLabel>
+          <MenuRadioGroup value={sort.dir} onValueChange={(v) => onSortChange({ key: sort.key, dir: v as SortDir })}>
+            <MenuRadioItem value="asc">Ascending</MenuRadioItem>
+            <MenuRadioItem value="desc">Descending</MenuRadioItem>
+          </MenuRadioGroup>
+        </MenuGroup>
+      </MenuContent>
+    </Menu>
+  )
+}
+
 export function ObjectTable({
   bucket,
   prefix,
@@ -202,6 +332,8 @@ export function ObjectTable({
   canWrite,
   access,
   onDelete,
+  sort = DEFAULT_OBJECT_SORT,
+  onSortChange,
   footer,
 }: {
   bucket: string
@@ -211,14 +343,19 @@ export function ObjectTable({
   canWrite: boolean
   access?: ObjectAccess
   onDelete: (key: string) => Promise<unknown>
+  sort?: ObjectSort
+  onSortChange?: (sort: ObjectSort) => void
   footer?: ReactNode
 }) {
   const [details] = useState(() => createDrawerController<ObjectOut>())
   // A key equal to the folder itself is a folder marker some S3 tools make:
   // it has no name of its own here, so it isn't listed.
   const rows: Row[] = [
-    ...prefixes.map((p): Row => ({ kind: "folder", prefix: p })),
-    ...objects.filter((o) => o.key !== prefix).map((o): Row => ({ kind: "object", object: o })),
+    ...sortFolders(prefixes, sort).map((p): Row => ({ kind: "folder", prefix: p })),
+    ...sortObjects(
+      objects.filter((o) => o.key !== prefix),
+      sort,
+    ).map((o): Row => ({ kind: "object", object: o })),
   ]
   if (rows.length === 0) {
     return <Empty icon={<FolderIcon />} title={prefix ? "This folder is empty" : "No objects yet"} description="Upload files here, or put them with an S3 client, the CLI or the SDK." />
@@ -228,10 +365,10 @@ export function ObjectTable({
       <Table>
         <thead>
           <tr>
-            <TableHead>Name</TableHead>
-            <TableHead className="text-right">Size</TableHead>
-            <TableHead className="hidden md:table-cell">Type</TableHead>
-            <TableHead className="hidden text-right sm:table-cell">Modified</TableHead>
+            <SortHead column="name" sort={sort} onSortChange={onSortChange} />
+            <SortHead column="size" sort={sort} onSortChange={onSortChange} align="right" />
+            <SortHead column="type" sort={sort} onSortChange={onSortChange} className="hidden md:table-cell" />
+            <SortHead column="modified" sort={sort} onSortChange={onSortChange} align="right" className="hidden sm:table-cell" />
             <TableHead>
               <span className="sr-only">Actions</span>
             </TableHead>
@@ -246,7 +383,7 @@ export function ObjectTable({
                     <Link
                       to="/buckets/$bucket"
                       params={{ bucket }}
-                      search={{ prefix: r.prefix }}
+                      search={{ prefix: r.prefix, ...sortSearch(sort) }}
                       className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0"
                     >
                       <FolderIcon aria-hidden="true" className="size-4 shrink-0 text-faint" />
