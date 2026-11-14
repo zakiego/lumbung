@@ -9,7 +9,7 @@ How we run Lumbung at https://lumbung.zakiego.com on the Mac mini (the `zaki-sel
 | Checkout | `~/selfhost/lumbung` (compose project `lumbung`) |
 | Compose files | `compose.yaml` + `ops/compose.selfhost.yaml` (ports, `mem_limit`, logs, public URLs, proxy header) |
 | Engine | `127.0.0.1:4805` (container 4870), 1 GB, volume `lumbung_data` |
-| Dashboard | `127.0.0.1:4806` (container 4871), 512 MB, volume `lumbung_dashboard` |
+| Dashboard | `127.0.0.1:4806` (container 4871), 512 MB, volume `lumbung_dashboard`. Also signs in at http://127.0.0.1:4806/app and http://localhost:4806/app on the Mac mini (password only, no passkeys), for when the tunnel is down |
 | Site | Cloudflare Pages, `SITE_ORIGIN` in `apps/edge/wrangler.jsonc` |
 | Edge Worker | `apps/edge`, route `lumbung.zakiego.com/*` |
 | Nightly backup | launchd `com.zakiego.lumbung-backup`, 03:30, log `~/selfhost/lumbung-backup.log` |
