@@ -39,7 +39,7 @@ const (
 // mountMCP adds /mcp to the router.
 func (s *Server) mountMCP() {
 	server := mcp.NewServer(&mcp.Implementation{Name: "lumbung", Title: "Lumbung", Version: version.Version}, &mcp.ServerOptions{
-		Instructions: "Lumbung holds SQLite databases, each with branches (full copies). Use list_databases first. " +
+		Instructions: "Lumbung holds SQLite databases, each with branches (full copies). A token works inside one workspace and sees only that workspace's databases and buckets. Use list_databases first. " +
 			"query runs read-only SQL; execute runs writes and needs a write token. Branches never merge back: " +
 			"to test a schema change, create_branch, execute the migration there, diff_branches against main, then run the same SQL on main. " +
 			"Buckets hold files: list_buckets, list_objects, get_object and put_object work with them, and presign_object makes a URL to share one.",
@@ -116,6 +116,15 @@ func (s *Server) gateRequest(w http.ResponseWriter, r *http.Request) (auth.Princ
 	if a := r.Header.Get("X-Lumbung-Actor"); a != "" && p.Service && actorRe.MatchString(a) {
 		p.Actor = a
 	}
+	// As on REST, the request runs as a principal acting in one workspace.
+	p, err = s.act(r.Context(), p, selFrom(r.Context()))
+	if err != nil {
+		ae := apierr.As(err)
+		if ae.Code == apierr.Internal {
+			s.log.Error("resolve workspace", "err", err, "request_id", id)
+		}
+		return auth.Principal{}, id, ae
+	}
 	return p, id, nil
 }
 
@@ -188,7 +197,7 @@ func (s *Server) toolErr(req *mcp.CallToolRequest, err error) error {
 func (s *Server) audited(req *mcp.CallToolRequest, action string, f func() (string, error)) error {
 	c, _ := mcpCallOf(req)
 	target, err := f()
-	e := meta.AuditEntry{TokenID: c.p.TokenID, Actor: c.p.Actor, Action: action, Target: target, Result: "ok", RequestID: c.requestID}
+	e := meta.AuditEntry{WorkspaceID: c.p.WorkspaceID, TokenID: c.p.TokenID, Actor: c.p.Actor, Action: action, Target: target, Result: "ok", RequestID: c.requestID}
 	if err != nil {
 		e.Result, e.Code = "error", apierr.As(err).Code
 	}
@@ -487,20 +496,20 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 			if err != nil {
 				return nil, out, err
 			}
-			all, err := s.eng.ListDatabases(ctx)
+			all, err := s.eng.ListDatabases(ctx, p.WorkspaceID)
 			if err != nil {
 				return nil, out, s.toolErr(req, err)
 			}
 			list := []mcpDatabase{}
 			for _, d := range all {
-				if !p.SeesDatabase(d.ID) {
+				if !p.SeesDatabase(d) {
 					continue
 				}
 				if len(list) == mcpListMax {
 					out.Truncated = true
 					break
 				}
-				o, err := s.mcpDatabaseOf(ctx, d)
+				o, err := s.mcpDatabaseOf(ctx, p, d)
 				if err != nil {
 					return nil, out, s.toolErr(req, err)
 				}
@@ -523,14 +532,14 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 			if err != nil {
 				return nil, mcpDatabase{}, s.toolErr(req, err)
 			}
-			o, err := s.mcpDatabaseOf(ctx, d)
+			o, err := s.mcpDatabaseOf(ctx, p, d)
 			if err != nil {
 				return nil, mcpDatabase{}, s.toolErr(req, err)
 			}
 			return nil, o, nil
 		})
 
-	mcp.AddTool(server, &mcp.Tool{Name: "create_database", Description: "Create a database with an empty default branch named main. Needs an instance admin token. Names: lowercase letters, digits and hyphens.", Annotations: additive},
+	mcp.AddTool(server, &mcp.Tool{Name: "create_database", Description: "Create a database in this token's workspace, with an empty default branch named main. Needs an admin token for the whole workspace. Names: lowercase letters, digits and hyphens.", Annotations: additive},
 		func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 			Name string `json:"name" jsonschema:"lowercase letters, digits and hyphens, starting with a letter or digit"`
 		}) (*mcp.CallToolResult, mcpDatabase, error) {
@@ -540,10 +549,10 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 			}
 			var out mcpDatabase
 			err = s.audited(req, "database.create", func() (string, error) {
-				if err := requireInstanceAdmin(p); err != nil {
+				if err := requireWorkspaceAdmin(p); err != nil {
 					return "", err
 				}
-				d, err := s.eng.CreateDatabase(ctx, in.Name)
+				d, err := s.eng.CreateDatabase(ctx, p.WorkspaceID, in.Name)
 				if err != nil {
 					return "", err
 				}
@@ -575,7 +584,7 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 			if err != nil {
 				return nil, out, s.toolErr(req, err)
 			}
-			bs, err := s.eng.ListBranches(ctx, d.ID)
+			bs, err := s.eng.ListBranches(ctx, d.WorkspaceID, d.ID)
 			if err != nil {
 				return nil, out, s.toolErr(req, err)
 			}
@@ -619,7 +628,7 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 				if in.ExpiresInDays < 0 || in.ExpiresInDays > 3650 {
 					return "", apierr.New(apierr.BadRequest, "expires_in_days must be 0 to 3650")
 				}
-				b, err := s.eng.CreateBranch(ctx, d.ID, in.Name, engine.BranchSource{Branch: in.From},
+				b, err := s.eng.CreateBranch(ctx, d.WorkspaceID, d.ID, in.Name, engine.BranchSource{Branch: in.From},
 					engine.NewBranchOptions{ExpiresIn: time.Duration(in.ExpiresInDays) * 24 * time.Hour})
 				if err != nil {
 					return "", err
@@ -652,7 +661,7 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 				if err != nil {
 					return "", err
 				}
-				if err := s.eng.DeleteBranch(ctx, d.ID, b.ID); err != nil {
+				if err := s.eng.DeleteBranch(ctx, d.WorkspaceID, d.ID, b.ID); err != nil {
 					return d.ID + "/" + b.ID, err
 				}
 				out.Deleted = b.Name
@@ -679,11 +688,11 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 				if err != nil {
 					return "", err
 				}
-				if !p.AtLeast(auth.AccessWrite, d.ID, "") {
+				if !p.AtLeast(auth.AccessWrite, d, "") {
 					return "", apierr.New(apierr.Forbidden, "resetting needs write access to the whole database")
 				}
 				target := d.ID + "/" + b.ID
-				reset, err := s.eng.ResetBranch(ctx, d.ID, b.ID)
+				reset, err := s.eng.ResetBranch(ctx, d.WorkspaceID, d.ID, b.ID)
 				if err != nil {
 					return target, err
 				}
@@ -727,7 +736,7 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 			if err != nil {
 				return nil, out, s.toolErr(req, err)
 			}
-			diff, err := s.eng.DiffBranches(ctx, d.ID, b.ID, a.ID)
+			diff, err := s.eng.DiffBranches(ctx, d.WorkspaceID, d.ID, b.ID, a.ID)
 			if err != nil {
 				return nil, out, s.toolErr(req, err)
 			}
@@ -747,7 +756,7 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 			if err != nil {
 				return nil, mcpSchema{}, s.toolErr(req, err)
 			}
-			sc, err := s.eng.Schema(ctx, engine.Target{Database: d.ID, Branch: b.ID})
+			sc, err := s.eng.Schema(ctx, engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID})
 			if err != nil {
 				return nil, mcpSchema{}, s.toolErr(req, err)
 			}
@@ -780,7 +789,7 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 			start := time.Now()
 			// The engine keeps one row past the display caps so a cut is
 			// reported; sqlResult then trims rows to fit mcpMaxBytes as shown.
-			r, err := s.eng.QueryCapped(ctx, engine.Target{Database: d.ID, Branch: b.ID}, engine.Statement{SQL: in.SQL, Args: args}, maxRows, s.eng.Config().MaxResultBytes)
+			r, err := s.eng.QueryCapped(ctx, engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID}, engine.Statement{SQL: in.SQL, Args: args}, maxRows, s.eng.Config().MaxResultBytes)
 			s.record(b.ID, []StatementIn{{SQL: in.SQL}}, start, results(r), err)
 			if err != nil {
 				return nil, sqlOut{}, s.toolErr(req, err)
@@ -803,7 +812,7 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 				return nil, sqlOut{}, err
 			}
 			start := time.Now()
-			r, err := s.eng.Query(ctx, engine.Target{Database: d.ID, Branch: b.ID}, engine.Write, engine.Statement{SQL: in.SQL, Args: args})
+			r, err := s.eng.Query(ctx, engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID}, engine.Write, engine.Statement{SQL: in.SQL, Args: args})
 			s.record(b.ID, []StatementIn{{SQL: in.SQL}}, start, results(r), err)
 			if err != nil {
 				return nil, sqlOut{}, s.toolErr(req, err)
@@ -826,7 +835,7 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 			if err != nil {
 				return nil, out, s.toolErr(req, err)
 			}
-			sns, err := s.eng.ListSnapshots(ctx, engine.Target{Database: d.ID, Branch: b.ID})
+			sns, err := s.eng.ListSnapshots(ctx, engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID})
 			if err != nil {
 				return nil, out, s.toolErr(req, err)
 			}
@@ -859,7 +868,7 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 				if len(in.Label) > 200 {
 					return "", apierr.New(apierr.BadRequest, "a label is at most 200 bytes")
 				}
-				sn, err := s.eng.CreateSnapshot(ctx, engine.Target{Database: d.ID, Branch: b.ID}, in.Label)
+				sn, err := s.eng.CreateSnapshot(ctx, engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID}, in.Label)
 				if err != nil {
 					return d.ID + "/" + b.ID, err
 				}
@@ -884,19 +893,25 @@ func results(r *engine.Result) []*engine.Result {
 
 // mcpDatabaseOf describes a database without the last-activity lookup the
 // REST view does, which the MCP tools don't show.
-func (s *Server) mcpDatabaseOf(ctx context.Context, d meta.Database) (mcpDatabase, error) {
+// mcpDatabaseOf describes a database as far as the principal reaches it: a
+// token limited to some branches gets the count, size and default branch of
+// those branches only.
+func (s *Server) mcpDatabaseOf(ctx context.Context, p auth.Principal, d meta.Database) (mcpDatabase, error) {
 	out := mcpDatabase{ID: d.ID, Name: d.Name, CreatedAt: timeStr(d.CreatedAt)}
 	branches, err := s.store.ListBranches(ctx, d.ID)
 	if err != nil {
 		return mcpDatabase{}, err
 	}
 	for _, b := range branches {
+		if !p.SeesBranch(d, b.ID) {
+			continue
+		}
 		if b.ID == d.DefaultBranchID {
 			out.DefaultBranch = b.Name
 		}
 		out.SizeBytes += s.eng.BranchBytes(b.ID)
+		out.BranchCount++
 	}
-	out.BranchCount = len(branches)
 	return out, nil
 }
 

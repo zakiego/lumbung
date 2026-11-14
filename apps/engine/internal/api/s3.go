@@ -50,7 +50,16 @@ type s3Req struct {
 	key    string // "" for a bucket request
 	q      url.Values
 
-	p      auth.Principal
+	p auth.Principal
+	// ws is the id of the workspace the request acts in (PLAN 17.3): the
+	// token's, or the default workspace for a request with no workspace of
+	// its own. Every bucket lookup takes it.
+	ws string
+	// sel is the workspace a qualified URL names, "" for a short URL.
+	sel string
+	// base is the path the S3 API is served under for this request:
+	// /v1/s3, or /v1/workspaces/<ws>/s3 for a qualified URL.
+	base   string
 	anon   bool
 	bearer bool
 	sig    *s3proto.Auth
@@ -61,25 +70,31 @@ type s3Req struct {
 	bodyErr *s3proto.Error
 }
 
-// serveS3 handles every request under /v1/s3.
-func (s *Server) serveS3(w http.ResponseWriter, r *http.Request) {
+// serveS3 handles every request under /v1/s3, and under
+// /v1/workspaces/<sel>/s3 when sel names a workspace. rest is the escaped
+// path in its short form, /v1/s3/...; the signature is still checked
+// against the path the client really sent.
+func (s *Server) serveS3(w http.ResponseWriter, r *http.Request, sel, rest string) {
 	id := r.Header.Get("X-Request-Id")
 	if !requestIDRe.MatchString(id) {
 		id = newRequestID()
 	}
 	w.Header().Set("X-Request-Id", id)
 	w.Header().Set("x-amz-request-id", id)
-	req := &s3Req{w: w, r: r, id: id, q: r.URL.Query()}
-	raw := r.URL.EscapedPath()
-	path, err := url.PathUnescape(raw)
-	if err != nil {
+	req := &s3Req{w: w, r: r, id: id, q: r.URL.Query(), sel: sel, base: S3Prefix}
+	if sel != "" {
+		req.base = workspacesPrefix + sel + "/s3"
+	}
+	path, err := url.PathUnescape(r.URL.EscapedPath())
+	short, err2 := url.PathUnescape(rest)
+	if err != nil || err2 != nil {
 		s.s3Fail(req, s3proto.Errf("InvalidURI", http.StatusBadRequest, "couldn't parse the specified URI"))
 		return
 	}
 	req.path = path
-	rest := strings.TrimPrefix(path, S3Prefix)
-	rest = strings.TrimPrefix(rest, "/")
-	req.bucket, req.key, _ = strings.Cut(rest, "/")
+	short = strings.TrimPrefix(short, S3Prefix)
+	short = strings.TrimPrefix(short, "/")
+	req.bucket, req.key, _ = strings.Cut(short, "/")
 
 	if r.Method == http.MethodOptions {
 		s.s3Preflight(req)
@@ -89,10 +104,51 @@ func (s *Server) serveS3(w http.ResponseWriter, r *http.Request) {
 		s.s3Fail(req, e)
 		return
 	}
+	if e := s.s3Workspace(req); e != nil {
+		s.s3Fail(req, e)
+		return
+	}
 	s.s3Dispatch(req)
 }
 
 // ---- authentication
+
+// s3Workspace resolves the workspace the request acts in, after
+// authentication. A token naming a workspace that isn't its own, or one
+// that doesn't exist, gets the same answer for both: NoSuchBucket when the
+// request names a bucket, AccessDenied when it doesn't. An anonymous
+// request to a missing workspace gets AccessDenied, as for a missing or
+// private bucket.
+func (s *Server) s3Workspace(req *s3Req) *s3proto.Error {
+	ctx := req.r.Context()
+	fail := func(err error) *s3proto.Error {
+		switch apierr.As(err).Code {
+		case apierr.WorkspaceNotFound:
+			if req.anon || req.bucket == "" {
+				return accessDenied()
+			}
+			return noSuchBucket(req.bucket)
+		case apierr.Unauthorized:
+			return invalidKeyID("the access key id you provided does not exist")
+		}
+		s.log.Error("s3 workspace", "err", err, "request_id", req.id)
+		return s3proto.Errf("InternalError", http.StatusInternalServerError, "internal error")
+	}
+	if req.anon {
+		ws, err := s.requestWorkspace(ctx, false, "", req.sel)
+		if err != nil {
+			return fail(err)
+		}
+		req.ws = ws.ID
+		return nil
+	}
+	p, err := s.act(ctx, req.p, req.sel)
+	if err != nil {
+		return fail(err)
+	}
+	req.p, req.ws = p, p.WorkspaceID
+	return nil
+}
 
 func (s *Server) s3AuthFailed(req *s3Req, e *s3proto.Error) *s3proto.Error {
 	if ok, wait := s.failures.Allow(s.clientIPFromRequest(req.r)); !ok {
@@ -176,10 +232,14 @@ func (s *Server) s3Verify(req *s3Req, a *s3proto.Auth) *s3proto.Error {
 		s.log.Error("s3 token", "err", err, "request_id", req.id)
 		return s3proto.Errf("InternalError", http.StatusInternalServerError, "internal error")
 	}
-	p, err := auth.FromToken(rec, s.now())
+	p, err := s.principalOf(ctx, rec)
 	if err != nil {
+		if apierr.As(err).Code != apierr.Unauthorized {
+			s.log.Error("s3 token", "err", err, "request_id", req.id)
+			return s3proto.Errf("InternalError", http.StatusInternalServerError, "internal error")
+		}
 		// The same answer as an unknown key: the id alone mustn't tell
-		// whether its token was ever live.
+		// whether its token, or its workspace, was ever live.
 		return s.s3AuthFailed(req, invalidKeyID("the access key id you provided does not exist"))
 	}
 	secret, err := s.eng.Sealer().Open(rec.ID, rec.AccessSecret)
@@ -410,12 +470,13 @@ func accessDenied() *s3proto.Error {
 	return s3proto.Errf("AccessDenied", http.StatusForbidden, "access denied")
 }
 
-// s3Bucket resolves the request's bucket and checks access. A bucket the
+// s3Bucket resolves the request's bucket in the request's workspace and
+// checks access. A bucket of another workspace is never found. A bucket the
 // token can't see answers like a missing one; without a token, missing and
 // private buckets both answer AccessDenied. publicOK marks the object reads
 // a public bucket allows without a token.
 func (s *Server) s3Bucket(req *s3Req, need string, publicOK bool) (meta.Bucket, *s3proto.Error) {
-	b, err := s.eng.GetBucket(req.r.Context(), req.bucket)
+	b, err := s.eng.GetBucket(req.r.Context(), req.ws, req.bucket)
 	if req.anon {
 		if err != nil || !publicOK || !b.PublicRead {
 			return meta.Bucket{}, accessDenied()
@@ -429,18 +490,18 @@ func (s *Server) s3Bucket(req *s3Req, need string, publicOK bool) (meta.Bucket, 
 		}
 		return meta.Bucket{}, s.s3FromAPI(req, err)
 	}
-	if !req.p.SeesBucket(b.ID) {
+	if !req.p.SeesBucket(b) {
 		return meta.Bucket{}, noSuchBucket(req.bucket)
 	}
 	s.s3CORS(req, b)
-	if !req.p.BucketAtLeast(need, b.ID) {
+	if !req.p.BucketAtLeast(need, b) {
 		return meta.Bucket{}, accessDenied()
 	}
 	return b, nil
 }
 
 func (s *Server) s3Audit(req *s3Req, action, target string, err error) {
-	e := meta.AuditEntry{TokenID: req.p.TokenID, Actor: req.p.Actor, Action: action, Target: target, Result: "ok", RequestID: req.id}
+	e := meta.AuditEntry{WorkspaceID: req.ws, TokenID: req.p.TokenID, Actor: req.p.Actor, Action: action, Target: target, Result: "ok", RequestID: req.id}
 	if err != nil {
 		e.Result, e.Code = "error", apierr.As(err).Code
 	}
@@ -456,14 +517,14 @@ func (s *Server) s3ListBuckets(req *s3Req) {
 		s.s3Fail(req, accessDenied())
 		return
 	}
-	all, err := s.eng.ListBuckets(req.r.Context())
+	all, err := s.eng.ListBuckets(req.r.Context(), req.ws)
 	if err != nil {
 		s.s3Err(req, err)
 		return
 	}
 	out := s3proto.ListAllMyBucketsResult{Xmlns: s3proto.Namespace, Owner: s3proto.TheOwner, Buckets: []s3proto.BucketEntry{}}
 	for _, b := range all {
-		if req.p.SeesBucket(b.ID) {
+		if req.p.SeesBucket(b) {
 			out.Buckets = append(out.Buckets, s3proto.BucketEntry{Name: b.Name, CreationDate: s3proto.XMLTime(b.CreatedAt)})
 		}
 	}
@@ -471,7 +532,7 @@ func (s *Server) s3ListBuckets(req *s3Req) {
 }
 
 func (s *Server) s3CreateBucket(req *s3Req) {
-	if req.anon || !req.p.InstanceAdmin() {
+	if req.anon || !req.p.WorkspaceAtLeast(auth.AccessAdmin) {
 		s.s3Fail(req, accessDenied())
 		return
 	}
@@ -479,7 +540,7 @@ func (s *Server) s3CreateBucket(req *s3Req) {
 		s.s3Fail(req, e)
 		return
 	}
-	b, err := s.eng.CreateBucket(req.r.Context(), req.bucket)
+	b, err := s.eng.CreateBucket(req.r.Context(), req.ws, req.bucket)
 	target := req.bucket
 	if err == nil {
 		target = b.ID
@@ -503,7 +564,7 @@ func (s *Server) s3DeleteBucket(req *s3Req) {
 		s.s3Fail(req, e)
 		return
 	}
-	if !req.p.InstanceAdmin() {
+	if !req.p.WorkspaceAtLeast(auth.AccessAdmin) {
 		s.s3Fail(req, accessDenied())
 		return
 	}
@@ -570,6 +631,33 @@ func (s *Server) s3CORS(req *s3Req, b meta.Bucket) {
 	}
 }
 
+// s3PreflightWorkspace finds the workspace of a CORS preflight, which
+// carries no credentials of its own. A presigned URL names its access key
+// in the query, so its token's workspace is used; anything else is the
+// workspace the URL names, or the default one. The answer only says whether
+// an origin may call a bucket, so the key isn't verified here: the request
+// that follows is.
+func (s *Server) s3PreflightWorkspace(req *s3Req) string {
+	ctx := req.r.Context()
+	if req.sel == "" {
+		if cred := req.q.Get("X-Amz-Credential"); cred != "" {
+			keyID, _, _ := strings.Cut(cred, "/")
+			if tokID, ok := auth.TokenIDOfAccessKey(keyID); ok {
+				if rec, err := s.store.GetToken(ctx, tokID); err == nil && len(rec.AccessSecret) > 0 {
+					if p, err := s.principalOf(ctx, rec); err == nil && p.Bound() {
+						return p.WorkspaceID
+					}
+				}
+			}
+		}
+	}
+	ws, err := s.requestWorkspace(ctx, false, "", req.sel)
+	if err != nil {
+		return ""
+	}
+	return ws.ID
+}
+
 // s3Preflight answers a CORS preflight from the bucket's origins.
 func (s *Server) s3Preflight(req *s3Req) {
 	origin := req.r.Header.Get("Origin")
@@ -588,7 +676,7 @@ func (s *Server) s3Preflight(req *s3Req) {
 		s.s3Fail(req, s3proto.Errf("SlowDown", http.StatusServiceUnavailable, "too many requests without a token from this address"))
 		return
 	}
-	b, err := s.eng.GetBucket(req.r.Context(), req.bucket)
+	b, err := s.eng.GetBucket(req.r.Context(), s.s3PreflightWorkspace(req), req.bucket)
 	allow, ok := originAllowed(b, origin)
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodPost, http.MethodDelete:
@@ -1084,12 +1172,14 @@ func (s *Server) s3CopyObject(req *s3Req) {
 		return
 	}
 	ctx := req.r.Context()
-	src, err := s.eng.GetBucket(ctx, srcBucket)
-	if err != nil || !req.p.SeesBucket(src.ID) {
+	// The source is resolved in the same workspace as the destination, so
+	// nothing is ever copied across workspaces.
+	src, err := s.eng.GetBucket(ctx, req.ws, srcBucket)
+	if err != nil || !req.p.SeesBucket(src) {
 		s.s3Fail(req, noSuchBucket(srcBucket))
 		return
 	}
-	if !req.p.BucketAtLeast(auth.AccessRead, src.ID) {
+	if !req.p.BucketAtLeast(auth.AccessRead, src) {
 		s.s3Fail(req, accessDenied())
 		return
 	}
@@ -1296,7 +1386,7 @@ func (s *Server) s3CompleteUpload(req *s3Req) {
 		return
 	}
 	s.s3XML(req, http.StatusOK, s3proto.CompleteMultipartUploadResult{Xmlns: s3proto.Namespace,
-		Location: S3Prefix + "/" + b.Name + "/" + s3proto.URIEncode(o.Key, true), Bucket: b.Name, Key: o.Key, ETag: quoteETag(o.ETag)})
+		Location: req.base + "/" + b.Name + "/" + s3proto.URIEncode(o.Key, true), Bucket: b.Name, Key: o.Key, ETag: quoteETag(o.ETag)})
 }
 
 func (s *Server) s3AbortUpload(req *s3Req) {

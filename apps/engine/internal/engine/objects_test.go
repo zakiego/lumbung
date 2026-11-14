@@ -22,7 +22,7 @@ import (
 
 func mustBucket(t testing.TB, e *Engine, name string) meta.Bucket {
 	t.Helper()
-	b, err := e.CreateBucket(context.Background(), name)
+	b, err := e.CreateBucket(context.Background(), ws(e), name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,14 +80,14 @@ func TestBucketNamesAndLimits(t *testing.T) {
 	e := newEngine(t, func(c *config.Config) { c.MaxBuckets = 2 })
 	ctx := context.Background()
 	for _, bad := range []string{"ab", "-abc", "abc-", "ABC", "a_b", strings.Repeat("a", 64), "a.b"} {
-		_, err := e.CreateBucket(ctx, bad)
+		_, err := e.CreateBucket(ctx, ws(e), bad)
 		wantCode(t, err, apierr.InvalidName, bad)
 	}
 	mustBucket(t, e, "abc")
-	_, err := e.CreateBucket(ctx, "abc")
+	_, err := e.CreateBucket(ctx, ws(e), "abc")
 	wantCode(t, err, apierr.NameTaken, "duplicate")
 	mustBucket(t, e, "two")
-	_, err = e.CreateBucket(ctx, "three")
+	_, err = e.CreateBucket(ctx, ws(e), "three")
 	wantCode(t, err, apierr.LimitReached, "max buckets")
 }
 
@@ -115,7 +115,7 @@ func TestPutGetOverwriteDelete(t *testing.T) {
 	if got := read(t, e, b.ID, "a/b.txt"); got != "goodbye!" {
 		t.Fatalf("read %q", got)
 	}
-	bk, _ := e.GetBucket(ctx, b.ID)
+	bk, _ := e.GetBucket(ctx, ws(e), b.ID)
 	if bk.SizeBytes != 8 || bk.ObjectCount != 1 {
 		t.Fatalf("bucket totals %d bytes %d objects", bk.SizeBytes, bk.ObjectCount)
 	}
@@ -127,7 +127,7 @@ func TestPutGetOverwriteDelete(t *testing.T) {
 	}
 	_, err = e.HeadObject(ctx, b.ID, "a/b.txt")
 	wantCode(t, err, apierr.ObjectNotFound, "deleted")
-	bk, _ = e.GetBucket(ctx, b.ID)
+	bk, _ = e.GetBucket(ctx, ws(e), b.ID)
 	if bk.SizeBytes != 0 || bk.ObjectCount != 0 {
 		t.Fatalf("bucket totals after delete %d bytes %d objects", bk.SizeBytes, bk.ObjectCount)
 	}
@@ -234,7 +234,7 @@ func TestConcurrentPutsRespectQuota(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	bk, _ := e.GetBucket(context.Background(), b.ID)
+	bk, _ := e.GetBucket(context.Background(), ws(e), b.ID)
 	if bk.SizeBytes > 100 || okCount != 10 {
 		t.Fatalf("%d puts succeeded, bucket holds %d bytes", okCount, bk.SizeBytes)
 	}
@@ -432,7 +432,7 @@ func TestDeleteBucket(t *testing.T) {
 	if _, err := os.Stat(e.layout.UploadDir(u.ID)); !os.IsNotExist(err) {
 		t.Fatal("upload folder left")
 	}
-	_, err := e.GetBucket(ctx, "files")
+	_, err := e.GetBucket(ctx, ws(e), "files")
 	wantCode(t, err, apierr.BucketNotFound, "deleted bucket")
 	mustBucket(t, e, "files") // the name is free again
 }

@@ -76,7 +76,7 @@ func TestServiceTokenRotation(t *testing.T) {
 
 	// An id that belongs to another token is refused, and nothing changes.
 	other, otherTok := auth.New()
-	if _, err := s.Engine.Meta().CreateToken(context.Background(), meta.Token{ID: other, Name: "x", SecretHash: auth.Hash(otherTok), Scope: "instance", Access: "read"}); err != nil {
+	if _, err := s.Engine.Meta().CreateToken(context.Background(), meta.Token{ID: other, Name: "x", SecretHash: auth.Hash(otherTok), Scope: "instance", Access: "read"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Engine.Close()

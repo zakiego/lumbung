@@ -31,9 +31,19 @@ func newEngine(t testing.TB, mod func(*config.Config)) *Engine {
 	return e
 }
 
+// ws is the id of the default workspace, where these tests keep their
+// databases and buckets unless a test makes another one.
+func ws(e *Engine) string {
+	w, err := e.meta.DefaultWorkspace(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	return w.ID
+}
+
 func mustCreate(t testing.TB, e *Engine, name string) meta.Database {
 	t.Helper()
-	d, err := e.CreateDatabase(context.Background(), name)
+	d, err := e.CreateDatabase(context.Background(), ws(e), name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +74,7 @@ func stmt(sql string, args ...any) Statement {
 }
 
 func query(e *Engine, db string, access Access, sql string, args ...any) (*Result, error) {
-	return e.Query(context.Background(), Target{Database: db}, access, stmt(sql, args...))
+	return e.Query(context.Background(), Target{Workspace: ws(e), Database: db}, access, stmt(sql, args...))
 }
 
 func mustQuery(t testing.TB, e *Engine, db string, access Access, sql string, args ...any) *Result {

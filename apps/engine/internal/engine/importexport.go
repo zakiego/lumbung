@@ -43,7 +43,7 @@ var sqliteHeader = []byte("SQLite format 3\x00")
 // everything passed. The mode's rule is checked again at the moment of the
 // swap, so writes that land during a long import are never silently lost.
 func (e *Engine) Import(ctx context.Context, t Target, format ImportFormat, mode ImportMode, r io.Reader) error {
-	tg, err := e.resolve(ctx, t.Database, t.Branch)
+	tg, err := e.resolve(ctx, t.Workspace, t.Database, t.Branch)
 	if err != nil {
 		return err
 	}
@@ -330,7 +330,7 @@ func importErr(err error) error {
 
 // ExportDB writes a consistent copy of a branch as a SQLite file.
 func (e *Engine) ExportDB(ctx context.Context, t Target, w io.Writer) error {
-	tg, err := e.resolve(ctx, t.Database, t.Branch)
+	tg, err := e.resolve(ctx, t.Workspace, t.Database, t.Branch)
 	if err != nil {
 		return err
 	}

@@ -118,5 +118,5 @@ A test starts from a version 5 `meta.db` holding every kind of token, a grants t
 - `@lumbung/client` 0.2.0: `workspace` option, workspace calls, and token creation without a target now makes a workspace token. Documented in the changelog as breaking.
 - A client that switches on a token's `scope` sees a new value, `workspace`. Token, database and bucket bodies gain `workspace_id`.
 - Engine functions that took a database or bucket name now take a workspace too. Nothing resolves a name without one.
-- The database list no longer shows a branch-limited token counts and sizes for branches it can't reach, and `GET /v1/databases/{db}` answers the same limited view instead of refusing.
+- The database list no longer shows a branch-limited token counts, sizes or the default branch for branches it can't reach. `GET /v1/databases/{db}` keeps refusing such a token: opening it up would have meant changing an existing isolation assertion, and the list was the only place that told it more than it could open.
 - A later migration that rebuilds `tokens` must still carry `token_grants` across.

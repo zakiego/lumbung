@@ -9,7 +9,7 @@ This file is the source of truth for scope and behavior. Read the section you're
 - Us first: one instance on the Mac mini, used by our own apps and agents.
 - Later, anyone who clones the repo and runs it on their own machine. So nothing in the product may depend on our hostnames, our tunnel or our accounts. Our own deployment notes live in `ops/`, everything else is generic.
 
-No public sign-up, no billing, no multi-org tenancy. One instance is one team.
+No public sign-up, no billing, no multi-org tenancy. One instance is one team. Workspaces (section 17) separate that team's apps and agents from each other; they aren't organizations.
 
 ## 2. Wording rule
 
@@ -53,7 +53,7 @@ SDK / CLI / MCP client / any HTTP client ─────────────
                                                         ▼
 browser ─► dashboard (TanStack Start) ──service token─► lumbungd (Go)
            Better Auth, invites, roles                  REST /v1, /mcp, /libsql, /health
-           own small SQLite (users, sessions)           meta.db (databases, branches, tokens, audit, stats)
+           own small SQLite (users, sessions)           meta.db (workspaces, databases, branches, tokens, audit, stats)
                                                         one SQLite file per branch
 ```
 
@@ -145,13 +145,13 @@ A branch is a full copy of its parent at the moment it was made, taken with the 
 ### 6.8 Tokens
 
 - Format `lmb_<id>_<secret>`. Only a SHA-256 hash is stored. The full token is shown once.
-- Scopes: instance admin, per database with read, write or admin (optionally limited to one branch), or per bucket (section 16.4). Optional expiry and S3 access key. Last-used time recorded.
+- Scopes: instance (belongs to no workspace), workspace (everything in one workspace), per database with read, write or admin (optionally limited to one branch), or per bucket (section 16.4). Every token below the instance belongs to one workspace (section 17.2). Optional expiry and S3 access key. Last-used time recorded.
 - Grants (ADR 0007): one token may hold up to 20 grants, each a database (optionally one branch) or a bucket with its own level, for an app or agent that needs its own database and bucket and nothing else. Such a token has the scope `grants`. Every check is per grant, minting and managing a token needs admin on every grant it has, and deleting anything a grant names revokes the whole token.
 - Constant-time comparison. Rate limit per token. Failed auth is rate limited by address.
 
 ### 6.9 Audit and stats
 
-- Audit log for every management action: who (token or dashboard user), what, when, result.
+- Audit log for every management action: who (token or dashboard user), what, when, result, and the workspace it happened in (section 17.4).
 - Per-branch counters in rolling buckets: queries, rows read and written, errors, duration percentiles. Bounded slow-query log. All of it capped in size.
 
 ### 6.10 Health and upgrades
@@ -161,7 +161,7 @@ A branch is a full copy of its parent at the moment it was made, taken with the 
 
 ## 7. REST API
 
-Base path `/v1`, `Authorization: Bearer <token>`. `{db}` and `{branch}` accept a name or an id. Names match `[a-z0-9][a-z0-9-]{0,62}`.
+Base path `/v1`, `Authorization: Bearer <token>`. `{db}` and `{branch}` accept a name or an id. Names match `[a-z0-9][a-z0-9-]{0,62}`. Every path below resolves in the workspace of the request, and can be prefixed with `/v1/workspaces/{ws}` to name one (section 17.3). Section 17.4 lists the workspace and instance endpoints.
 
 ```
 GET  POST            /v1/databases
@@ -205,6 +205,7 @@ Added in milestone 11 (ADR 0005). The libSQL remote protocol over HTTP (Hrana v2
 ## 8. MCP
 
 - Streamable HTTP endpoint at `/mcp` on the engine, same bearer tokens and scopes as REST.
+- A token works inside its workspace (section 17.7): creating a database or a bucket takes an admin of the whole workspace.
 - Tools: `list_databases`, `get_database`, `create_database`, `list_branches`, `create_branch`, `delete_branch`, `reset_branch`, `diff_branches`, `get_schema`, `query` (always on a read-only connection), `execute` (needs a write scope), `list_snapshots`, `create_snapshot`.
 - Every tool has correct read-only and destructive annotations, a tight input schema, and capped output sized for a model's context (row and byte caps, with a note when truncated).
 - Check the current MCP spec and the Go SDK docs before writing it. Test with a real client: `mcporter` against a local engine.
@@ -328,7 +329,7 @@ Added after milestone 11, on top of the shipped product. Buckets of files live n
 
 ### 16.1 Model
 
-- A bucket belongs to the instance. Names match `[a-z0-9][a-z0-9-]{1,61}[a-z0-9]` (3 to 63 characters, so every S3 client accepts them). Bucket ids are `bk_...`.
+- A bucket belongs to a workspace (section 17.1), and its name is unique there. Names match `[a-z0-9][a-z0-9-]{1,61}[a-z0-9]` (3 to 63 characters, so every S3 client accepts them). Bucket ids are `bk_...`.
 - An object has a key (1 to 1024 bytes of UTF-8, no control characters), a size, an ETag, a content type, the standard headers (`Cache-Control`, `Content-Disposition`, `Content-Encoding`, `Content-Language`) and custom metadata (`x-amz-meta-*`, 2 KB in total). Keys are opaque strings: they never become file paths.
 - The ETag is the MD5 of the content, or for a multipart object the MD5 of the parts' MD5s with a `-<parts>` suffix, as S3 clients expect.
 - Writes are atomic: a reader sees the old object or the new one, never a partial file. The last write wins.
@@ -366,8 +367,8 @@ POST                 /v1/buckets/{bucket}/presign          (a presigned URL, sig
 
 ### 16.4 Tokens and access keys
 
-- New token scope `bucket`: read, write or admin on one bucket. Instance tokens reach every bucket at their level. Database tokens never reach a bucket, and bucket tokens never reach a database. A token that needs both holds a grant for each (section 6.8): it reaches exactly what its grants name, each at its own level.
-- read: list, GET, HEAD, presign GET. write: also PUT, DELETE, copy into the bucket, multipart, presign PUT. admin: also bucket settings and tokens for the bucket. Creating and deleting buckets needs an instance admin.
+- New token scope `bucket`: read, write or admin on one bucket. Instance and workspace tokens reach every bucket of the workspace they act in at their level. Database tokens never reach a bucket, and bucket tokens never reach a database. A token that needs both holds a grant for each (section 6.8): it reaches exactly what its grants name, each at its own level.
+- read: list, GET, HEAD, presign GET. write: also PUT, DELETE, copy into the bucket, multipart, presign PUT. admin: also bucket settings and tokens for the bucket. Creating and deleting buckets needs an admin of the whole workspace (section 17.2).
 - An access key belongs to one token: id `LMB` + the token's id in capitals, secret 40 random characters. It has the token's scope, expiry, rate limit and audit identity, and revoking the token revokes the key and every URL it signed. SigV4 needs the secret on the server, so it is stored encrypted (AES-256-GCM, key in `secrets/access-key-encryption-key`, mode 600, made on first start).
 - Failed signatures count against the per-address failed-auth limit. Anonymous public reads have their own per-address limit.
 
@@ -481,7 +482,7 @@ GET                  /v1/instance/audit                     (every workspace and
 - Creating, renaming, deleting and restoring a database, the trash list, creating and deleting a bucket and reading the audit log take a workspace admin (they took an instance admin).
 - `GET /v1/audit` is the request's workspace. Every audit entry records its workspace, and `LUMBUNG_AUDIT_MAX_ROWS` applies per workspace.
 - Database, bucket and token bodies gain `workspace_id`. A token's `scope` may be `workspace`.
-- The database list and `GET /v1/databases/{db}` give a token limited to some branches the same limited view: counts, size, default branch and last activity cover only the branches it reaches.
+- The database list gives a token limited to some branches a limited view: counts, size, default branch and last activity cover only the branches it reaches. `GET /v1/databases/{db}` still refuses such a token, as before. MCP `list_databases` follows the same rule.
 - Moving revokes every token that reached the moved database or bucket.
 
 ### 17.5 Limits and quotas
@@ -542,8 +543,8 @@ Migration 6, forward-only: the default workspace, `workspace_id` on `databases`,
 
 | # | Milestone | Done when |
 |---|---|---|
-| 18 | Workspace core | Migration 6 with the upgrade test, workspaces in meta, engine and auth, the `workspace` scope, short-URL resolution on every door, the workspace and instance endpoints, per-workspace audit, the limited database view, isolation rows for REST, libSQL, S3 and MCP, generated files current, concept docs |
-| 19 | Limits, deletion, addressing | 17.5 quotas, 17.6 trash, restore, purge and move, qualified URLs on every door, the service token's narrowed access, the new MCP tools, backup and restore drill, the rest of 17.9, fuzz tests with two workspaces |
+| 18 | Workspace core | Migration 6 with the upgrade test, workspaces in meta, engine and auth, the `workspace` scope, short and qualified URLs on every door, the workspace and instance endpoints, count limits and the token cap, per-workspace audit, the limited database view, isolation rows for REST, libSQL, S3 and MCP, generated files current, concept docs |
+| 19 | Quotas, deletion, moving | 17.5 byte quotas, 17.6 trash, restore, purge and move, the service token's narrowed access, the new MCP tools, backup and restore drill, the rest of 17.9, fuzz tests with two workspaces |
 | 20 | SDK, CLI, docs | 17.7 SDK 0.2.0 and CLI with tests against a real engine, examples, guides and the AI agents guide, the proof script for REST, libSQL, S3 and MCP |
 | 21 | Dashboard | 17.8, reviewed per `/zaki-design-ui`, end-to-end script walks two workspaces |
 | 22 | Upgrade notes | `ops/README.md` steps for our instance, restore drill run against a local upgraded copy |

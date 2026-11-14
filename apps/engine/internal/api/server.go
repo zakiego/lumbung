@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	"github.com/zakiego/lumbung/apps/engine/internal/auth"
 	"github.com/zakiego/lumbung/apps/engine/internal/config"
 	"github.com/zakiego/lumbung/apps/engine/internal/engine"
+	"github.com/zakiego/lumbung/apps/engine/internal/ids"
 	"github.com/zakiego/lumbung/apps/engine/internal/meta"
 	"github.com/zakiego/lumbung/apps/engine/internal/ratelimit"
 	"github.com/zakiego/lumbung/apps/engine/internal/stats"
@@ -108,7 +110,10 @@ func Config() huma.Config {
 	// The document version is the API version, not the binary version, so
 	// the committed openapi.json only changes when the API does.
 	cfg := huma.DefaultConfig("Lumbung API", "1")
-	cfg.Info.Description = "Self-hosted SQLite databases with branches. Every request needs `Authorization: Bearer <token>`. Errors are `application/problem+json` with a stable `code`."
+	cfg.Info.Description = "Self-hosted SQLite databases with branches. Every request needs `Authorization: Bearer <token>`. Errors are `application/problem+json` with a stable `code`.\n\n" +
+		"Databases, buckets and tokens live in workspaces. A request acts in the workspace of its token; an instance token, which belongs to none, acts in the default workspace. " +
+		"To name a workspace, put `/v1/workspaces/{workspace}` in front of a path under `/v1/databases`, `/v1/trash`, `/v1/buckets`, `/v1/tokens`, `/v1/audit` or `/v1/s3` " +
+		"(for example `/v1/workspaces/acme/databases`), or of `/libsql` and `/mcp`. A token that belongs to a workspace can only name its own; any other gets `workspace_not_found`."
 	cfg.OpenAPIPath = "/v1/openapi"
 	cfg.DocsPath = ""
 	cfg.SchemasPath = ""
@@ -139,14 +144,59 @@ func stampRequestID(ctx huma.Context, _ string, v any) (any, error) {
 // raw path first: the router cleans paths, which would change object keys.
 // Requests no route matches get a problem+json 404 or 405 instead of the
 // router's plain text.
+//
+// A qualified URL, /v1/workspaces/{ws}/..., is the same request as its short
+// form with the workspace named (PLAN 17.3): the prefix is taken off here,
+// kept in the context, and the request goes to the same handler as the
+// short URL. Nothing is decided here. Whether the caller may act in that
+// workspace is checked after authentication, in act.
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isS3Path(r.URL.EscapedPath()) {
-			s.serveS3(w, r)
+		raw := r.URL.EscapedPath()
+		sel, rest, qualified := splitQualified(raw)
+		if !qualified {
+			rest = raw
+		}
+		if isS3Path(rest) {
+			s.serveS3(w, r, sel, rest)
 			return
+		}
+		if qualified {
+			decoded, err := url.PathUnescape(rest)
+			if err != nil {
+				writeProblemHTTP(w, apierr.New(apierr.BadRequest, "the path isn't valid"), newRequestID())
+				return
+			}
+			r = r.Clone(context.WithValue(r.Context(), keySel, sel))
+			r.URL.Path, r.URL.RawPath = decoded, rest
 		}
 		s.mux.ServeHTTP(&problemFallback{ResponseWriter: w}, r)
 	})
+}
+
+const workspacesPrefix = "/v1/workspaces/"
+
+// splitQualified splits a qualified URL path into the workspace it names
+// and the short path it stands for. Only the paths that act inside a
+// workspace have a qualified form; /v1/workspaces/{ws} itself and its own
+// sub-resources are ordinary routes.
+func splitQualified(escaped string) (sel, rest string, ok bool) {
+	after, found := strings.CutPrefix(escaped, workspacesPrefix)
+	if !found {
+		return "", "", false
+	}
+	ref, tail, found := strings.Cut(after, "/")
+	if !found || !(ids.ValidName(ref) || ids.IsID(ref, ids.Workspace)) {
+		return "", "", false
+	}
+	head, _, _ := strings.Cut(tail, "/")
+	switch head {
+	case "databases", "trash", "buckets", "tokens", "audit", "s3":
+		return ref, "/v1/" + tail, true
+	case "libsql", "mcp":
+		return ref, "/" + tail, true
+	}
+	return "", "", false
 }
 
 // problemFallback rewrites the router's own text/plain 404 and 405 into
@@ -298,12 +348,69 @@ func (s *Server) authenticate(ctx context.Context, header string) (auth.Principa
 	if !auth.Matches(tok, rec.SecretHash) {
 		return auth.Principal{}, apierr.New(apierr.Unauthorized, "unknown token")
 	}
+	p, err := s.principalOf(ctx, rec)
+	if err != nil {
+		return auth.Principal{}, err
+	}
+	s.touch(ctx, rec.ID)
+	return p, nil
+}
+
+// principalOf builds the principal of a token record whose secret the
+// caller has already checked. It fails with unauthorized for a revoked or
+// expired token, and for a token whose workspace is gone: such a token
+// answers exactly like one that doesn't exist.
+func (s *Server) principalOf(ctx context.Context, rec meta.Token) (auth.Principal, error) {
 	p, err := auth.FromToken(rec, s.now())
 	if err != nil {
 		return auth.Principal{}, apierr.New(apierr.Unauthorized, err.Error())
 	}
-	s.touch(ctx, rec.ID)
+	if p.Bound() {
+		if _, err := s.eng.GetWorkspace(ctx, p.WorkspaceID); err != nil {
+			if apierr.As(err).Code == apierr.WorkspaceNotFound {
+				return auth.Principal{}, apierr.New(apierr.Unauthorized, "unknown token")
+			}
+			return auth.Principal{}, err
+		}
+	}
 	return p, nil
+}
+
+// act resolves the workspace a request acts in and returns the principal
+// acting there (PLAN 17.3). sel is the workspace a qualified URL names, by
+// name or id; it is empty for a short URL, which means the caller's own
+// workspace: a bound token's, or the default workspace for an instance
+// token.
+//
+// A bound token naming any workspace but its own gets workspace_not_found,
+// worded exactly like a workspace that doesn't exist, so it can't tell
+// which names are taken.
+func (s *Server) act(ctx context.Context, p auth.Principal, sel string) (auth.Principal, error) {
+	ws, err := s.requestWorkspace(ctx, p.Bound(), p.WorkspaceID, sel)
+	if err != nil {
+		return auth.Principal{}, err
+	}
+	acting, ok := p.In(ws.ID)
+	if !ok {
+		return auth.Principal{}, apierr.Newf(apierr.WorkspaceNotFound, "no workspace %q", sel)
+	}
+	return acting, nil
+}
+
+// requestWorkspace finds the workspace a request names or implies.
+func (s *Server) requestWorkspace(ctx context.Context, bound bool, own, sel string) (meta.Workspace, error) {
+	switch {
+	case sel != "":
+		return s.eng.GetWorkspace(ctx, sel)
+	case bound:
+		ws, err := s.eng.GetWorkspace(ctx, own)
+		if err != nil && apierr.As(err).Code == apierr.WorkspaceNotFound {
+			// Deleted between authentication and here.
+			return meta.Workspace{}, apierr.New(apierr.Unauthorized, "unknown token")
+		}
+		return ws, err
+	}
+	return s.eng.DefaultWorkspace(ctx)
 }
 
 // touch records a token's last use, writing meta.db at most once a minute
@@ -365,12 +472,26 @@ func (s *Server) middleware(ctx huma.Context, next func(huma.Context)) {
 	if a := ctx.Header("X-Lumbung-Actor"); a != "" && p.Service && actorRe.MatchString(a) {
 		p.Actor = a
 	}
+	// Every operation runs as a principal acting in exactly one workspace.
+	p, err = s.act(ctx.Context(), p, selFrom(ctx.Context()))
+	if err != nil {
+		ae := apierr.As(err)
+		if ae.Code == apierr.Internal {
+			s.log.Error("resolve workspace", "err", err)
+		}
+		writeProblem(ctx, ae, id)
+		return
+	}
 	info.principal = p
 
 	next(ctx)
 
 	if action, _ := ctx.Operation().Metadata["audit"].(string); action != "" {
-		e := meta.AuditEntry{TokenID: p.TokenID, Actor: p.Actor, Action: action, Target: info.target, Result: "ok", RequestID: id}
+		e := meta.AuditEntry{WorkspaceID: p.WorkspaceID, TokenID: p.TokenID, Actor: p.Actor, Action: action, Target: info.target, Result: "ok", RequestID: id}
+		if instance, _ := ctx.Operation().Metadata["instance"].(bool); instance {
+			// Workspaces, instance tokens and moves belong to no workspace's log.
+			e.WorkspaceID = ""
+		}
 		if ctx.Status() >= 400 {
 			e.Result, e.Code = "error", info.code
 			if e.Code == "" {

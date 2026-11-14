@@ -51,7 +51,7 @@ func (e *Engine) removeOrphans(ctx context.Context) error {
 		dir := filepath.Join(e.layout.DBsDir(), d.Name())
 		if !liveDB[d.Name()] {
 			// No live database owns this folder (trashed ones live in trash/).
-			if _, err := e.meta.GetDeletedDatabase(ctx, d.Name()); err != nil {
+			if _, err := e.meta.DeletedDatabaseByID(ctx, d.Name()); err != nil {
 				e.log.Warn("removing orphan database folder", "path", dir)
 				_ = os.RemoveAll(dir)
 			}

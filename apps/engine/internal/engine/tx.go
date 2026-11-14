@@ -65,7 +65,7 @@ func (e *Engine) begin(ctx context.Context, t Target, access Access, hooks sessi
 	if access != Read && access != Write {
 		return nil, apierr.New(apierr.BadRequest, "unknown access")
 	}
-	tg, err := e.resolve(ctx, t.Database, t.Branch)
+	tg, err := e.resolve(ctx, t.Workspace, t.Database, t.Branch)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func (e *Engine) begin(ctx context.Context, t Target, access Access, hooks sessi
 			tx.release()
 		}
 	}()
-	if tg, err = e.resolve(ctx, tg.db.ID, tg.branch.ID); err != nil {
+	if tg, err = e.resolve(ctx, tg.db.WorkspaceID, tg.db.ID, tg.branch.ID); err != nil {
 		return nil, err
 	}
 	tx.tg = tg

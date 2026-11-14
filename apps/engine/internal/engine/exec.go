@@ -54,8 +54,11 @@ type Result struct {
 
 // Target names a branch. An empty Branch means the database's default.
 type Target struct {
-	Database string
-	Branch   string
+	// Workspace is the id of the workspace the database is in. A database
+	// of another workspace is not found.
+	Workspace string
+	Database  string
+	Branch    string
 }
 
 // Query runs one statement in its own transaction.

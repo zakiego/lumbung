@@ -38,7 +38,7 @@ func readObj(t *testing.T, e *engine.Engine, bucketID, key string) string {
 func TestBackupIncludesObjects(t *testing.T) {
 	src := t.TempDir()
 	e := open(t, src)
-	b, err := e.CreateBucket(bg, "photos")
+	b, err := e.CreateBucket(bg, ws(e), "photos")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestBackupIncludesObjects(t *testing.T) {
 	// A token whose access key secret is sealed with this instance's key.
 	sealed := e.Sealer().Seal("tok_aaaaaaaaaaaaaaaaaaaa", "the-secret")
 	if _, err := e.Meta().CreateToken(bg, meta.Token{ID: "tok_aaaaaaaaaaaaaaaaaaaa", Name: "s3", SecretHash: []byte{1}, Scope: "bucket",
-		BucketID: b.ID, Access: "read", AccessSecret: sealed}); err != nil {
+		WorkspaceID: b.WorkspaceID, BucketID: b.ID, Access: "read", AccessSecret: sealed}, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -111,7 +111,7 @@ func TestBackupIncludesObjects(t *testing.T) {
 			t.Fatalf("restored %s = %q", k, got)
 		}
 	}
-	rb, _ := r.GetBucket(bg, "photos")
+	rb, _ := r.GetBucket(bg, ws(r), "photos")
 	if rb.ObjectCount != 3 || rb.SizeBytes != int64(len("alphabravocharlie")) {
 		t.Fatalf("restored bucket totals: %d objects %d bytes", rb.ObjectCount, rb.SizeBytes)
 	}
@@ -132,7 +132,7 @@ func TestBackupIncludesObjects(t *testing.T) {
 func TestRestoreDropsObjectsWithoutFiles(t *testing.T) {
 	src := t.TempDir()
 	e := open(t, src)
-	b, _ := e.CreateBucket(bg, "photos")
+	b, _ := e.CreateBucket(bg, ws(e), "photos")
 	putObj(t, e, b.ID, "keep.txt", "keep")
 	gone := putObj(t, e, b.ID, "gone.txt", "gone!")
 	dir, m, err := Run(bg, Options{DataDir: src, To: t.TempDir()})
@@ -166,7 +166,7 @@ func TestRestoreDropsObjectsWithoutFiles(t *testing.T) {
 	if _, err := r.HeadObject(bg, b.ID, "gone.txt"); err == nil {
 		t.Fatal("an object without its file survived the restore")
 	}
-	rb, _ := r.GetBucket(bg, "photos")
+	rb, _ := r.GetBucket(bg, ws(r), "photos")
 	if rb.ObjectCount != 1 || rb.SizeBytes != 4 {
 		t.Fatalf("bucket totals after reconcile: %d objects %d bytes", rb.ObjectCount, rb.SizeBytes)
 	}
@@ -192,7 +192,7 @@ func TestVerifyObjectPaths(t *testing.T) {
 func TestCorruptPreviousFileIsNotLinked(t *testing.T) {
 	src := t.TempDir()
 	e := open(t, src)
-	b, _ := e.CreateBucket(bg, "photos")
+	b, _ := e.CreateBucket(bg, ws(e), "photos")
 	o := putObj(t, e, b.ID, "a.txt", "alpha")
 	to := t.TempDir()
 	now := time.Date(2026, 11, 14, 2, 0, 0, 0, time.UTC)
@@ -224,7 +224,7 @@ func TestCorruptPreviousFileIsNotLinked(t *testing.T) {
 func TestSkipObjectsBackupsStayApart(t *testing.T) {
 	src := t.TempDir()
 	e := open(t, src)
-	b, _ := e.CreateBucket(bg, "photos")
+	b, _ := e.CreateBucket(bg, ws(e), "photos")
 	putObj(t, e, b.ID, "a.txt", "alpha")
 	to := t.TempDir()
 	at := time.Date(2026, 11, 14, 2, 0, 0, 0, time.UTC)
@@ -262,7 +262,7 @@ func TestRestoreMetaDropsUploadsWithMissingParts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := e.CreateBucket(bg, "photos")
+	b, _ := e.CreateBucket(bg, ws(e), "photos")
 	u, _ := e.CreateUpload(bg, b.ID, "big", engine.ObjectAttrs{}, "")
 	if _, err := e.UploadPart(bg, engine.UploadPartInput{UploadID: u.ID, BucketID: b.ID, Key: "big", Number: 1, Size: 1, Body: strings.NewReader("x")}); err != nil {
 		t.Fatal(err)

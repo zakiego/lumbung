@@ -38,70 +38,72 @@ type CodeInfo struct {
 
 // The error codes.
 const (
-	BadRequest            = "bad_request"
-	InvalidName           = "invalid_name"
-	EmptyStatement        = "empty_statement"
-	MultipleStatements    = "multiple_statements"
-	InvalidParams         = "invalid_params"
-	SQLError              = "sql_error"
-	ConstraintViolation   = "constraint_violation"
-	StatementDenied       = "statement_denied"
-	ReadOnly              = "read_only"
-	StatementTimeout      = "statement_timeout"
-	ValueTooLarge         = "value_too_large"
-	ResultTooLarge        = "result_too_large"
-	MemoryLimit           = "memory_limit"
-	BranchSizeLimit       = "branch_size_limit"
-	InstanceQuotaExceeded = "instance_quota_exceeded"
-	DiskFull              = "insufficient_disk"
-	DatabaseNotFound      = "database_not_found"
-	BranchNotFound        = "branch_not_found"
-	NameTaken             = "name_taken"
-	LimitReached          = "limit_reached"
-	SnapshotNotFound      = "snapshot_not_found"
-	BranchProtected       = "branch_protected"
-	ParentGone            = "parent_gone"
-	BranchNotEmpty        = "branch_not_empty"
-	InvalidImport         = "invalid_import"
-	ImportTooLarge        = "import_too_large"
-	Unauthorized          = "unauthorized"
-	Forbidden             = "forbidden"
-	RateLimited           = "rate_limited"
-	NotFound              = "not_found"
-	MethodNotAllowed      = "method_not_allowed"
-	InvalidRequest        = "invalid_request"
-	RequestTooLarge       = "request_too_large"
-	RequestTimeout        = "request_timeout"
-	IdempotencyMismatch   = "idempotency_mismatch"
-	TokenNotFound         = "token_not_found"
-	TransactionAborted    = "transaction_aborted"
-	InvalidBaton          = "invalid_baton"
-	TooManyStreams        = "too_many_streams"
-	BucketNotFound        = "bucket_not_found"
-	BucketNotEmpty        = "bucket_not_empty"
-	ObjectNotFound        = "object_not_found"
-	InvalidKey            = "invalid_key"
-	ObjectTooLarge        = "object_too_large"
-	BucketSizeLimit       = "bucket_size_limit"
-	ObjectQuotaExceeded   = "object_storage_quota_exceeded"
-	UploadNotFound        = "upload_not_found"
-	InvalidPart           = "invalid_part"
-	PartTooSmall          = "part_too_small"
-	BadDigest             = "bad_digest"
-	IncompleteBody        = "incomplete_body"
-	LengthRequired        = "length_required"
-	PreconditionFailed    = "precondition_failed"
-	InvalidRange          = "invalid_range"
-	NoAccessKey           = "no_access_key"
-	Busy                  = "busy"
-	Unavailable           = "unavailable"
-	Internal              = "internal"
+	BadRequest             = "bad_request"
+	InvalidName            = "invalid_name"
+	EmptyStatement         = "empty_statement"
+	MultipleStatements     = "multiple_statements"
+	InvalidParams          = "invalid_params"
+	SQLError               = "sql_error"
+	ConstraintViolation    = "constraint_violation"
+	StatementDenied        = "statement_denied"
+	ReadOnly               = "read_only"
+	StatementTimeout       = "statement_timeout"
+	ValueTooLarge          = "value_too_large"
+	ResultTooLarge         = "result_too_large"
+	MemoryLimit            = "memory_limit"
+	BranchSizeLimit        = "branch_size_limit"
+	InstanceQuotaExceeded  = "instance_quota_exceeded"
+	DiskFull               = "insufficient_disk"
+	DatabaseNotFound       = "database_not_found"
+	BranchNotFound         = "branch_not_found"
+	NameTaken              = "name_taken"
+	LimitReached           = "limit_reached"
+	SnapshotNotFound       = "snapshot_not_found"
+	BranchProtected        = "branch_protected"
+	ParentGone             = "parent_gone"
+	BranchNotEmpty         = "branch_not_empty"
+	InvalidImport          = "invalid_import"
+	ImportTooLarge         = "import_too_large"
+	Unauthorized           = "unauthorized"
+	Forbidden              = "forbidden"
+	RateLimited            = "rate_limited"
+	NotFound               = "not_found"
+	MethodNotAllowed       = "method_not_allowed"
+	InvalidRequest         = "invalid_request"
+	RequestTooLarge        = "request_too_large"
+	RequestTimeout         = "request_timeout"
+	IdempotencyMismatch    = "idempotency_mismatch"
+	TokenNotFound          = "token_not_found"
+	TransactionAborted     = "transaction_aborted"
+	InvalidBaton           = "invalid_baton"
+	TooManyStreams         = "too_many_streams"
+	BucketNotFound         = "bucket_not_found"
+	BucketNotEmpty         = "bucket_not_empty"
+	ObjectNotFound         = "object_not_found"
+	InvalidKey             = "invalid_key"
+	ObjectTooLarge         = "object_too_large"
+	BucketSizeLimit        = "bucket_size_limit"
+	ObjectQuotaExceeded    = "object_storage_quota_exceeded"
+	UploadNotFound         = "upload_not_found"
+	InvalidPart            = "invalid_part"
+	PartTooSmall           = "part_too_small"
+	BadDigest              = "bad_digest"
+	IncompleteBody         = "incomplete_body"
+	LengthRequired         = "length_required"
+	PreconditionFailed     = "precondition_failed"
+	InvalidRange           = "invalid_range"
+	NoAccessKey            = "no_access_key"
+	WorkspaceNotFound      = "workspace_not_found"
+	WorkspaceQuotaExceeded = "workspace_quota_exceeded"
+	Busy                   = "busy"
+	Unavailable            = "unavailable"
+	Internal               = "internal"
 )
 
 // Codes lists every code with its status, for the Error codes docs page.
 var Codes = []CodeInfo{
 	{BadRequest, http.StatusBadRequest, "The request body or a parameter is malformed."},
-	{InvalidName, http.StatusBadRequest, "A database or branch name doesn't match `[a-z0-9][a-z0-9-]{0,62}`, or a bucket name doesn't match `[a-z0-9][a-z0-9-]{1,61}[a-z0-9]`."},
+	{InvalidName, http.StatusBadRequest, "A workspace, database or branch name doesn't match `[a-z0-9][a-z0-9-]{0,62}`, or a bucket name doesn't match `[a-z0-9][a-z0-9-]{1,61}[a-z0-9]`."},
 	{EmptyStatement, http.StatusBadRequest, "The SQL text holds no statement."},
 	{MultipleStatements, http.StatusBadRequest, "`query` got more than one statement. Use `batch` for several."},
 	{InvalidParams, http.StatusBadRequest, "The parameters don't match the statement's placeholders."},
@@ -118,8 +120,8 @@ var Codes = []CodeInfo{
 	{DiskFull, http.StatusInsufficientStorage, "The host disk has less free space than the configured minimum."},
 	{DatabaseNotFound, http.StatusNotFound, "No database with that name or id."},
 	{BranchNotFound, http.StatusNotFound, "No branch with that name or id in this database."},
-	{NameTaken, http.StatusConflict, "Another database, branch or bucket already has that name."},
-	{LimitReached, http.StatusConflict, "The instance already has the most databases or buckets, the database the most branches, or the bucket the most multipart uploads in progress, allowed."},
+	{NameTaken, http.StatusConflict, "Another database or bucket in the workspace, another branch in the database, or another workspace already has that name."},
+	{LimitReached, http.StatusConflict, "The instance or the workspace already has the most databases, buckets, tokens or workspaces, the database the most branches, or the bucket the most multipart uploads in progress, allowed."},
 	{SnapshotNotFound, http.StatusNotFound, "No snapshot with that id in this database."},
 	{BranchProtected, http.StatusConflict, "The branch is protected, so it can't be deleted, reset or overwritten by an import. The default branch is always protected."},
 	{ParentGone, http.StatusConflict, "The branch can't be reset because the branch or snapshot it was made from no longer exists."},
@@ -155,6 +157,8 @@ var Codes = []CodeInfo{
 	{PreconditionFailed, http.StatusPreconditionFailed, "An If-Match or If-Unmodified-Since condition doesn't hold."},
 	{InvalidRange, http.StatusRequestedRangeNotSatisfiable, "The Range starts past the end of the object."},
 	{NoAccessKey, http.StatusBadRequest, "Presigning needs a token created with an access key."},
+	{WorkspaceNotFound, http.StatusNotFound, "No workspace with that name or id, or the token belongs to another workspace."},
+	{WorkspaceQuotaExceeded, http.StatusInsufficientStorage, "The write would grow the workspace's databases or its buckets past the workspace's own size limit."},
 	{Busy, http.StatusServiceUnavailable, "The branch stayed locked longer than the busy timeout. Retry."},
 	{Unavailable, http.StatusServiceUnavailable, "The engine can't serve: for example meta.db is newer than this binary."},
 	{Internal, http.StatusInternalServerError, "Something failed inside the engine. The log has details."},

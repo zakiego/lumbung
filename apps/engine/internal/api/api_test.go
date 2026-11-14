@@ -75,6 +75,17 @@ func newEnv(t testing.TB, mod func(*config.Config)) *env {
 	return &env{t: t, srv: srv, http: hs, admin: strings.TrimSpace(string(tok)), spec: spec, compile: c, schemas: map[string]*jsonschema.Schema{}}
 }
 
+// defaultWS is the id of the default workspace, where the service token and
+// every test written before workspaces act.
+func (e *env) defaultWS() string {
+	e.t.Helper()
+	w, err := e.srv.Engine.DefaultWorkspace(context.Background())
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return w.ID
+}
+
 func pointerEscape(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "~", "~0"), "/", "~1")
 }

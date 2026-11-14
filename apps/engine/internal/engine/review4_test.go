@@ -28,7 +28,7 @@ func TestMigrationBatchKeepsChildRows(t *testing.T) {
 		stmt("ALTER TABLE __new_users RENAME TO users"),
 		stmt("PRAGMA foreign_keys=ON"),
 	}
-	if _, err := e.BatchWith(bg, Target{Database: "a"}, Write, rebuild, BatchOptions{Migration: true}); err != nil {
+	if _, err := e.BatchWith(bg, Target{Workspace: ws(e), Database: "a"}, Write, rebuild, BatchOptions{Migration: true}); err != nil {
 		t.Fatal(err)
 	}
 	if v := scalar(t, mustQuery(t, e, "a", Read, "SELECT count(*) FROM posts")); v.Int != 1 {
@@ -39,14 +39,14 @@ func TestMigrationBatchKeepsChildRows(t *testing.T) {
 	mustQuery(t, e, "a", Write, "CREATE TABLE post_tags(tag INTEGER REFERENCES tags(id) ON DELETE CASCADE)")
 	mustQuery(t, e, "a", Write, "INSERT INTO tags VALUES (1)")
 	mustQuery(t, e, "a", Write, "INSERT INTO post_tags VALUES (1)")
-	if _, err := e.Batch(bg, Target{Database: "a"}, Write, []Statement{stmt("DROP TABLE tags"), stmt("CREATE TABLE tags(id INTEGER PRIMARY KEY)"), stmt("INSERT INTO tags VALUES (1)")}); err != nil {
+	if _, err := e.Batch(bg, Target{Workspace: ws(e), Database: "a"}, Write, []Statement{stmt("DROP TABLE tags"), stmt("CREATE TABLE tags(id INTEGER PRIMARY KEY)"), stmt("INSERT INTO tags VALUES (1)")}); err != nil {
 		t.Fatal(err)
 	}
 	if v := scalar(t, mustQuery(t, e, "a", Read, "SELECT count(*) FROM post_tags")); v.Int != 0 {
 		t.Fatalf("expected the plain batch to cascade, %d rows left", v.Int)
 	}
 
-	_, err := e.BatchWith(bg, Target{Database: "a"}, Write, []Statement{stmt("INSERT INTO posts VALUES (2, 99)")}, BatchOptions{Migration: true})
+	_, err := e.BatchWith(bg, Target{Workspace: ws(e), Database: "a"}, Write, []Statement{stmt("INSERT INTO posts VALUES (2, 99)")}, BatchOptions{Migration: true})
 	wantCode(t, err, apierr.ConstraintViolation, "dangling reference in a migration")
 	if v := scalar(t, mustQuery(t, e, "a", Read, "SELECT count(*) FROM posts")); v.Int != 1 {
 		t.Fatal("a refused migration was kept")
@@ -54,6 +54,6 @@ func TestMigrationBatchKeepsChildRows(t *testing.T) {
 	// Foreign keys are back on for the next request.
 	_, err = query(e, "a", Write, "INSERT INTO posts VALUES (3, 99)")
 	wantCode(t, err, apierr.ConstraintViolation, "foreign keys after a migration")
-	_, err = e.BatchWith(bg, Target{Database: "a"}, Read, []Statement{stmt("SELECT 1")}, BatchOptions{Migration: true})
+	_, err = e.BatchWith(bg, Target{Workspace: ws(e), Database: "a"}, Read, []Statement{stmt("SELECT 1")}, BatchOptions{Migration: true})
 	wantCode(t, err, apierr.ReadOnly, "migration with read access")
 }

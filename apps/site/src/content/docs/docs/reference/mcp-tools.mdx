@@ -12,8 +12,8 @@ The engine serves MCP over streamable HTTP at `/mcp`, with the same bearer token
 | Tool | Read-only | Destructive | What it does |
 |---|---|---|---|
 | `create_branch` | no | no | Create a branch as a full copy of another branch (default: the default branch). Changes on it never merge back. Use it to test migrations safely. |
-| `create_bucket` | no | no | Create an empty bucket. Needs an instance admin token. Names: 3 to 63 lowercase letters, digits and hyphens. |
-| `create_database` | no | no | Create a database with an empty default branch named main. Needs an instance admin token. Names: lowercase letters, digits and hyphens. |
+| `create_bucket` | no | no | Create an empty bucket in this token's workspace. Needs an admin token for the whole workspace. Names: 3 to 63 lowercase letters, digits and hyphens. |
+| `create_database` | no | no | Create a database in this token's workspace, with an empty default branch named main. Needs an admin token for the whole workspace. Names: lowercase letters, digits and hyphens. |
 | `create_snapshot` | no | no | Take a snapshot of a branch. Restoring one later makes a new branch; it never overwrites. |
 | `delete_branch` | no | yes | Delete a branch and its data. Protected branches and the default branch can't be deleted. This can't be undone. |
 | `delete_object` | no | yes | Delete an object. This can't be undone. Deleting a key that doesn't exist succeeds. |
@@ -45,7 +45,7 @@ Create a branch as a full copy of another branch (default: the default branch). 
 
 ## create_bucket
 
-Create an empty bucket. Needs an instance admin token. Names: 3 to 63 lowercase letters, digits and hyphens.
+Create an empty bucket in this token's workspace. Needs an admin token for the whole workspace. Names: 3 to 63 lowercase letters, digits and hyphens.
 
 | Input | Type | Description |
 |---|---|---|
@@ -53,7 +53,7 @@ Create an empty bucket. Needs an instance admin token. Names: 3 to 63 lowercase 
 
 ## create_database
 
-Create a database with an empty default branch named main. Needs an instance admin token. Names: lowercase letters, digits and hyphens.
+Create a database in this token's workspace, with an empty default branch named main. Needs an admin token for the whole workspace. Names: lowercase letters, digits and hyphens.
 
 | Input | Type | Description |
 |---|---|---|

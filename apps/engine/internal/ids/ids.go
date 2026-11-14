@@ -13,13 +13,14 @@ import (
 
 // Prefixes for each kind of id.
 const (
-	Database = "db"
-	Branch   = "br"
-	Snapshot = "sn"
-	Token    = "tok"
-	Bucket   = "bk"
-	Blob     = "ob"
-	Upload   = "up"
+	Database  = "db"
+	Branch    = "br"
+	Snapshot  = "sn"
+	Token     = "tok"
+	Bucket    = "bk"
+	Workspace = "ws"
+	Blob      = "ob"
+	Upload    = "up"
 )
 
 const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"

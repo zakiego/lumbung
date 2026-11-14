@@ -16,6 +16,7 @@ import (
 // Database is one database record.
 type Database struct {
 	ID              string
+	WorkspaceID     string
 	Name            string
 	DefaultBranchID string
 	CreatedAt       time.Time
@@ -37,7 +38,7 @@ type Branch struct {
 	UpdatedAt        time.Time
 }
 
-const dbCols = `id, name, default_branch_id, created_at, updated_at, deleted_at, purge_after`
+const dbCols = `id, workspace_id, name, default_branch_id, created_at, updated_at, deleted_at, purge_after`
 const branchCols = `id, database_id, name, coalesce(parent_id, ''), coalesce(source_snapshot_id, ''), protected, expires_at, created_at, updated_at`
 
 // branchColsB is branchCols for a query that aliases branches as b.
@@ -49,7 +50,7 @@ func scanDatabase(r scanner) (Database, error) {
 	var d Database
 	var created, updated string
 	var deleted, purge sql.NullString
-	if err := r.Scan(&d.ID, &d.Name, &d.DefaultBranchID, &created, &updated, &deleted, &purge); err != nil {
+	if err := r.Scan(&d.ID, &d.WorkspaceID, &d.Name, &d.DefaultBranchID, &created, &updated, &deleted, &purge); err != nil {
 		return Database{}, err
 	}
 	d.CreatedAt = *parseTime(sql.NullString{String: created, Valid: true})
@@ -76,10 +77,11 @@ func isUnique(err error) bool {
 	return errors.Is(err, sqlite3.CONSTRAINT_UNIQUE)
 }
 
-// CreateDatabase records a new database and its default branch, named main.
-// It fails with limit_reached when maxDatabases already exist, counted in
-// the same transaction so concurrent creates can't pass the cap.
-func (s *Store) CreateDatabase(ctx context.Context, name, dbID, branchID string, maxDatabases int) (Database, Branch, error) {
+// CreateDatabase records a new database in a workspace and its default
+// branch, named main. It fails with limit_reached when the instance already
+// has maxDatabases or the workspace its own cap, counted in the same
+// transaction so concurrent creates can't pass either.
+func (s *Store) CreateDatabase(ctx context.Context, wsID, name, dbID, branchID string, maxDatabases int) (Database, Branch, error) {
 	if !ids.ValidName(name) {
 		return Database{}, Branch{}, apierr.Newf(apierr.InvalidName, "invalid database name %q", name)
 	}
@@ -96,9 +98,21 @@ func (s *Store) CreateDatabase(ctx context.Context, name, dbID, branchID string,
 	if n >= maxDatabases {
 		return Database{}, Branch{}, apierr.Newf(apierr.LimitReached, "the instance has the most databases allowed (%d)", maxDatabases)
 	}
+	var own, limit int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT (SELECT count(*) FROM databases WHERE workspace_id = w.id), w.max_databases FROM workspaces w WHERE w.id = ? AND w.deleted_at IS NULL`,
+		wsID).Scan(&own, &limit); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Database{}, Branch{}, noWorkspace(wsID)
+		}
+		return Database{}, Branch{}, err
+	}
+	if limit > 0 && own >= limit {
+		return Database{}, Branch{}, apierr.Newf(apierr.LimitReached, "the workspace has the most databases allowed (%d)", limit)
+	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO databases (id, name, default_branch_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		dbID, name, branchID, ts, ts); err != nil {
+		`INSERT INTO databases (id, workspace_id, name, default_branch_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		dbID, wsID, name, branchID, ts, ts); err != nil {
 		if isUnique(err) {
 			return Database{}, Branch{}, apierr.Newf(apierr.NameTaken, "a database named %q already exists", name)
 		}
@@ -112,7 +126,7 @@ func (s *Store) CreateDatabase(ctx context.Context, name, dbID, branchID string,
 	if err := tx.Commit(); err != nil {
 		return Database{}, Branch{}, err
 	}
-	d, err := s.GetDatabase(ctx, dbID)
+	d, err := s.GetDatabase(ctx, wsID, dbID)
 	if err != nil {
 		return Database{}, Branch{}, err
 	}
@@ -120,18 +134,31 @@ func (s *Store) CreateDatabase(ctx context.Context, name, dbID, branchID string,
 	return d, b, err
 }
 
-// GetDatabase finds a live database by name or id.
-func (s *Store) GetDatabase(ctx context.Context, ref string) (Database, error) {
+// GetDatabase finds a live database of a workspace by name or id. A
+// database of another workspace is not found, by id as much as by name.
+func (s *Store) GetDatabase(ctx context.Context, wsID, ref string) (Database, error) {
 	col := "name"
 	if ids.IsID(ref, ids.Database) {
 		col = "id"
 	} else if !ids.ValidName(ref) {
 		return Database{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q", ref)
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT `+dbCols+` FROM databases WHERE `+col+` = ? AND deleted_at IS NULL`, ref)
+	row := s.db.QueryRowContext(ctx, `SELECT `+dbCols+` FROM databases WHERE workspace_id = ? AND `+col+` = ? AND deleted_at IS NULL`, wsID, ref)
 	d, err := scanDatabase(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Database{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q", ref)
+	}
+	return d, err
+}
+
+// DatabaseByID finds a live database by id alone, in any workspace. It is
+// for the engine's own jobs (schedules, expiry, usage), which start from
+// ids in meta.db. A request never resolves a database this way.
+func (s *Store) DatabaseByID(ctx context.Context, id string) (Database, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT `+dbCols+` FROM databases WHERE id = ? AND deleted_at IS NULL`, id)
+	d, err := scanDatabase(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Database{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q", id)
 	}
 	return d, err
 }
@@ -143,9 +170,29 @@ func (s *Store) CountDatabases(ctx context.Context) (int, error) {
 	return n, err
 }
 
-// ListLiveBranches returns every branch of every database not in the trash.
+// ListLiveBranches returns every branch of every database not in the trash,
+// in every workspace.
 func (s *Store) ListLiveBranches(ctx context.Context) ([]Branch, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+branchColsB+` FROM branches b JOIN databases d ON d.id = b.database_id WHERE d.deleted_at IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Branch
+	for rows.Next() {
+		b, err := scanBranch(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// ListWorkspaceBranches returns every branch of a workspace's live
+// databases.
+func (s *Store) ListWorkspaceBranches(ctx context.Context, wsID string) ([]Branch, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+branchColsB+` FROM branches b JOIN databases d ON d.id = b.database_id WHERE d.workspace_id = ? AND d.deleted_at IS NULL`, wsID)
 	if err != nil {
 		return nil, err
 	}

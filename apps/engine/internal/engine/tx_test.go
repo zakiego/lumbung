@@ -11,7 +11,7 @@ import (
 
 func beginTx(t *testing.T, e *Engine, db string, access Access) *Tx {
 	t.Helper()
-	tx, err := e.BeginTx(context.Background(), Target{Database: db}, access, TxOptions{})
+	tx, err := e.BeginTx(context.Background(), Target{Workspace: ws(e), Database: db}, access, TxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,13 +93,13 @@ func TestTxHoldsTheWriter(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	_, err := e.Query(ctx, Target{Database: "app"}, Write, stmt("INSERT INTO t VALUES (2)"))
+	_, err := e.Query(ctx, Target{Workspace: ws(e), Database: "app"}, Write, stmt("INSERT INTO t VALUES (2)"))
 	wantCode(t, err, apierr.Busy, "write while a transaction holds the writer")
 	mustQuery(t, e, "app", Read, "SELECT count(*) FROM t")
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := e.Query(context.Background(), Target{Database: "app"}, Write, stmt("INSERT INTO t VALUES (3)"))
+		_, err := e.Query(context.Background(), Target{Workspace: ws(e), Database: "app"}, Write, stmt("INSERT INTO t VALUES (3)"))
 		done <- err
 	}()
 	time.Sleep(50 * time.Millisecond)
@@ -223,18 +223,18 @@ func TestTxReadOnly(t *testing.T) {
 func TestTxMigrationChecksForeignKeys(t *testing.T) {
 	e := newEngine(t, nil)
 	mustCreate(t, e, "app")
-	if _, err := e.Batch(context.Background(), Target{Database: "app"}, Write, []Statement{
+	if _, err := e.Batch(context.Background(), Target{Workspace: ws(e), Database: "app"}, Write, []Statement{
 		stmt("CREATE TABLE p(id INTEGER PRIMARY KEY)"),
 		stmt("CREATE TABLE c(id INTEGER PRIMARY KEY, p INTEGER REFERENCES p(id) ON DELETE CASCADE)"),
 		stmt("INSERT INTO p VALUES (1)"), stmt("INSERT INTO c VALUES (1, 1)"),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := e.BeginTx(context.Background(), Target{Database: "app"}, Read, TxOptions{Migration: true})
+	_, err := e.BeginTx(context.Background(), Target{Workspace: ws(e), Database: "app"}, Read, TxOptions{Migration: true})
 	wantCode(t, err, apierr.ReadOnly, "read migration")
 
 	// Rebuilding the parent doesn't cascade.
-	tx, err := e.BeginTx(context.Background(), Target{Database: "app"}, Write, TxOptions{Migration: true})
+	tx, err := e.BeginTx(context.Background(), Target{Workspace: ws(e), Database: "app"}, Write, TxOptions{Migration: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestTxMigrationChecksForeignKeys(t *testing.T) {
 	}
 
 	// A migration that breaks a foreign key doesn't commit.
-	tx, err = e.BeginTx(context.Background(), Target{Database: "app"}, Write, TxOptions{Migration: true})
+	tx, err = e.BeginTx(context.Background(), Target{Workspace: ws(e), Database: "app"}, Write, TxOptions{Migration: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,16 +274,16 @@ func TestTxAbortedByMaintenanceAndClose(t *testing.T) {
 	e := newEngine(t, nil)
 	mustCreate(t, e, "app")
 	mustQuery(t, e, "app", Write, "CREATE TABLE t(x)")
-	b, err := e.CreateBranch(context.Background(), "app", "dev", BranchSource{}, NewBranchOptions{})
+	b, err := e.CreateBranch(context.Background(), ws(e), "app", "dev", BranchSource{}, NewBranchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, err := e.BeginTx(context.Background(), Target{Database: "app", Branch: "dev"}, Write, TxOptions{})
+	tx, err := e.BeginTx(context.Background(), Target{Workspace: ws(e), Database: "app", Branch: "dev"}, Write, TxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	txExec(t, e, tx, "INSERT INTO t VALUES (1)")
-	if _, err := e.ResetBranch(context.Background(), "app", b.ID); err != nil {
+	if _, err := e.ResetBranch(context.Background(), ws(e), "app", b.ID); err != nil {
 		t.Fatalf("reset with an open transaction: %v", err)
 	}
 	if !tx.Done() {
@@ -292,13 +292,14 @@ func TestTxAbortedByMaintenanceAndClose(t *testing.T) {
 
 	main := beginTx(t, e, "app", Write)
 	txExec(t, e, main, "INSERT INTO t VALUES (1)")
+	workspace := ws(e) // read before the close: meta.db closes with the engine
 	if err := e.Close(); err != nil {
 		t.Fatalf("close with an open transaction: %v", err)
 	}
 	if !main.Done() {
 		t.Fatal("close left the transaction open")
 	}
-	_, err = e.BeginTx(context.Background(), Target{Database: "app"}, Write, TxOptions{})
+	_, err = e.BeginTx(context.Background(), Target{Workspace: workspace, Database: "app"}, Write, TxOptions{})
 	if err == nil {
 		t.Fatal("began a transaction on a closed engine")
 	}
@@ -308,7 +309,7 @@ func TestDescribe(t *testing.T) {
 	e := newEngine(t, nil)
 	mustCreate(t, e, "app")
 	mustQuery(t, e, "app", Write, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)")
-	d, err := e.Describe(context.Background(), Target{Database: "app"}, "SELECT id, name AS n, 1 FROM t WHERE id = ? AND name = :name")
+	d, err := e.Describe(context.Background(), Target{Workspace: ws(e), Database: "app"}, "SELECT id, name AS n, 1 FROM t WHERE id = ? AND name = :name")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,17 +322,17 @@ func TestDescribe(t *testing.T) {
 	if !d.ReadOnly || d.Explain {
 		t.Fatalf("flags: %+v", d)
 	}
-	d, err = e.Describe(context.Background(), Target{Database: "app"}, "/* x */ EXPLAIN QUERY PLAN DELETE FROM t")
+	d, err = e.Describe(context.Background(), Target{Workspace: ws(e), Database: "app"}, "/* x */ EXPLAIN QUERY PLAN DELETE FROM t")
 	if err != nil || !d.Explain {
 		t.Fatalf("explain: %+v %v", d, err)
 	}
-	d, err = e.Describe(context.Background(), Target{Database: "app"}, "DELETE FROM t")
+	d, err = e.Describe(context.Background(), Target{Workspace: ws(e), Database: "app"}, "DELETE FROM t")
 	if err != nil || d.ReadOnly {
 		t.Fatalf("delete: %+v %v", d, err)
 	}
-	_, err = e.Describe(context.Background(), Target{Database: "app"}, "SELECT 1; SELECT 2")
+	_, err = e.Describe(context.Background(), Target{Workspace: ws(e), Database: "app"}, "SELECT 1; SELECT 2")
 	wantCode(t, err, apierr.MultipleStatements, "two statements")
-	_, err = e.Describe(context.Background(), Target{Database: "app"}, "ATTACH 'x' AS y")
+	_, err = e.Describe(context.Background(), Target{Workspace: ws(e), Database: "app"}, "ATTACH 'x' AS y")
 	wantCode(t, err, apierr.StatementDenied, "describe attach")
 }
 
@@ -346,7 +347,7 @@ func TestQueryWithReadsBesideATransaction(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	r, err := e.QueryWith(ctx, Target{Database: "app"}, Write, stmt("SELECT count(*) FROM t"), e.NewBudget(), nil)
+	r, err := e.QueryWith(ctx, Target{Workspace: ws(e), Database: "app"}, Write, stmt("SELECT count(*) FROM t"), e.NewBudget(), nil)
 	if err != nil {
 		t.Fatalf("read beside a transaction: %v", err)
 	}
@@ -355,12 +356,12 @@ func TestQueryWithReadsBesideATransaction(t *testing.T) {
 	}
 	short, cancel2 := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel2()
-	_, err = e.QueryWith(short, Target{Database: "app"}, Write, stmt("INSERT INTO t VALUES (2)"), e.NewBudget(), nil)
+	_, err = e.QueryWith(short, Target{Workspace: ws(e), Database: "app"}, Write, stmt("INSERT INTO t VALUES (2)"), e.NewBudget(), nil)
 	wantCode(t, err, apierr.Busy, "write beside a transaction")
-	_, err = e.QueryWith(context.Background(), Target{Database: "app"}, Write, stmt("SELECT nope FROM t"), e.NewBudget(), nil)
+	_, err = e.QueryWith(context.Background(), Target{Workspace: ws(e), Database: "app"}, Write, stmt("SELECT nope FROM t"), e.NewBudget(), nil)
 	wantCode(t, err, apierr.SQLError, "bad SQL")
 	tx.Rollback()
-	r, err = e.QueryWith(context.Background(), Target{Database: "app"}, Write, stmt("INSERT INTO t VALUES (3) RETURNING x"), e.NewBudget(), nil)
+	r, err = e.QueryWith(context.Background(), Target{Workspace: ws(e), Database: "app"}, Write, stmt("INSERT INTO t VALUES (3) RETURNING x"), e.NewBudget(), nil)
 	if err != nil || scalar(t, r).Int != 3 {
 		t.Fatalf("write: %v", err)
 	}
@@ -392,7 +393,7 @@ func TestLastInsertRowID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rs, err := e.Batch(context.Background(), Target{Database: "app"}, Write, []Statement{
+	rs, err := e.Batch(context.Background(), Target{Workspace: ws(e), Database: "app"}, Write, []Statement{
 		stmt("INSERT INTO t (x) VALUES ('d')"), stmt("SELECT last_insert_rowid()"), stmt("UPDATE t SET x = x"),
 	})
 	if err != nil {
@@ -413,7 +414,7 @@ func TestTxDeadline(t *testing.T) {
 	mustCreate(t, e, "app")
 	mustQuery(t, e, "app", Write, "CREATE TABLE t(x)")
 
-	tx, err := e.BeginTx(context.Background(), Target{Database: "app"}, Write, TxOptions{Deadline: time.Now().Add(300 * time.Millisecond)})
+	tx, err := e.BeginTx(context.Background(), Target{Workspace: ws(e), Database: "app"}, Write, TxOptions{Deadline: time.Now().Add(300 * time.Millisecond)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +426,7 @@ func TestTxDeadline(t *testing.T) {
 		t.Fatalf("the deadline didn't end the transaction (%v)", time.Since(start))
 	}
 
-	tx, err = e.BeginTx(context.Background(), Target{Database: "app"}, Write, TxOptions{Deadline: time.Now().Add(200 * time.Millisecond)})
+	tx, err = e.BeginTx(context.Background(), Target{Workspace: ws(e), Database: "app"}, Write, TxOptions{Deadline: time.Now().Add(200 * time.Millisecond)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +437,7 @@ func TestTxDeadline(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if _, err := e.Query(ctx, Target{Database: "app"}, Write, stmt("INSERT INTO t VALUES (2)")); err != nil {
+	if _, err := e.Query(ctx, Target{Workspace: ws(e), Database: "app"}, Write, stmt("INSERT INTO t VALUES (2)")); err != nil {
 		t.Fatalf("writer after the deadline: %v", err)
 	}
 	if got := count(t, e, "app", "t"); got != 1 {
@@ -454,7 +455,7 @@ func TestTxBegunDuringPriorityBreak(t *testing.T) {
 	e := newEngine(t, nil)
 	mustCreate(t, e, "app")
 	mustQuery(t, e, "app", Write, "CREATE TABLE t(x)")
-	b, err := e.CreateBranch(context.Background(), "app", "dev", BranchSource{}, NewBranchOptions{})
+	b, err := e.CreateBranch(context.Background(), ws(e), "app", "dev", BranchSource{}, NewBranchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,11 +468,11 @@ func TestTxBegunDuringPriorityBreak(t *testing.T) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, err := e.ResetBranch(ctx, "app", b.ID)
+		_, err := e.ResetBranch(ctx, ws(e), "app", b.ID)
 		done <- err
 	}()
 	time.Sleep(200 * time.Millisecond) // past the window, inside the break
-	tx, err := e.BeginTx(context.Background(), Target{Database: "app", Branch: "dev"}, Write, TxOptions{})
+	tx, err := e.BeginTx(context.Background(), Target{Workspace: ws(e), Database: "app", Branch: "dev"}, Write, TxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

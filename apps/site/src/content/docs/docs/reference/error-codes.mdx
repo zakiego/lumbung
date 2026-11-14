@@ -22,7 +22,7 @@ Errors come back as `application/problem+json` with a stable `code`. Match on `c
 | Code | HTTP status | Meaning |
 |---|---|---|
 | `bad_request` | 400 Bad Request | The request body or a parameter is malformed. |
-| `invalid_name` | 400 Bad Request | A database or branch name doesn't match `[a-z0-9][a-z0-9-]{0,62}`, or a bucket name doesn't match `[a-z0-9][a-z0-9-]{1,61}[a-z0-9]`. |
+| `invalid_name` | 400 Bad Request | A workspace, database or branch name doesn't match `[a-z0-9][a-z0-9-]{0,62}`, or a bucket name doesn't match `[a-z0-9][a-z0-9-]{1,61}[a-z0-9]`. |
 | `empty_statement` | 400 Bad Request | The SQL text holds no statement. |
 | `multiple_statements` | 400 Bad Request | `query` got more than one statement. Use `batch` for several. |
 | `invalid_params` | 400 Bad Request | The parameters don't match the statement's placeholders. |
@@ -39,8 +39,8 @@ Errors come back as `application/problem+json` with a stable `code`. Match on `c
 | `insufficient_disk` | 507 Insufficient Storage | The host disk has less free space than the configured minimum. |
 | `database_not_found` | 404 Not Found | No database with that name or id. |
 | `branch_not_found` | 404 Not Found | No branch with that name or id in this database. |
-| `name_taken` | 409 Conflict | Another database, branch or bucket already has that name. |
-| `limit_reached` | 409 Conflict | The instance already has the most databases or buckets, the database the most branches, or the bucket the most multipart uploads in progress, allowed. |
+| `name_taken` | 409 Conflict | Another database or bucket in the workspace, another branch in the database, or another workspace already has that name. |
+| `limit_reached` | 409 Conflict | The instance or the workspace already has the most databases, buckets, tokens or workspaces, the database the most branches, or the bucket the most multipart uploads in progress, allowed. |
 | `snapshot_not_found` | 404 Not Found | No snapshot with that id in this database. |
 | `branch_protected` | 409 Conflict | The branch is protected, so it can't be deleted, reset or overwritten by an import. The default branch is always protected. |
 | `parent_gone` | 409 Conflict | The branch can't be reset because the branch or snapshot it was made from no longer exists. |
@@ -76,6 +76,8 @@ Errors come back as `application/problem+json` with a stable `code`. Match on `c
 | `precondition_failed` | 412 Precondition Failed | An If-Match or If-Unmodified-Since condition doesn't hold. |
 | `invalid_range` | 416 Requested Range Not Satisfiable | The Range starts past the end of the object. |
 | `no_access_key` | 400 Bad Request | Presigning needs a token created with an access key. |
+| `workspace_not_found` | 404 Not Found | No workspace with that name or id, or the token belongs to another workspace. |
+| `workspace_quota_exceeded` | 507 Insufficient Storage | The write would grow the workspace's databases or its buckets past the workspace's own size limit. |
 | `busy` | 503 Service Unavailable | The branch stayed locked longer than the busy timeout. Retry. |
 | `unavailable` | 503 Service Unavailable | The engine can't serve: for example meta.db is newer than this binary. |
 | `internal` | 500 Internal Server Error | Something failed inside the engine. The log has details. |

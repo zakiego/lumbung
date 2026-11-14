@@ -250,13 +250,19 @@ func TestGrantsTokenRules(t *testing.T) {
 	if m["scope"] != "database" || m["access"] != "read" || len(m["grants"].([]any)) != 1 {
 		t.Fatalf("one grant: %v", m)
 	}
-	// The old shape still works and lists its one grant; an instance token has none.
+	// The old shape still works and lists its one grant. Without a target a
+	// token reaches the whole workspace (ADR 0008; it used to be an instance
+	// token) and lists no grants, and neither does an instance token.
 	m = e.ok(create(e.admin, map[string]any{"name": "b", "bucket": "files", "access": "admin"}), 201).json(t)
 	if m["scope"] != "bucket" || len(m["grants"].([]any)) != 1 {
 		t.Fatalf("bucket token: %v", m)
 	}
-	m = e.ok(create(e.admin, map[string]any{"name": "i", "access": "read"}), 201).json(t)
-	if m["scope"] != "instance" || len(m["grants"].([]any)) != 0 {
+	m = e.ok(create(e.admin, map[string]any{"name": "w", "access": "read"}), 201).json(t)
+	if m["scope"] != "workspace" || m["workspace_id"] != e.defaultWS() || len(m["grants"].([]any)) != 0 {
+		t.Fatalf("workspace token: %v", m)
+	}
+	m = e.ok(e.do(e.admin, "POST", "/v1/instance/tokens", "/v1/instance/tokens", map[string]any{"name": "i", "access": "read"}), 201).json(t)
+	if m["scope"] != "instance" || m["workspace_id"] != "" || len(m["grants"].([]any)) != 0 {
 		t.Fatalf("instance token: %v", m)
 	}
 

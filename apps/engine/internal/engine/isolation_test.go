@@ -76,7 +76,7 @@ func TestIsolationAttachDetach(t *testing.T) {
 		_, err = query(e, "attacker", a, "DETACH o")
 		wantCode(t, err, apierr.StatementDenied, name+" detach o")
 	})
-	_, err := e.Batch(context.Background(), Target{Database: "attacker"}, Write, []Statement{
+	_, err := e.Batch(context.Background(), Target{Workspace: ws(e), Database: "attacker"}, Write, []Statement{
 		stmt("CREATE TABLE t(x)"), stmt("ATTACH ? AS o", victimFile),
 	})
 	wantCode(t, err, apierr.StatementDenied, "attach in batch")
@@ -204,7 +204,7 @@ func TestIsolationPragmas(t *testing.T) {
 	mustQuery(t, e, "a", Write, "PRAGMA foreign_keys = OFF")
 	_, err := query(e, "a", Write, "INSERT INTO child VALUES (42)")
 	wantCode(t, err, apierr.ConstraintViolation, "foreign key after foreign_keys=OFF")
-	_, err = e.Batch(context.Background(), Target{Database: "a"}, Write, []Statement{
+	_, err = e.Batch(context.Background(), Target{Workspace: ws(e), Database: "a"}, Write, []Statement{
 		stmt("PRAGMA foreign_keys = OFF"), stmt("INSERT INTO child VALUES (43)"),
 	})
 	wantCode(t, err, apierr.ConstraintViolation, "foreign key inside a batch with foreign_keys=OFF")
@@ -231,7 +231,7 @@ func TestIsolationReadOnlyWrites(t *testing.T) {
 		_, err := query(e, "a", Read, sql)
 		wantCode(t, err, apierr.ReadOnly, sql)
 	}
-	_, err := e.Batch(context.Background(), Target{Database: "a"}, Read, []Statement{stmt("SELECT 1"), stmt("INSERT INTO t VALUES (9)")})
+	_, err := e.Batch(context.Background(), Target{Workspace: ws(e), Database: "a"}, Read, []Statement{stmt("SELECT 1"), stmt("INSERT INTO t VALUES (9)")})
 	wantCode(t, err, apierr.ReadOnly, "write in a read batch")
 	if v := scalar(t, mustQuery(t, e, "a", Read, "SELECT count(*) FROM t")); v.Int != 1 {
 		t.Fatalf("rows = %d", v.Int)
@@ -288,7 +288,7 @@ func TestIsolationResultCap(t *testing.T) {
 		wantCode(t, err, apierr.ResultTooLarge, name+" wide NULL rows")
 	})
 	// The byte cap counts across a batch.
-	_, err := e.Batch(context.Background(), Target{Database: "a"}, Read, []Statement{
+	_, err := e.Batch(context.Background(), Target{Workspace: ws(e), Database: "a"}, Read, []Statement{
 		stmt("SELECT randomblob(3000)"), stmt("SELECT randomblob(3000)"),
 	})
 	wantCode(t, err, apierr.ResultTooLarge, "bytes across a batch")
@@ -407,7 +407,7 @@ func TestIsolationDiskFill(t *testing.T) {
 	t.Run("free disk", func(t *testing.T) {
 		e := newEngine(t, nil)
 		e.freeBytes = func(string) (int64, error) { return 1 << 20, nil }
-		_, err := e.CreateDatabase(context.Background(), "a")
+		_, err := e.CreateDatabase(context.Background(), ws(e), "a")
 		wantCode(t, err, apierr.DiskFull, "create with a full disk")
 	})
 }

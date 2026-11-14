@@ -95,7 +95,7 @@ func (s *Server) registerSnapshots(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			all, err := s.eng.ListSnapshots(ctx, engine.Target{Database: d.ID, Branch: b.ID})
+			all, err := s.eng.ListSnapshots(ctx, engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID})
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -126,7 +126,7 @@ func (s *Server) registerSnapshots(api huma.API) {
 				label = in.Body.Label
 			}
 			return idempotent(ctx, s, "create-snapshot", in.IdempotencyKey, struct{ B, L string }{b.ID, label}, func() (*snapshotBody, error) {
-				sn, err := s.eng.CreateSnapshot(ctx, engine.Target{Database: d.ID, Branch: b.ID}, label)
+				sn, err := s.eng.CreateSnapshot(ctx, engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID}, label)
 				if err != nil {
 					return nil, toProblem(ctx, err)
 				}
@@ -142,7 +142,7 @@ func (s *Server) registerSnapshots(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			b, err := s.eng.RestoreSnapshot(ctx, d.ID, in.Snapshot, in.Body.Name)
+			b, err := s.eng.RestoreSnapshot(ctx, d.WorkspaceID, d.ID, in.Snapshot, in.Body.Name)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -157,7 +157,7 @@ func (s *Server) registerSnapshots(api huma.API) {
 				return nil, toProblem(ctx, err)
 			}
 			setTarget(ctx, d.ID+"/"+in.Snapshot)
-			if err := s.eng.DeleteSnapshot(ctx, d.ID, in.Snapshot); err != nil {
+			if err := s.eng.DeleteSnapshot(ctx, d.WorkspaceID, d.ID, in.Snapshot); err != nil {
 				return nil, toProblem(ctx, err)
 			}
 			return nil, nil
@@ -170,7 +170,7 @@ func (s *Server) registerSnapshots(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			sc, ok, err := s.eng.GetSchedule(ctx, engine.Target{Database: d.ID, Branch: b.ID})
+			sc, ok, err := s.eng.GetSchedule(ctx, engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID})
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -186,7 +186,7 @@ func (s *Server) registerSnapshots(api huma.API) {
 				return nil, toProblem(ctx, err)
 			}
 			setTarget(ctx, d.ID+"/"+b.ID)
-			sc, err := s.eng.SetSchedule(ctx, engine.Target{Database: d.ID, Branch: b.ID}, engine.ScheduleOptions{
+			sc, err := s.eng.SetSchedule(ctx, engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID}, engine.ScheduleOptions{
 				Every: time.Duration(in.Body.EveryMinutes) * time.Minute, KeepCount: in.Body.KeepCount,
 				KeepFor: time.Duration(in.Body.KeepDays) * 24 * time.Hour,
 			})
@@ -202,7 +202,7 @@ func (s *Server) registerSnapshots(api huma.API) {
 				return nil, toProblem(ctx, err)
 			}
 			setTarget(ctx, d.ID+"/"+b.ID)
-			if err := s.eng.DeleteSchedule(ctx, engine.Target{Database: d.ID, Branch: b.ID}); err != nil {
+			if err := s.eng.DeleteSchedule(ctx, engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID}); err != nil {
 				return nil, toProblem(ctx, err)
 			}
 			return nil, nil

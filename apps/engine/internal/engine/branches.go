@@ -27,8 +27,8 @@ type NewBranchOptions struct {
 }
 
 // ListBranches returns a database's branches, oldest first.
-func (e *Engine) ListBranches(ctx context.Context, dbRef string) ([]meta.Branch, error) {
-	d, err := e.database(ctx, dbRef)
+func (e *Engine) ListBranches(ctx context.Context, ws, dbRef string) ([]meta.Branch, error) {
+	d, err := e.database(ctx, ws, dbRef)
 	if err != nil {
 		return nil, err
 	}
@@ -36,21 +36,21 @@ func (e *Engine) ListBranches(ctx context.Context, dbRef string) ([]meta.Branch,
 }
 
 // GetBranch returns one branch.
-func (e *Engine) GetBranch(ctx context.Context, dbRef, branchRef string) (meta.Branch, error) {
-	tg, err := e.resolve(ctx, dbRef, branchRef)
+func (e *Engine) GetBranch(ctx context.Context, ws, dbRef, branchRef string) (meta.Branch, error) {
+	tg, err := e.resolve(ctx, ws, dbRef, branchRef)
 	return tg.branch, err
 }
 
-func (e *Engine) database(ctx context.Context, dbRef string) (meta.Database, error) {
+func (e *Engine) database(ctx context.Context, ws, dbRef string) (meta.Database, error) {
 	if e.refused != nil {
 		return meta.Database{}, e.refused
 	}
-	return e.meta.GetDatabase(ctx, dbRef)
+	return e.meta.GetDatabase(ctx, ws, dbRef)
 }
 
 // CreateBranch creates a branch as a full copy of a branch or a snapshot.
-func (e *Engine) CreateBranch(ctx context.Context, dbRef, name string, src BranchSource, opts NewBranchOptions) (meta.Branch, error) {
-	d, err := e.database(ctx, dbRef)
+func (e *Engine) CreateBranch(ctx context.Context, ws, dbRef, name string, src BranchSource, opts NewBranchOptions) (meta.Branch, error) {
+	d, err := e.database(ctx, ws, dbRef)
 	if err != nil {
 		return meta.Branch{}, err
 	}
@@ -137,8 +137,8 @@ func (e *Engine) CreateBranch(ctx context.Context, dbRef, name string, src Branc
 type BranchChanges = meta.BranchUpdate
 
 // UpdateBranch renames a branch or changes its protection or expiry.
-func (e *Engine) UpdateBranch(ctx context.Context, dbRef, branchRef string, u BranchChanges) (meta.Branch, error) {
-	tg, err := e.resolve(ctx, dbRef, branchRef)
+func (e *Engine) UpdateBranch(ctx context.Context, ws, dbRef, branchRef string, u BranchChanges) (meta.Branch, error) {
+	tg, err := e.resolve(ctx, ws, dbRef, branchRef)
 	if err != nil {
 		return meta.Branch{}, err
 	}
@@ -147,8 +147,8 @@ func (e *Engine) UpdateBranch(ctx context.Context, dbRef, branchRef string, u Br
 
 // DeleteBranch removes a branch and its file. Protected branches, including
 // the default branch, can't be deleted. Its snapshots are kept.
-func (e *Engine) DeleteBranch(ctx context.Context, dbRef, branchRef string) error {
-	tg, err := e.resolve(ctx, dbRef, branchRef)
+func (e *Engine) DeleteBranch(ctx context.Context, ws, dbRef, branchRef string) error {
+	tg, err := e.resolve(ctx, ws, dbRef, branchRef)
 	if err != nil {
 		return err
 	}
@@ -178,8 +178,8 @@ func unprotected(tg target) error {
 
 // ResetBranch replaces a branch's content with a fresh copy of what it was
 // made from: its source snapshot, or else its parent branch.
-func (e *Engine) ResetBranch(ctx context.Context, dbRef, branchRef string) (meta.Branch, error) {
-	tg, err := e.resolve(ctx, dbRef, branchRef)
+func (e *Engine) ResetBranch(ctx context.Context, ws, dbRef, branchRef string) (meta.Branch, error) {
+	tg, err := e.resolve(ctx, ws, dbRef, branchRef)
 	if err != nil {
 		return meta.Branch{}, err
 	}
@@ -280,7 +280,7 @@ func (e *Engine) withExclusive(ctx context.Context, tg target, recheck func(targ
 		return apierr.New(apierr.Busy, "timed out waiting for requests on the branch to finish")
 	}
 	defer g.release()
-	cur, err := e.resolve(ctx, tg.db.ID, tg.branch.ID)
+	cur, err := e.resolve(ctx, tg.db.WorkspaceID, tg.db.ID, tg.branch.ID)
 	if err != nil {
 		return err
 	}
@@ -294,8 +294,8 @@ func (e *Engine) withExclusive(ctx context.Context, tg target, recheck func(targ
 
 // PromoteBranch makes a branch the database's default. The old default
 // stays as an ordinary branch and keeps its protection.
-func (e *Engine) PromoteBranch(ctx context.Context, dbRef, branchRef string) (meta.Branch, error) {
-	tg, err := e.resolve(ctx, dbRef, branchRef)
+func (e *Engine) PromoteBranch(ctx context.Context, ws, dbRef, branchRef string) (meta.Branch, error) {
+	tg, err := e.resolve(ctx, ws, dbRef, branchRef)
 	if err != nil {
 		return meta.Branch{}, err
 	}
@@ -322,20 +322,20 @@ func (e *Engine) Schema(ctx context.Context, t Target) (*Schema, error) {
 }
 
 // DiffBranches reports how branch's schema differs from against's.
-func (e *Engine) DiffBranches(ctx context.Context, dbRef, branchRef, againstRef string) (*Diff, error) {
-	a, err := e.resolve(ctx, dbRef, againstRef)
+func (e *Engine) DiffBranches(ctx context.Context, ws, dbRef, branchRef, againstRef string) (*Diff, error) {
+	a, err := e.resolve(ctx, ws, dbRef, againstRef)
 	if err != nil {
 		return nil, err
 	}
-	b, err := e.resolve(ctx, dbRef, branchRef)
+	b, err := e.resolve(ctx, ws, dbRef, branchRef)
 	if err != nil {
 		return nil, err
 	}
-	base, err := e.Schema(ctx, Target{Database: a.db.ID, Branch: a.branch.ID})
+	base, err := e.Schema(ctx, Target{Workspace: a.db.WorkspaceID, Database: a.db.ID, Branch: a.branch.ID})
 	if err != nil {
 		return nil, err
 	}
-	head, err := e.Schema(ctx, Target{Database: b.db.ID, Branch: b.branch.ID})
+	head, err := e.Schema(ctx, Target{Workspace: b.db.WorkspaceID, Database: b.db.ID, Branch: b.branch.ID})
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +356,11 @@ func (e *Engine) deleteExpiredBranches(ctx context.Context) {
 		return
 	}
 	for _, b := range expired {
-		if err := e.DeleteBranch(ctx, b.DatabaseID, b.ID); err != nil && !errors.Is(err, context.Canceled) {
+		d, err := e.meta.DatabaseByID(ctx, b.DatabaseID)
+		if err != nil {
+			continue // deleted meanwhile
+		}
+		if err := e.DeleteBranch(ctx, d.WorkspaceID, d.ID, b.ID); err != nil && !errors.Is(err, context.Canceled) {
 			e.log.Error("delete expired branch", "branch", b.ID, "err", err)
 		}
 	}

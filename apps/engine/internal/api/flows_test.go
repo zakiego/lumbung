@@ -254,14 +254,26 @@ func TestTokensAndAudit(t *testing.T) {
 	e.fails(e.sql(tok, "a", "SELECT 1"), 401, "unauthorized")
 	golden(t, "token-not-found", e.fails(e.do(e.admin, "DELETE", pToken, "/v1/tokens/"+id, nil), 404, "token_not_found"))
 
+	// The service token is an instance token (ADR 0008): it is listed with
+	// the instance tokens, not with a workspace's, and can't be revoked
+	// through either door.
 	var serviceID string
-	all := e.ok(e.do(e.admin, "GET", pTokens, "/v1/tokens", nil), 200).json(t)
+	for _, raw := range e.ok(e.do(e.admin, "GET", pTokens, "/v1/tokens", nil), 200).json(t)["data"].([]any) {
+		if m := raw.(map[string]any); m["service"] == true || m["scope"] == "instance" {
+			t.Fatalf("the workspace's token list holds an instance token: %v", m)
+		}
+	}
+	all := e.ok(e.do(e.admin, "GET", "/v1/instance/tokens", "/v1/instance/tokens", nil), 200).json(t)
 	for _, raw := range all["data"].([]any) {
 		if m := raw.(map[string]any); m["service"] == true {
 			serviceID = m["id"].(string)
 		}
 	}
-	e.fails(e.do(e.admin, "DELETE", pToken, "/v1/tokens/"+serviceID, nil), 403, "forbidden")
+	if serviceID == "" {
+		t.Fatal("the service token isn't among the instance tokens")
+	}
+	e.fails(e.do(e.admin, "DELETE", "/v1/instance/tokens/{token_id}", "/v1/instance/tokens/"+serviceID, nil), 403, "forbidden")
+	e.fails(e.do(e.admin, "DELETE", pToken, "/v1/tokens/"+serviceID, nil), 404, "token_not_found")
 
 	// The actor header is honored for the service token only.
 	other, _ := e.token(map[string]any{"name": "admin2", "access": "admin"})

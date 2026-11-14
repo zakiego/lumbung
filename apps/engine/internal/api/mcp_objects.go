@@ -116,13 +116,13 @@ func (s *Server) addObjectTools(server *mcp.Server) {
 			if err != nil {
 				return nil, out, err
 			}
-			all, err := s.eng.ListBuckets(ctx)
+			all, err := s.eng.ListBuckets(ctx, p.WorkspaceID)
 			if err != nil {
 				return nil, out, s.toolErr(req, err)
 			}
 			list := []mcpBucket{}
 			for _, b := range all {
-				if p.SeesBucket(b.ID) {
+				if p.SeesBucket(b) {
 					list = append(list, mcpBucket{b.Name, b.PublicRead, b.CORSOrigins, b.ObjectCount, b.SizeBytes, timeStr(b.CreatedAt)})
 				}
 			}
@@ -131,7 +131,7 @@ func (s *Server) addObjectTools(server *mcp.Server) {
 			return nil, out, nil
 		})
 
-	mcp.AddTool(server, &mcp.Tool{Name: "create_bucket", Description: "Create an empty bucket. Needs an instance admin token. Names: 3 to 63 lowercase letters, digits and hyphens.", Annotations: additive},
+	mcp.AddTool(server, &mcp.Tool{Name: "create_bucket", Description: "Create an empty bucket in this token's workspace. Needs an admin token for the whole workspace. Names: 3 to 63 lowercase letters, digits and hyphens.", Annotations: additive},
 		func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 			Name string `json:"name" jsonschema:"3 to 63 lowercase letters, digits and hyphens, starting and ending with a letter or digit"`
 		}) (*mcp.CallToolResult, mcpBucket, error) {
@@ -141,10 +141,10 @@ func (s *Server) addObjectTools(server *mcp.Server) {
 			}
 			var out mcpBucket
 			err = s.audited(req, "bucket.create", func() (string, error) {
-				if err := requireInstanceAdmin(p); err != nil {
+				if err := requireWorkspaceAdmin(p); err != nil {
 					return "", err
 				}
-				b, err := s.eng.CreateBucket(ctx, in.Name)
+				b, err := s.eng.CreateBucket(ctx, p.WorkspaceID, in.Name)
 				if err != nil {
 					return "", err
 				}

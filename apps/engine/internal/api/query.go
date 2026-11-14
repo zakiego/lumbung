@@ -57,8 +57,8 @@ type batchOut struct {
 
 // access picks the connection: the writer when the token can write and the
 // request didn't ask for read-only.
-func access(p auth.Principal, dbID, branchID string, readOnly bool) engine.Access {
-	if !readOnly && p.AtLeast(auth.AccessWrite, dbID, branchID) {
+func access(p auth.Principal, d meta.Database, branchID string, readOnly bool) engine.Access {
+	if !readOnly && p.AtLeast(auth.AccessWrite, d, branchID) {
 		return engine.Write
 	}
 	return engine.Read
@@ -74,8 +74,8 @@ func (s *Server) runBatch(ctx context.Context, dbRef, branchRef string, stmts []
 	if err != nil {
 		return nil, toProblem(ctx, err)
 	}
-	t := engine.Target{Database: d.ID, Branch: b.ID}
-	acc := access(p, d.ID, b.ID, readOnly)
+	t := engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID}
+	acc := access(p, d, b.ID, readOnly)
 	start := time.Now()
 	var results []*engine.Result
 	if single {

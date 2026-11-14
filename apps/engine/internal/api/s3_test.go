@@ -471,7 +471,7 @@ func chunkRequest(e *env, rawPath string, body []byte, h http.Header) *http.Requ
 func TestS3IsolationAnonymous(t *testing.T) {
 	w := newS3World(t, nil)
 	ctx := context.Background()
-	b, _ := w.srv.Engine.GetBucket(ctx, "bucket-a")
+	b, _ := w.srv.Engine.GetBucket(ctx, w.defaultWS(), "bucket-a")
 	pub := true
 	if _, err := w.srv.Engine.UpdateBucket(ctx, b.ID, meta.BucketUpdate{PublicRead: &pub}); err != nil {
 		t.Fatal(err)
@@ -503,7 +503,7 @@ func TestS3IsolationAnonymous(t *testing.T) {
 	if r.header.Get("Content-Type") == "text/html" {
 		t.Fatal("an anonymous request overrode the content type")
 	}
-	if _, err := w.srv.Engine.ListBuckets(ctx); err != nil {
+	if _, err := w.srv.Engine.ListBuckets(ctx, w.defaultWS()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -749,7 +749,7 @@ func TestS3Listing(t *testing.T) {
 func TestS3CORS(t *testing.T) {
 	w := newS3World(t, nil)
 	ctx := context.Background()
-	b, _ := w.srv.Engine.GetBucket(ctx, "bucket-a")
+	b, _ := w.srv.Engine.GetBucket(ctx, w.defaultWS(), "bucket-a")
 	origins := []string{"https://app.example"}
 	if _, err := w.srv.Engine.UpdateBucket(ctx, b.ID, meta.BucketUpdate{CORSOrigins: &origins}); err != nil {
 		t.Fatal(err)

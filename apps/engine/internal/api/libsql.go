@@ -22,6 +22,7 @@ import (
 	"github.com/zakiego/lumbung/apps/engine/internal/auth"
 	"github.com/zakiego/lumbung/apps/engine/internal/config"
 	"github.com/zakiego/lumbung/apps/engine/internal/engine"
+	"github.com/zakiego/lumbung/apps/engine/internal/meta"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlsplit"
 	"github.com/zakiego/lumbung/apps/engine/internal/value"
 )
@@ -81,7 +82,8 @@ func writeHranaHTTP(w http.ResponseWriter, e *apierr.Error) {
 type hranaCall struct {
 	ctx       context.Context
 	p         auth.Principal
-	target    engine.Target // database and branch ids
+	db        meta.Database // the database the stream is on, for access checks
+	target    engine.Target // workspace, database and branch ids
 	budget    *engine.Budget
 	requestID string
 }
@@ -144,7 +146,7 @@ func (s *Server) libsqlHandler(cursor bool) http.Handler {
 			return
 		}
 		c := &hranaCall{
-			ctx: ctx, p: p, target: engine.Target{Database: d.ID, Branch: b.ID},
+			ctx: ctx, p: p, db: d, target: engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID},
 			budget: s.eng.NewBudget(), requestID: id,
 		}
 		if cursor {
@@ -356,7 +358,7 @@ func (s *Server) hranaRun(c *hranaCall, st *libsqlStream, es engine.Statement) (
 		if st.tx != nil || st.aborted {
 			return nil, apierr.New(apierr.SQLError, "SQL error").WithDetail("cannot start a transaction within a transaction")
 		}
-		acc := access(c.p, c.target.Database, c.target.Branch, ctl.readOnly)
+		acc := access(c.p, c.db, c.target.Branch, ctl.readOnly)
 		deadline := time.Now().Add(s.eng.Config().LibSQLTxTimeout)
 		tx, err := s.eng.BeginTx(c.ctx, c.target, acc, engine.TxOptions{Migration: st.fkOff && acc == engine.Write, Deadline: deadline})
 		if err != nil {
@@ -421,7 +423,7 @@ func (s *Server) hranaRun(c *hranaCall, st *libsqlStream, es engine.Statement) (
 		if st.fkOff {
 			refuse = apierr.New(apierr.BadRequest, "PRAGMA foreign_keys = OFF on this stream applies to the next transaction only: send BEGIN before the writes, or PRAGMA foreign_keys = ON")
 		}
-		r, err = s.eng.QueryWith(c.ctx, c.target, access(c.p, c.target.Database, c.target.Branch, false), es, c.budget, refuse)
+		r, err = s.eng.QueryWith(c.ctx, c.target, access(c.p, c.db, c.target.Branch, false), es, c.budget, refuse)
 	}
 	var results []*engine.Result
 	if r != nil {

@@ -143,7 +143,7 @@ func FuzzQueryPath(f *testing.F) {
 		if write {
 			access = Write
 		}
-		_, err := e.Query(context.Background(), Target{Database: "attacker"}, access, Statement{SQL: expand(sql)})
+		_, err := e.Query(context.Background(), Target{Workspace: ws(e), Database: "attacker"}, access, Statement{SQL: expand(sql)})
 		if err != nil {
 			if ae := apierr.As(err); ae.Code == apierr.Internal {
 				// Internal errors are fine for garbage input as long as the

@@ -397,7 +397,7 @@ func (e *Engine) sweepObjects(ctx context.Context, now time.Time, minAge time.Du
 			}
 			_ = os.Remove(sdir) // only succeeds when empty
 		}
-		if _, err := e.meta.GetBucket(ctx, b.Name()); err != nil {
+		if _, err := e.meta.BucketByID(ctx, b.Name()); err != nil {
 			_ = os.Remove(bdir) // a deleted bucket's folder, once empty
 		}
 	}

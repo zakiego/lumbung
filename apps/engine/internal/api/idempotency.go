@@ -59,6 +59,10 @@ func idempotent[T any](ctx context.Context, s *Server, opID, key string, request
 	p := principalFrom(ctx)
 	reqJSON, _ := json.Marshal(request)
 	sum := sha256.Sum256(append([]byte(opID+"\x00"), reqJSON...))
+	// The key is kept per workspace as well as per token. An instance token
+	// (the dashboard's service token above all) acts in many workspaces, and
+	// a key reused in another one must never replay the first one's response.
+	key = p.WorkspaceID + "\x00" + key
 
 	defer lockKey(p.TokenID + "\x00" + key)()
 	prev, ok, err := s.store.GetIdempotent(ctx, p.TokenID, key, idempotencyTTL)
@@ -73,7 +77,7 @@ func idempotent[T any](ctx context.Context, s *Server, opID, key string, request
 		if err := json.Unmarshal(prev.Body, &out); err != nil {
 			return nil, toProblem(ctx, err)
 		}
-		setTarget(ctx, "replay of Idempotency-Key "+key)
+		setTarget(ctx, "replay of an Idempotency-Key")
 		return &out, nil
 	}
 	out, err := f()

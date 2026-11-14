@@ -21,23 +21,23 @@ func TestCreateDatabase(t *testing.T) {
 	if d.Name != "app" || d.DefaultBranchID == "" {
 		t.Fatalf("database: %+v", d)
 	}
-	_, err := e.CreateDatabase(context.Background(), "app")
+	_, err := e.CreateDatabase(context.Background(), ws(e), "app")
 	wantCode(t, err, apierr.NameTaken, "duplicate name")
 	for _, bad := range []string{"", "App", "-x", "a_b", "a/b", "../x", string(make([]byte, 64))} {
-		_, err := e.CreateDatabase(context.Background(), bad)
+		_, err := e.CreateDatabase(context.Background(), ws(e), bad)
 		wantCode(t, err, apierr.InvalidName, fmt.Sprintf("name %q", bad))
 	}
 	mustCreate(t, e, "two")
-	_, err = e.CreateDatabase(context.Background(), "three")
+	_, err = e.CreateDatabase(context.Background(), ws(e), "three")
 	wantCode(t, err, apierr.LimitReached, "database cap")
 	// Reachable by name and by id; the default branch by name too.
 	mustQuery(t, e, d.ID, Read, "SELECT 1")
-	if _, err := e.Query(context.Background(), Target{Database: "app", Branch: "main"}, Read, stmt("SELECT 1")); err != nil {
+	if _, err := e.Query(context.Background(), Target{Workspace: ws(e), Database: "app", Branch: "main"}, Read, stmt("SELECT 1")); err != nil {
 		t.Fatal(err)
 	}
-	_, err = e.Query(context.Background(), Target{Database: "nope"}, Read, stmt("SELECT 1"))
+	_, err = e.Query(context.Background(), Target{Workspace: ws(e), Database: "nope"}, Read, stmt("SELECT 1"))
 	wantCode(t, err, apierr.DatabaseNotFound, "missing database")
-	_, err = e.Query(context.Background(), Target{Database: "app", Branch: "dev"}, Read, stmt("SELECT 1"))
+	_, err = e.Query(context.Background(), Target{Workspace: ws(e), Database: "app", Branch: "dev"}, Read, stmt("SELECT 1"))
 	wantCode(t, err, apierr.BranchNotFound, "missing branch")
 }
 
@@ -91,7 +91,7 @@ func TestStatementRules(t *testing.T) {
 	wantCode(t, err, apierr.InvalidParams, "too many args")
 
 	named := func(sql string, m map[string]value.Value) error {
-		_, err := e.Query(context.Background(), Target{Database: "a"}, Read, Statement{SQL: sql, Named: m})
+		_, err := e.Query(context.Background(), Target{Workspace: ws(e), Database: "a"}, Read, Statement{SQL: sql, Named: m})
 		return err
 	}
 	if err := named("SELECT :a, @b, $c", map[string]value.Value{"a": value.IntValue(1), ":b": value.IntValue(2), "$c": value.IntValue(3)}); err == nil {
@@ -109,7 +109,7 @@ func TestBatchAtomic(t *testing.T) {
 	e := newEngine(t, nil)
 	mustCreate(t, e, "a")
 	mustQuery(t, e, "a", Write, "CREATE TABLE t(x UNIQUE)")
-	res, err := e.Batch(context.Background(), Target{Database: "a"}, Write, []Statement{
+	res, err := e.Batch(context.Background(), Target{Workspace: ws(e), Database: "a"}, Write, []Statement{
 		stmt("INSERT INTO t VALUES (1)"), stmt("INSERT INTO t VALUES (2)"), stmt("SELECT count(*) FROM t"),
 	})
 	if err != nil {
@@ -118,14 +118,14 @@ func TestBatchAtomic(t *testing.T) {
 	if len(res) != 3 || res[2].Rows[0][0].Int != 2 {
 		t.Fatalf("batch: %+v", res)
 	}
-	_, err = e.Batch(context.Background(), Target{Database: "a"}, Write, []Statement{
+	_, err = e.Batch(context.Background(), Target{Workspace: ws(e), Database: "a"}, Write, []Statement{
 		stmt("INSERT INTO t VALUES (3)"), stmt("INSERT INTO t VALUES (1)"),
 	})
 	wantCode(t, err, apierr.ConstraintViolation, "duplicate in batch")
 	if v := scalar(t, mustQuery(t, e, "a", Read, "SELECT count(*) FROM t")); v.Int != 2 {
 		t.Fatalf("failed batch kept rows: %d", v.Int)
 	}
-	_, err = e.Batch(context.Background(), Target{Database: "a"}, Write, nil)
+	_, err = e.Batch(context.Background(), Target{Workspace: ws(e), Database: "a"}, Write, nil)
 	wantCode(t, err, apierr.EmptyStatement, "empty batch")
 }
 
@@ -253,7 +253,7 @@ func TestNewerMetaRefuses(t *testing.T) {
 	}
 	defer e2.Close()
 	wantCode(t, e2.Ready(context.Background()), apierr.Unavailable, "ready")
-	_, err = e2.CreateDatabase(context.Background(), "b")
+	_, err = e2.CreateDatabase(context.Background(), ws(e2), "b")
 	wantCode(t, err, apierr.Unavailable, "create")
 	_, err = query(e2, "a", Read, "SELECT 1")
 	wantCode(t, err, apierr.Unavailable, "query")

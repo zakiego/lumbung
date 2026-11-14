@@ -16,7 +16,7 @@ func TestSnapshotsAndRestore(t *testing.T) {
 	mustCreate(t, e, "app")
 	mustQuery(t, e, "app", Write, "CREATE TABLE t(x)")
 	mustQuery(t, e, "app", Write, "INSERT INTO t VALUES (1)")
-	sn, err := e.CreateSnapshot(bg, Target{Database: "app"}, "before change")
+	sn, err := e.CreateSnapshot(bg, Target{Workspace: ws(e), Database: "app"}, "before change")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestSnapshotsAndRestore(t *testing.T) {
 	mustQuery(t, e, "app", Write, "DELETE FROM t")
 
 	// Restore makes a new branch and leaves main alone.
-	b, err := e.RestoreSnapshot(bg, "app", sn.ID, "restored")
+	b, err := e.RestoreSnapshot(bg, ws(e), "app", sn.ID, "restored")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,39 +41,39 @@ func TestSnapshotsAndRestore(t *testing.T) {
 	}
 	// Reset of a restored branch copies the snapshot again.
 	mustOnBranch(t, e, "app", "restored", Write, "INSERT INTO t VALUES (2)")
-	if _, err := e.ResetBranch(bg, "app", "restored"); err != nil {
+	if _, err := e.ResetBranch(bg, ws(e), "app", "restored"); err != nil {
 		t.Fatal(err)
 	}
 	if v := scalar(t, mustOnBranch(t, e, "app", "restored", Read, "SELECT count(*) FROM t")); v.Int != 1 {
 		t.Fatalf("reset restored rows %d", v.Int)
 	}
 
-	list, err := e.ListSnapshots(bg, Target{Database: "app"})
+	list, err := e.ListSnapshots(bg, Target{Workspace: ws(e), Database: "app"})
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list: %v %v", list, err)
 	}
-	_, err = e.RestoreSnapshot(bg, "app", "sn_doesnotexistxxxxxxxx", "x")
+	_, err = e.RestoreSnapshot(bg, ws(e), "app", "sn_doesnotexistxxxxxxxx", "x")
 	wantCode(t, err, apierr.SnapshotNotFound, "missing snapshot")
 
 	// A snapshot outlives its branch.
-	if _, err := e.CreateBranch(bg, "app", "tmp", BranchSource{}, NewBranchOptions{}); err != nil {
+	if _, err := e.CreateBranch(bg, ws(e), "app", "tmp", BranchSource{}, NewBranchOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	sn2, err := e.CreateSnapshot(bg, Target{Database: "app", Branch: "tmp"}, "")
+	sn2, err := e.CreateSnapshot(bg, Target{Workspace: ws(e), Database: "app", Branch: "tmp"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.DeleteBranch(bg, "app", "tmp"); err != nil {
+	if err := e.DeleteBranch(bg, ws(e), "app", "tmp"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.RestoreSnapshot(bg, "app", sn2.ID, "back"); err != nil {
+	if _, err := e.RestoreSnapshot(bg, ws(e), "app", sn2.ID, "back"); err != nil {
 		t.Fatalf("restore from a deleted branch's snapshot: %v", err)
 	}
 
 	// Deleting a snapshot removes its file.
-	d, _ := e.GetDatabase(bg, "app")
+	d, _ := e.GetDatabase(bg, ws(e), "app")
 	path := e.Layout().SnapshotFile(d.ID, sn2.ID)
-	if err := e.DeleteSnapshot(bg, "app", sn2.ID); err != nil {
+	if err := e.DeleteSnapshot(bg, ws(e), "app", sn2.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -85,17 +85,17 @@ func TestScheduledSnapshotsAndRetention(t *testing.T) {
 	e := newEngine(t, nil)
 	mustCreate(t, e, "app")
 	mustQuery(t, e, "app", Write, "CREATE TABLE t(x)")
-	if _, err := e.SetSchedule(bg, Target{Database: "app"}, ScheduleOptions{Every: time.Second}); err == nil {
+	if _, err := e.SetSchedule(bg, Target{Workspace: ws(e), Database: "app"}, ScheduleOptions{Every: time.Second}); err == nil {
 		t.Fatal("sub-minute schedule accepted")
 	}
-	sc, err := e.SetSchedule(bg, Target{Database: "app"}, ScheduleOptions{Every: time.Hour, KeepCount: 2})
+	sc, err := e.SetSchedule(bg, Target{Workspace: ws(e), Database: "app"}, ScheduleOptions{Every: time.Hour, KeepCount: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sc.Every != time.Hour || sc.KeepCount != 2 {
 		t.Fatalf("schedule: %+v", sc)
 	}
-	manual, err := e.CreateSnapshot(bg, Target{Database: "app"}, "keep me")
+	manual, err := e.CreateSnapshot(bg, Target{Workspace: ws(e), Database: "app"}, "keep me")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestScheduledSnapshotsAndRetention(t *testing.T) {
 	}
 	// Not due again within the hour.
 	e.runSchedules(bg, now.Add(3*time.Hour+30*time.Minute))
-	list, _ := e.ListSnapshots(bg, Target{Database: "app"})
+	list, _ := e.ListSnapshots(bg, Target{Workspace: ws(e), Database: "app"})
 	var scheduled int
 	foundManual := false
 	for _, sn := range list {
@@ -121,11 +121,11 @@ func TestScheduledSnapshotsAndRetention(t *testing.T) {
 	}
 
 	// Age retention.
-	if _, err := e.SetSchedule(bg, Target{Database: "app"}, ScheduleOptions{Every: time.Hour, KeepFor: time.Minute}); err != nil {
+	if _, err := e.SetSchedule(bg, Target{Workspace: ws(e), Database: "app"}, ScheduleOptions{Every: time.Hour, KeepFor: time.Minute}); err != nil {
 		t.Fatal(err)
 	}
 	e.runSchedules(bg, time.Now().Add(10*time.Hour))
-	list, _ = e.ListSnapshots(bg, Target{Database: "app"})
+	list, _ = e.ListSnapshots(bg, Target{Workspace: ws(e), Database: "app"})
 	scheduled = 0
 	for _, sn := range list {
 		if sn.Kind == meta.SnapshotScheduled {
@@ -137,10 +137,10 @@ func TestScheduledSnapshotsAndRetention(t *testing.T) {
 	if scheduled != 0 {
 		t.Fatalf("age retention kept %d", scheduled)
 	}
-	if err := e.DeleteSchedule(bg, Target{Database: "app"}); err != nil {
+	if err := e.DeleteSchedule(bg, Target{Workspace: ws(e), Database: "app"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := e.GetSchedule(bg, Target{Database: "app"}); ok {
+	if _, ok, _ := e.GetSchedule(bg, Target{Workspace: ws(e), Database: "app"}); ok {
 		t.Fatal("schedule kept")
 	}
 }
@@ -150,14 +150,14 @@ func TestTrash(t *testing.T) {
 	d := mustCreate(t, e, "app")
 	mustQuery(t, e, "app", Write, "CREATE TABLE t(x)")
 	mustQuery(t, e, "app", Write, "INSERT INTO t VALUES (42)")
-	if _, err := e.CreateSnapshot(bg, Target{Database: "app"}, ""); err != nil {
+	if _, err := e.CreateSnapshot(bg, Target{Workspace: ws(e), Database: "app"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	before := e.TotalBytes()
 	if before == 0 {
 		t.Fatal("no usage recorded")
 	}
-	del, err := e.DeleteDatabase(bg, "app")
+	del, err := e.DeleteDatabase(bg, ws(e), "app")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,9 +174,9 @@ func TestTrash(t *testing.T) {
 	}
 	// The name is free; restoring under it then fails.
 	mustCreate(t, e, "app")
-	_, err = e.RestoreDatabase(bg, d.ID, "")
+	_, err = e.RestoreDatabase(bg, ws(e), d.ID, "")
 	wantCode(t, err, apierr.NameTaken, "restore onto a taken name")
-	r, err := e.RestoreDatabase(bg, d.ID, "app-old")
+	r, err := e.RestoreDatabase(bg, ws(e), d.ID, "app-old")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,23 +186,23 @@ func TestTrash(t *testing.T) {
 	if v := scalar(t, mustQuery(t, e, "app-old", Read, "SELECT x FROM t")); v.Int != 42 {
 		t.Fatalf("restored data %d", v.Int)
 	}
-	if snaps, _ := e.ListSnapshots(bg, Target{Database: "app-old"}); len(snaps) != 1 {
+	if snaps, _ := e.ListSnapshots(bg, Target{Workspace: ws(e), Database: "app-old"}); len(snaps) != 1 {
 		t.Fatal("snapshot lost in the trash round trip")
 	}
 
 	// Purge after retention removes files and records.
-	if _, err := e.DeleteDatabase(bg, "app-old"); err != nil {
+	if _, err := e.DeleteDatabase(bg, ws(e), "app-old"); err != nil {
 		t.Fatal(err)
 	}
 	e.purgeTrash(bg, time.Now())
-	if _, err := e.RestoreDatabase(bg, d.ID, "x"); err != nil {
+	if _, err := e.RestoreDatabase(bg, ws(e), d.ID, "x"); err != nil {
 		t.Fatalf("purged before retention: %v", err)
 	}
-	if _, err := e.DeleteDatabase(bg, d.ID); err != nil {
+	if _, err := e.DeleteDatabase(bg, ws(e), d.ID); err != nil {
 		t.Fatal(err)
 	}
 	e.purgeTrash(bg, time.Now().Add(2*time.Hour))
-	_, err = e.RestoreDatabase(bg, d.ID, "x")
+	_, err = e.RestoreDatabase(bg, ws(e), d.ID, "x")
 	wantCode(t, err, apierr.DatabaseNotFound, "restore after purge")
 	if _, err := os.Stat(e.Layout().TrashEntry(d.ID)); !os.IsNotExist(err) {
 		t.Fatal("trash files left after purge")

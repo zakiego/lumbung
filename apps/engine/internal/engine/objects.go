@@ -149,8 +149,8 @@ func CheckCORSOrigins(origins []string) error {
 	return nil
 }
 
-// CreateBucket creates an empty bucket.
-func (e *Engine) CreateBucket(ctx context.Context, name string) (meta.Bucket, error) {
+// CreateBucket creates an empty bucket in a workspace.
+func (e *Engine) CreateBucket(ctx context.Context, ws, name string) (meta.Bucket, error) {
 	if e.refused != nil {
 		return meta.Bucket{}, e.refused
 	}
@@ -160,23 +160,23 @@ func (e *Engine) CreateBucket(ctx context.Context, name string) (meta.Bucket, er
 	if err := e.checkDisk(); err != nil {
 		return meta.Bucket{}, err
 	}
-	return e.meta.CreateBucket(ctx, ids.New(ids.Bucket), name, e.cfg.MaxBuckets)
+	return e.meta.CreateBucket(ctx, ws, ids.New(ids.Bucket), name, e.cfg.MaxBuckets)
 }
 
-// GetBucket finds a bucket by name or id.
-func (e *Engine) GetBucket(ctx context.Context, ref string) (meta.Bucket, error) {
+// GetBucket finds a bucket of a workspace by name or id.
+func (e *Engine) GetBucket(ctx context.Context, ws, ref string) (meta.Bucket, error) {
 	if e.refused != nil {
 		return meta.Bucket{}, e.refused
 	}
-	return e.meta.GetBucket(ctx, ref)
+	return e.meta.GetBucket(ctx, ws, ref)
 }
 
-// ListBuckets returns every bucket by name.
-func (e *Engine) ListBuckets(ctx context.Context) ([]meta.Bucket, error) {
+// ListBuckets returns a workspace's buckets by name.
+func (e *Engine) ListBuckets(ctx context.Context, ws string) ([]meta.Bucket, error) {
 	if e.refused != nil {
 		return nil, e.refused
 	}
-	return e.meta.ListBuckets(ctx)
+	return e.meta.ListBuckets(ctx, ws)
 }
 
 // UpdateBucket changes a bucket's name or settings.

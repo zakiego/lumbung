@@ -19,6 +19,7 @@ import (
 // Bucket is one bucket record.
 type Bucket struct {
 	ID          string
+	WorkspaceID string
 	Name        string
 	PublicRead  bool
 	CORSOrigins []string
@@ -64,12 +65,12 @@ type Part struct {
 	CreatedAt time.Time
 }
 
-const bucketCols = `id, name, public_read, cors_origins, size_bytes, object_count, created_at, updated_at`
+const bucketCols = `id, workspace_id, name, public_read, cors_origins, size_bytes, object_count, created_at, updated_at`
 
 func scanBucket(r scanner) (Bucket, error) {
 	var b Bucket
 	var cors, created, updated string
-	if err := r.Scan(&b.ID, &b.Name, &b.PublicRead, &cors, &b.SizeBytes, &b.ObjectCount, &created, &updated); err != nil {
+	if err := r.Scan(&b.ID, &b.WorkspaceID, &b.Name, &b.PublicRead, &cors, &b.SizeBytes, &b.ObjectCount, &created, &updated); err != nil {
 		return Bucket{}, err
 	}
 	if err := json.Unmarshal([]byte(cors), &b.CORSOrigins); err != nil {
@@ -105,9 +106,10 @@ func jsonMap(s string) (map[string]string, error) {
 	return m, nil
 }
 
-// CreateBucket records a new bucket. It fails with limit_reached when max
-// buckets already exist, counted in the same transaction.
-func (s *Store) CreateBucket(ctx context.Context, id, name string, max int) (Bucket, error) {
+// CreateBucket records a new bucket in a workspace. It fails with
+// limit_reached when the instance already has max buckets or the workspace
+// its own cap, counted in the same transaction.
+func (s *Store) CreateBucket(ctx context.Context, wsID, id, name string, max int) (Bucket, error) {
 	if !ids.ValidBucketName(name) {
 		return Bucket{}, apierr.Newf(apierr.InvalidName, "invalid bucket name %q", name)
 	}
@@ -123,8 +125,20 @@ func (s *Store) CreateBucket(ctx context.Context, id, name string, max int) (Buc
 	if n >= max {
 		return Bucket{}, apierr.Newf(apierr.LimitReached, "the instance has the most buckets allowed (%d)", max)
 	}
+	var own, limit int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT (SELECT count(*) FROM buckets WHERE workspace_id = w.id), w.max_buckets FROM workspaces w WHERE w.id = ? AND w.deleted_at IS NULL`,
+		wsID).Scan(&own, &limit); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Bucket{}, noWorkspace(wsID)
+		}
+		return Bucket{}, err
+	}
+	if limit > 0 && own >= limit {
+		return Bucket{}, apierr.Newf(apierr.LimitReached, "the workspace has the most buckets allowed (%d)", limit)
+	}
 	ts := now()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO buckets (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, id, name, ts, ts); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO buckets (id, workspace_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, id, wsID, name, ts, ts); err != nil {
 		if isUnique(err) {
 			return Bucket{}, apierr.Newf(apierr.NameTaken, "a bucket named %q already exists", name)
 		}
@@ -133,27 +147,49 @@ func (s *Store) CreateBucket(ctx context.Context, id, name string, max int) (Buc
 	if err := tx.Commit(); err != nil {
 		return Bucket{}, err
 	}
-	return s.GetBucket(ctx, id)
+	return s.BucketByID(ctx, id)
 }
 
-// GetBucket finds a bucket by name or id.
-func (s *Store) GetBucket(ctx context.Context, ref string) (Bucket, error) {
+// GetBucket finds a bucket of a workspace by name or id. A bucket of
+// another workspace is not found, by id as much as by name.
+func (s *Store) GetBucket(ctx context.Context, wsID, ref string) (Bucket, error) {
 	col := "name"
 	if ids.IsID(ref, ids.Bucket) {
 		col = "id"
 	} else if !ids.ValidBucketName(ref) {
 		return Bucket{}, apierr.Newf(apierr.BucketNotFound, "no bucket %q", ref)
 	}
-	b, err := scanBucket(s.db.QueryRowContext(ctx, `SELECT `+bucketCols+` FROM buckets WHERE `+col+` = ?`, ref))
+	b, err := scanBucket(s.db.QueryRowContext(ctx, `SELECT `+bucketCols+` FROM buckets WHERE workspace_id = ? AND `+col+` = ?`, wsID, ref))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Bucket{}, apierr.Newf(apierr.BucketNotFound, "no bucket %q", ref)
 	}
 	return b, err
 }
 
-// ListBuckets returns every bucket by name.
-func (s *Store) ListBuckets(ctx context.Context) ([]Bucket, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+bucketCols+` FROM buckets ORDER BY name`)
+// BucketByID finds a bucket by id alone, in any workspace. It is for
+// re-reading a bucket the caller already resolved, and for the engine's
+// own jobs. A request never resolves a bucket this way.
+func (s *Store) BucketByID(ctx context.Context, id string) (Bucket, error) {
+	b, err := scanBucket(s.db.QueryRowContext(ctx, `SELECT `+bucketCols+` FROM buckets WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Bucket{}, apierr.Newf(apierr.BucketNotFound, "no bucket %q", id)
+	}
+	return b, err
+}
+
+// ListBuckets returns a workspace's buckets by name.
+func (s *Store) ListBuckets(ctx context.Context, wsID string) ([]Bucket, error) {
+	return s.listBuckets(ctx, `WHERE workspace_id = ? ORDER BY name`, wsID)
+}
+
+// ListAllBuckets returns the buckets of every workspace, for the engine's
+// own jobs and backups.
+func (s *Store) ListAllBuckets(ctx context.Context) ([]Bucket, error) {
+	return s.listBuckets(ctx, `ORDER BY name`)
+}
+
+func (s *Store) listBuckets(ctx context.Context, where string, args ...any) ([]Bucket, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+bucketCols+` FROM buckets `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +254,7 @@ func (s *Store) UpdateBucket(ctx context.Context, id string, u BucketUpdate) (Bu
 	if err := tx.Commit(); err != nil {
 		return Bucket{}, err
 	}
-	return s.GetBucket(ctx, id)
+	return s.BucketByID(ctx, id)
 }
 
 // DeleteBucket removes an empty bucket, aborts its uploads and revokes its

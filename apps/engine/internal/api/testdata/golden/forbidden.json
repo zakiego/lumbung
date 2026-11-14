@@ -1,6 +1,6 @@
 {
   "code": "forbidden",
   "status": 403,
-  "title": "this needs an instance admin token",
+  "title": "this needs an admin token for the whole workspace",
   "type": "about:blank"
 }

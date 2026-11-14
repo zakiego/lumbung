@@ -32,17 +32,59 @@ func TestTokenRoundTrip(t *testing.T) {
 	}
 }
 
+// The older tests all run in one workspace. db, bk and tok build records
+// in it, so every assertion below is about scopes and grants, as it was
+// before workspaces; TestWorkspaceBoundary covers the boundary itself.
+const wsA, wsB = "ws_a", "ws_b"
+
+func db(id string) meta.Database { return meta.Database{ID: id, WorkspaceID: wsA} }
+func bk(id string) meta.Bucket   { return meta.Bucket{ID: id, WorkspaceID: wsA} }
+
+// in makes a principal act in workspace A.
+func in(p Principal) Principal {
+	p.WorkspaceID = wsA
+	return p
+}
+
+// tok is a stored token of workspace A with the given scope and grants, in
+// the one shape each scope is stored in.
+func tok(scope string, grants []Grant) meta.Token {
+	t := meta.Token{Scope: scope, WorkspaceID: wsA}
+	switch {
+	case scope == ScopeInstance:
+		t.WorkspaceID = ""
+	case scope == ScopeDatabase && len(grants) == 1:
+		t.DatabaseID, t.BranchID, t.Access = grants[0].DatabaseID, grants[0].BranchID, grants[0].Access
+	case scope == ScopeBucket && len(grants) == 1:
+		t.BucketID, t.Access = grants[0].BucketID, grants[0].Access
+	default:
+		t.Grants = grants
+	}
+	return t
+}
+
+// covers is CoversToken for a token with one scope.
+func covers(p Principal, scope, dbID, branchID, bucketID, access string) bool {
+	switch scope {
+	case ScopeDatabase:
+		return p.CoversToken(tok(scope, []Grant{{DatabaseID: dbID, BranchID: branchID, Access: access}}))
+	case ScopeBucket:
+		return p.CoversToken(tok(scope, []Grant{{BucketID: bucketID, Access: access}}))
+	}
+	return p.CoversToken(meta.Token{Scope: scope, Access: access})
+}
+
 func TestPrincipal(t *testing.T) {
 	past := time.Now().Add(-time.Hour)
-	if _, err := FromToken(meta.Token{ExpiresAt: &past}, time.Now()); err == nil {
+	if _, err := FromToken(meta.Token{Scope: ScopeInstance, ExpiresAt: &past}, time.Now()); err == nil {
 		t.Fatal("expired token accepted")
 	}
-	if _, err := FromToken(meta.Token{RevokedAt: &past}, time.Now()); err == nil {
+	if _, err := FromToken(meta.Token{Scope: ScopeInstance, RevokedAt: &past}, time.Now()); err == nil {
 		t.Fatal("revoked token accepted")
 	}
-	admin := Principal{Scope: ScopeInstance, Access: AccessAdmin}
-	dbRead := Principal{Scope: ScopeDatabase, DatabaseID: "db_a", Access: AccessRead}
-	brWrite := Principal{Scope: ScopeDatabase, DatabaseID: "db_a", BranchID: "br_x", Access: AccessWrite}
+	admin := in(Principal{Scope: ScopeInstance, Access: AccessAdmin})
+	dbRead := in(Principal{Scope: ScopeDatabase, DatabaseID: "db_a", Access: AccessRead})
+	brWrite := in(Principal{Scope: ScopeDatabase, DatabaseID: "db_a", BranchID: "br_x", Access: AccessWrite})
 	cases := []struct {
 		p                  Principal
 		access, db, branch string
@@ -57,48 +99,48 @@ func TestPrincipal(t *testing.T) {
 		{brWrite, AccessRead, "db_a", "", false},
 	}
 	for i, c := range cases {
-		if got := c.p.AtLeast(c.access, c.db, c.branch); got != c.want {
+		if got := c.p.AtLeast(c.access, db(c.db), c.branch); got != c.want {
 			t.Errorf("case %d: got %v", i, got)
 		}
 	}
-	dbAdmin := Principal{Scope: ScopeDatabase, DatabaseID: "db_a", Access: AccessAdmin}
-	if !dbAdmin.Covers(ScopeDatabase, "db_a", "", "", AccessWrite) || dbAdmin.Covers(ScopeInstance, "", "", "", AccessRead) || dbAdmin.Covers(ScopeDatabase, "db_b", "", "", AccessRead) {
+	dbAdmin := in(Principal{Scope: ScopeDatabase, DatabaseID: "db_a", Access: AccessAdmin})
+	if !covers(dbAdmin, ScopeDatabase, "db_a", "", "", AccessWrite) || covers(dbAdmin, ScopeInstance, "", "", "", AccessRead) || covers(dbAdmin, ScopeDatabase, "db_b", "", "", AccessRead) {
 		t.Fatal("database admin covers")
 	}
-	if brWrite.Covers(ScopeDatabase, "db_a", "br_x", "", AccessRead) {
+	if covers(brWrite, ScopeDatabase, "db_a", "br_x", "", AccessRead) {
 		t.Fatal("a write token minted tokens")
 	}
 }
 
 func TestBucketScope(t *testing.T) {
-	bucketRead := Principal{Scope: ScopeBucket, BucketID: "bk_a", Access: AccessRead}
-	bucketAdmin := Principal{Scope: ScopeBucket, BucketID: "bk_a", Access: AccessAdmin}
-	dbAdmin := Principal{Scope: ScopeDatabase, DatabaseID: "db_a", Access: AccessAdmin}
-	instRead := Principal{Scope: ScopeInstance, Access: AccessRead}
+	bucketRead := in(Principal{Scope: ScopeBucket, BucketID: "bk_a", Access: AccessRead})
+	bucketAdmin := in(Principal{Scope: ScopeBucket, BucketID: "bk_a", Access: AccessAdmin})
+	dbAdmin := in(Principal{Scope: ScopeDatabase, DatabaseID: "db_a", Access: AccessAdmin})
+	instRead := in(Principal{Scope: ScopeInstance, Access: AccessRead})
 
-	if !bucketRead.BucketAtLeast(AccessRead, "bk_a") || bucketRead.BucketAtLeast(AccessWrite, "bk_a") || bucketRead.BucketAtLeast(AccessRead, "bk_b") {
+	if !bucketRead.BucketAtLeast(AccessRead, bk("bk_a")) || bucketRead.BucketAtLeast(AccessWrite, bk("bk_a")) || bucketRead.BucketAtLeast(AccessRead, bk("bk_b")) {
 		t.Fatal("bucket read token")
 	}
-	if bucketRead.SeesBucket("") || bucketRead.SeesDatabase("") || bucketRead.SeesDatabase("db_a") || bucketRead.AtLeast(AccessRead, "", "") {
+	if bucketRead.SeesBucket(bk("")) || bucketRead.SeesDatabase(db("")) || bucketRead.SeesDatabase(db("db_a")) || bucketRead.AtLeast(AccessRead, db(""), "") {
 		t.Fatal("a bucket token reaches databases")
 	}
-	if dbAdmin.SeesBucket("bk_a") || dbAdmin.BucketAtLeast(AccessRead, "bk_a") || dbAdmin.SeesBucket("") {
+	if dbAdmin.SeesBucket(bk("bk_a")) || dbAdmin.BucketAtLeast(AccessRead, bk("bk_a")) || dbAdmin.SeesBucket(bk("")) {
 		t.Fatal("a database token reaches buckets")
 	}
-	if !instRead.BucketAtLeast(AccessRead, "bk_z") || instRead.BucketAtLeast(AccessWrite, "bk_z") {
+	if !instRead.BucketAtLeast(AccessRead, bk("bk_z")) || instRead.BucketAtLeast(AccessWrite, bk("bk_z")) {
 		t.Fatal("instance read token")
 	}
-	if !bucketAdmin.Covers(ScopeBucket, "", "", "bk_a", AccessWrite) || bucketAdmin.Covers(ScopeBucket, "", "", "bk_b", AccessRead) ||
-		bucketAdmin.Covers(ScopeDatabase, "db_a", "", "", AccessRead) || bucketAdmin.Covers(ScopeInstance, "", "", "", AccessRead) {
+	if !covers(bucketAdmin, ScopeBucket, "", "", "bk_a", AccessWrite) || covers(bucketAdmin, ScopeBucket, "", "", "bk_b", AccessRead) ||
+		covers(bucketAdmin, ScopeDatabase, "db_a", "", "", AccessRead) || covers(bucketAdmin, ScopeInstance, "", "", "", AccessRead) {
 		t.Fatal("bucket admin covers")
 	}
-	if dbAdmin.Covers(ScopeBucket, "", "", "bk_a", AccessRead) || bucketRead.Covers(ScopeBucket, "", "", "bk_a", AccessRead) {
+	if covers(dbAdmin, ScopeBucket, "", "", "bk_a", AccessRead) || covers(bucketRead, ScopeBucket, "", "", "bk_a", AccessRead) {
 		t.Fatal("covers across scopes or without admin")
 	}
 }
 
 func TestGrantsScope(t *testing.T) {
-	stored := meta.Token{ID: "tok_a", Scope: ScopeGrants, Access: AccessAdmin, Grants: []Grant{
+	stored := meta.Token{ID: "tok_a", WorkspaceID: wsA, Scope: ScopeGrants, Access: AccessAdmin, Grants: []Grant{
 		{DatabaseID: "db_a", Access: AccessWrite},
 		{DatabaseID: "db_b", BranchID: "br_dev", Access: AccessAdmin},
 		{BucketID: "bk_a", Access: AccessRead},
@@ -132,33 +174,33 @@ func TestGrantsScope(t *testing.T) {
 		{AccessRead, "", "", false},
 		{AccessRead, "bk_a", "", false},
 	} {
-		if got := p.AtLeast(c.access, c.db, c.branch); got != c.want {
+		if got := p.AtLeast(c.access, db(c.db), c.branch); got != c.want {
 			t.Errorf("AtLeast case %d: got %v", i, got)
 		}
 	}
-	if !p.SeesDatabase("db_a") || !p.SeesDatabase("db_b") || p.SeesDatabase("db_c") || p.SeesDatabase("") || p.SeesDatabase("bk_a") {
+	if !p.SeesDatabase(db("db_a")) || !p.SeesDatabase(db("db_b")) || p.SeesDatabase(db("db_c")) || p.SeesDatabase(db("")) || p.SeesDatabase(db("bk_a")) {
 		t.Fatal("SeesDatabase")
 	}
-	if !p.WholeDatabase("db_a") || p.WholeDatabase("db_b") || p.WholeDatabase("db_c") || p.WholeDatabase("") {
+	if !p.WholeDatabase(db("db_a")) || p.WholeDatabase(db("db_b")) || p.WholeDatabase(db("db_c")) || p.WholeDatabase(db("")) {
 		t.Fatal("WholeDatabase")
 	}
-	if !p.SeesBranch("db_a", "br_any") || !p.SeesBranch("db_b", "br_dev") || p.SeesBranch("db_b", "br_main") || p.SeesBranch("db_b", "") || p.SeesBranch("db_c", "br_dev") {
+	if !p.SeesBranch(db("db_a"), "br_any") || !p.SeesBranch(db("db_b"), "br_dev") || p.SeesBranch(db("db_b"), "br_main") || p.SeesBranch(db("db_b"), "") || p.SeesBranch(db("db_c"), "br_dev") {
 		t.Fatal("SeesBranch")
 	}
-	if !p.SeesBucket("bk_a") || p.SeesBucket("bk_b") || p.SeesBucket("") || p.SeesBucket("db_a") {
+	if !p.SeesBucket(bk("bk_a")) || p.SeesBucket(bk("bk_b")) || p.SeesBucket(bk("")) || p.SeesBucket(bk("db_a")) {
 		t.Fatal("SeesBucket")
 	}
 	// The bucket grant is read: neither the write nor the admin grant on a
 	// database lifts it.
-	if !p.BucketAtLeast(AccessRead, "bk_a") || p.BucketAtLeast(AccessWrite, "bk_a") || p.BucketAtLeast(AccessRead, "bk_b") || p.BucketAtLeast(AccessRead, "") {
+	if !p.BucketAtLeast(AccessRead, bk("bk_a")) || p.BucketAtLeast(AccessWrite, bk("bk_a")) || p.BucketAtLeast(AccessRead, bk("bk_b")) || p.BucketAtLeast(AccessRead, bk("")) {
 		t.Fatal("BucketAtLeast")
 	}
-	if !p.HasAdmin() || (Principal{Scope: ScopeGrants, Grants: stored.Grants[2:]}).HasAdmin() {
+	if !p.HasAdmin() || in(Principal{Scope: ScopeGrants, Grants: stored.Grants[2:]}).HasAdmin() {
 		t.Fatal("HasAdmin")
 	}
 
 	// It is an admin of db_b's dev branch only, so that is all it may hand out.
-	if !p.CoversToken(ScopeDatabase, []Grant{{DatabaseID: "db_b", BranchID: "br_dev", Access: AccessWrite}}) {
+	if !p.CoversToken(tok(ScopeDatabase, []Grant{{DatabaseID: "db_b", BranchID: "br_dev", Access: AccessWrite}})) {
 		t.Fatal("doesn't cover its admin grant")
 	}
 	for i, g := range [][]Grant{
@@ -172,17 +214,17 @@ func TestGrantsScope(t *testing.T) {
 		{{Access: AccessRead}},
 		{},
 	} {
-		if p.CoversToken(ScopeGrants, g) {
+		if p.CoversToken(tok(ScopeGrants, g)) {
 			t.Errorf("covers case %d: %+v", i, g)
 		}
 	}
-	if p.CoversToken(ScopeInstance, nil) || p.Covers(ScopeInstance, "", "", "", AccessRead) {
+	if p.CoversToken(tok(ScopeInstance, nil)) || covers(p, ScopeInstance, "", "", "", AccessRead) {
 		t.Fatal("covers an instance token")
 	}
 	// A grants principal with no grants reaches nothing.
-	empty := Principal{Scope: ScopeGrants, Access: AccessAdmin}
-	if empty.AtLeast(AccessRead, "db_a", "") || empty.SeesDatabase("db_a") || empty.SeesBucket("bk_a") || empty.BucketAtLeast(AccessRead, "bk_a") ||
-		empty.HasAdmin() || empty.WholeDatabase("db_a") || empty.CoversToken(ScopeDatabase, []Grant{{DatabaseID: "db_a", Access: AccessRead}}) {
+	empty := in(Principal{Scope: ScopeGrants, Access: AccessAdmin})
+	if empty.AtLeast(AccessRead, db("db_a"), "") || empty.SeesDatabase(db("db_a")) || empty.SeesBucket(bk("bk_a")) || empty.BucketAtLeast(AccessRead, bk("bk_a")) ||
+		empty.HasAdmin() || empty.WholeDatabase(db("db_a")) || empty.CoversToken(tok(ScopeDatabase, []Grant{{DatabaseID: "db_a", Access: AccessRead}})) {
 		t.Fatal("a grants principal without grants reaches something")
 	}
 
@@ -195,6 +237,163 @@ func TestGrantsScope(t *testing.T) {
 	}
 	if len(TokenGrants(meta.Token{Scope: ScopeInstance, Access: AccessAdmin})) != 0 || len(TokenGrants(stored)) != 3 {
 		t.Fatal("instance or grants token grants")
+	}
+}
+
+// The workspace boundary (PLAN 17.9, ADR 0008): every check starts from the
+// record's workspace, for every scope, the instance included.
+func TestWorkspaceBoundary(t *testing.T) {
+	dbA, dbB := meta.Database{ID: "db_a", WorkspaceID: wsA}, meta.Database{ID: "db_b", WorkspaceID: wsB}
+	bkA, bkB := meta.Bucket{ID: "bk_a", WorkspaceID: wsA}, meta.Bucket{ID: "bk_b", WorkspaceID: wsB}
+	// A record with the same id in the other workspace: an id alone must
+	// never be enough.
+	dbAinB, bkAinB := meta.Database{ID: "db_a", WorkspaceID: wsB}, meta.Bucket{ID: "bk_a", WorkspaceID: wsB}
+
+	reaches := func(p Principal, d meta.Database, b meta.Bucket) bool {
+		return p.SeesDatabase(d) || p.WholeDatabase(d) || p.SeesBranch(d, "br_x") || p.AtLeast(AccessRead, d, "") ||
+			p.AtLeast(AccessRead, d, "br_x") || p.SeesBucket(b) || p.BucketAtLeast(AccessRead, b)
+	}
+	principals := map[string]Principal{
+		"instance admin acting in A": in(Principal{Scope: ScopeInstance, Access: AccessAdmin}),
+		"workspace admin of A":       in(Principal{Scope: ScopeWorkspace, Access: AccessAdmin}),
+		"workspace read of A":        in(Principal{Scope: ScopeWorkspace, Access: AccessRead}),
+		"database admin in A":        in(Principal{Scope: ScopeDatabase, DatabaseID: "db_a", Access: AccessAdmin}),
+		"branch token in A":          in(Principal{Scope: ScopeDatabase, DatabaseID: "db_a", BranchID: "br_x", Access: AccessWrite}),
+		"bucket admin in A":          in(Principal{Scope: ScopeBucket, BucketID: "bk_a", Access: AccessAdmin}),
+		"grants token in A": in(Principal{Scope: ScopeGrants, Grants: []Grant{
+			{DatabaseID: "db_a", Access: AccessAdmin}, {BucketID: "bk_a", Access: AccessAdmin},
+			// Grants that name the other workspace's ids must still reach nothing there.
+			{DatabaseID: "db_b", Access: AccessAdmin}, {BucketID: "bk_b", Access: AccessAdmin},
+		}}),
+	}
+	for name, p := range principals {
+		if !reaches(p, dbA, bkA) {
+			t.Errorf("%s reaches nothing in its own workspace", name)
+		}
+		if reaches(p, dbB, bkB) {
+			t.Errorf("%s reaches workspace B", name)
+		}
+		if reaches(p, dbAinB, bkAinB) {
+			t.Errorf("%s reaches a record of workspace B that shares an id with one of its own", name)
+		}
+		if reaches(p, meta.Database{ID: "db_a"}, meta.Bucket{ID: "bk_a"}) {
+			t.Errorf("%s reaches a record with no workspace", name)
+		}
+	}
+
+	// A principal that acts in no workspace reaches nothing, whatever its
+	// scope and level: an instance token before In, and a zero principal.
+	for name, p := range map[string]Principal{
+		"instance admin before In": {Scope: ScopeInstance, Access: AccessAdmin},
+		"zero principal":           {},
+		"workspace admin, no id":   {Scope: ScopeWorkspace, Access: AccessAdmin},
+	} {
+		if reaches(p, dbA, bkA) || reaches(p, meta.Database{ID: "db_a"}, meta.Bucket{ID: "bk_a"}) || p.WorkspaceAtLeast(AccessRead) {
+			t.Errorf("%s reaches something", name)
+		}
+	}
+
+	// In: an instance principal acts in any workspace, one at a time. A
+	// bound one acts only in its own.
+	inst := Principal{Scope: ScopeInstance, Access: AccessAdmin}
+	if p, ok := inst.In(wsB); !ok || p.WorkspaceID != wsB || !reaches(p, dbB, bkB) || reaches(p, dbA, bkA) {
+		t.Fatal("instance principal In")
+	}
+	if inst.WorkspaceID != "" {
+		t.Fatal("In changed the principal it was called on")
+	}
+	wsAdmin := principals["workspace admin of A"]
+	if p, ok := wsAdmin.In(wsA); !ok || p.WorkspaceID != wsA {
+		t.Fatal("a workspace principal can't act in its own workspace")
+	}
+	for _, other := range []string{wsB, "", "ws_"} {
+		if p, ok := wsAdmin.In(other); ok || p.WorkspaceID != "" || reaches(p, dbB, bkB) {
+			t.Errorf("a workspace principal acts in %q", other)
+		}
+	}
+	if _, ok := inst.In(""); ok {
+		t.Fatal("an instance principal acts in no workspace")
+	}
+	if inst.Bound() || !wsAdmin.Bound() || !(Principal{}).Bound() {
+		t.Fatal("Bound")
+	}
+
+	// Seeing a workspace: the instance sees all, a bound principal its own.
+	if !inst.SeesWorkspace(wsA) || !inst.SeesWorkspace(wsB) || inst.SeesWorkspace("") ||
+		!wsAdmin.SeesWorkspace(wsA) || wsAdmin.SeesWorkspace(wsB) || wsAdmin.SeesWorkspace("") ||
+		principals["database admin in A"].SeesWorkspace(wsB) {
+		t.Fatal("SeesWorkspace")
+	}
+
+	// Workspace levels. Only an instance or workspace principal has a level
+	// on the workspace as a whole; an admin of one database never does.
+	read, write := principals["workspace read of A"], in(Principal{Scope: ScopeWorkspace, Access: AccessWrite})
+	if !read.WorkspaceAtLeast(AccessRead) || read.WorkspaceAtLeast(AccessWrite) || read.AtLeast(AccessWrite, dbA, "") || read.BucketAtLeast(AccessWrite, bkA) ||
+		!write.WorkspaceAtLeast(AccessWrite) || write.WorkspaceAtLeast(AccessAdmin) || !write.AtLeast(AccessWrite, dbA, "br_x") || write.AtLeast(AccessAdmin, dbA, "") ||
+		!wsAdmin.WorkspaceAtLeast(AccessAdmin) || !wsAdmin.AtLeast(AccessAdmin, dbA, "") || !wsAdmin.BucketAtLeast(AccessAdmin, bkA) {
+		t.Fatal("workspace levels")
+	}
+	for name, p := range principals {
+		wide := p.Scope == ScopeInstance || p.Scope == ScopeWorkspace
+		if got := p.WorkspaceAtLeast(AccessRead); got != wide {
+			t.Errorf("%s: WorkspaceAtLeast(read) = %v", name, got)
+		}
+	}
+	if wsAdmin.WorkspaceAtLeast("") || wsAdmin.WorkspaceAtLeast("owner") || wsAdmin.AtLeast("", dbA, "") || wsAdmin.BucketAtLeast("owner", bkA) {
+		t.Fatal("an unknown level passes")
+	}
+	// Only an instance admin operates the instance.
+	if wsAdmin.InstanceAdmin() || !inst.InstanceAdmin() || (Principal{Scope: ScopeInstance, Access: AccessWrite}).InstanceAdmin() {
+		t.Fatal("InstanceAdmin")
+	}
+
+	// Minting and managing tokens stops at the workspace.
+	wsTokA := meta.Token{Scope: ScopeWorkspace, WorkspaceID: wsA, Access: AccessAdmin}
+	wsTokB := meta.Token{Scope: ScopeWorkspace, WorkspaceID: wsB, Access: AccessRead}
+	dbTokA := meta.Token{Scope: ScopeDatabase, WorkspaceID: wsA, DatabaseID: "db_a", Access: AccessRead}
+	dbTokB := meta.Token{Scope: ScopeDatabase, WorkspaceID: wsB, DatabaseID: "db_a", Access: AccessRead}
+	instTok := meta.Token{Scope: ScopeInstance, Access: AccessRead}
+	if !wsAdmin.CoversToken(wsTokA) || !wsAdmin.CoversToken(dbTokA) {
+		t.Fatal("a workspace admin doesn't cover its workspace's tokens")
+	}
+	if wsAdmin.CoversToken(wsTokB) || wsAdmin.CoversToken(dbTokB) || wsAdmin.CoversToken(instTok) ||
+		wsAdmin.CoversToken(meta.Token{Scope: ScopeWorkspace, Access: AccessRead}) ||
+		wsAdmin.CoversToken(meta.Token{Scope: ScopeInstance, WorkspaceID: wsA, Access: AccessRead}) {
+		t.Fatal("a workspace admin covers a token outside its workspace")
+	}
+	if write.CoversToken(dbTokA) || read.CoversToken(dbTokA) || write.CoversToken(wsTokA) {
+		t.Fatal("a workspace token below admin mints tokens")
+	}
+	dbAdmin := principals["database admin in A"]
+	if !dbAdmin.CoversToken(dbTokA) || dbAdmin.CoversToken(wsTokA) || dbAdmin.CoversToken(dbTokB) || dbAdmin.CoversToken(instTok) {
+		t.Fatal("database admin covers")
+	}
+	actingA := principals["instance admin acting in A"]
+	if !actingA.CoversToken(wsTokA) || !actingA.CoversToken(dbTokA) || !actingA.CoversToken(instTok) || actingA.CoversToken(wsTokB) || actingA.CoversToken(dbTokB) {
+		t.Fatal("an instance admin covers the instance's tokens and those of the workspace it acts in, no others")
+	}
+	if in(Principal{Scope: ScopeInstance, Access: AccessWrite}).CoversToken(dbTokA) || in(Principal{Scope: ScopeInstance, Access: AccessWrite}).CoversToken(instTok) {
+		t.Fatal("an instance token below admin mints tokens")
+	}
+
+	// A stored token belongs to a workspace exactly when it isn't an
+	// instance token. Anything else never becomes a principal.
+	now := time.Now()
+	for i, bad := range []meta.Token{
+		{Scope: ScopeWorkspace, Access: AccessAdmin},
+		{Scope: ScopeDatabase, DatabaseID: "db_a", Access: AccessRead},
+		{Scope: ScopeInstance, WorkspaceID: wsA, Access: AccessAdmin},
+		{Access: AccessAdmin},
+	} {
+		if _, err := FromToken(bad, now); err == nil {
+			t.Errorf("token %d became a principal", i)
+		}
+	}
+	if p, err := FromToken(wsTokA, now); err != nil || p.WorkspaceID != wsA || p.Scope != ScopeWorkspace {
+		t.Fatalf("workspace token %+v %v", p, err)
+	}
+	if p, err := FromToken(instTok, now); err != nil || p.WorkspaceID != "" || p.Bound() {
+		t.Fatalf("instance token %+v %v", p, err)
 	}
 }
 

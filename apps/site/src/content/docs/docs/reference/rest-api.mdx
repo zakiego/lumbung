@@ -51,17 +51,18 @@ Response `201`:
 
 | Field | Type | Description |
 |---|---|---|
-| `branch_count` (required) | integer |  |
+| `branch_count` (required) | integer | Branches the token reaches: all of them, unless it is limited to some. |
 | `created_at` (required) | string |  |
-| `default_branch` (required) | string | Name of the default branch. |
-| `default_branch_id` (required) | string |  |
+| `default_branch` (required) | string | Name of the default branch. Empty for a token that can't reach that branch. |
+| `default_branch_id` (required) | string | Empty for a token that can't reach the default branch. |
 | `deleted_at` (required) | string or null | When it went to the trash, or null. |
 | `id` (required) | string |  |
-| `last_activity_at` (required) | string or null | Start of the last minute with a query, or null. |
+| `last_activity_at` (required) | string or null | Start of the last minute with a query on a branch the token reaches, or null. |
 | `name` (required) | string |  |
 | `purge_after` (required) | string or null | When a trashed database is removed for good, or null. |
-| `size_bytes` (required) | integer | Space all branches take on disk. |
+| `size_bytes` (required) | integer | Space the branches the token reaches take on disk. |
 | `updated_at` (required) | string |  |
+| `workspace_id` (required) | string | The workspace the database is in. |
 
 ### Get a database
 
@@ -75,17 +76,18 @@ Response `200`:
 
 | Field | Type | Description |
 |---|---|---|
-| `branch_count` (required) | integer |  |
+| `branch_count` (required) | integer | Branches the token reaches: all of them, unless it is limited to some. |
 | `created_at` (required) | string |  |
-| `default_branch` (required) | string | Name of the default branch. |
-| `default_branch_id` (required) | string |  |
+| `default_branch` (required) | string | Name of the default branch. Empty for a token that can't reach that branch. |
+| `default_branch_id` (required) | string | Empty for a token that can't reach the default branch. |
 | `deleted_at` (required) | string or null | When it went to the trash, or null. |
 | `id` (required) | string |  |
-| `last_activity_at` (required) | string or null | Start of the last minute with a query, or null. |
+| `last_activity_at` (required) | string or null | Start of the last minute with a query on a branch the token reaches, or null. |
 | `name` (required) | string |  |
 | `purge_after` (required) | string or null | When a trashed database is removed for good, or null. |
-| `size_bytes` (required) | integer | Space all branches take on disk. |
+| `size_bytes` (required) | integer | Space the branches the token reaches take on disk. |
 | `updated_at` (required) | string |  |
+| `workspace_id` (required) | string | The workspace the database is in. |
 
 ### Rename a database
 
@@ -105,17 +107,18 @@ Response `200`:
 
 | Field | Type | Description |
 |---|---|---|
-| `branch_count` (required) | integer |  |
+| `branch_count` (required) | integer | Branches the token reaches: all of them, unless it is limited to some. |
 | `created_at` (required) | string |  |
-| `default_branch` (required) | string | Name of the default branch. |
-| `default_branch_id` (required) | string |  |
+| `default_branch` (required) | string | Name of the default branch. Empty for a token that can't reach that branch. |
+| `default_branch_id` (required) | string | Empty for a token that can't reach the default branch. |
 | `deleted_at` (required) | string or null | When it went to the trash, or null. |
 | `id` (required) | string |  |
-| `last_activity_at` (required) | string or null | Start of the last minute with a query, or null. |
+| `last_activity_at` (required) | string or null | Start of the last minute with a query on a branch the token reaches, or null. |
 | `name` (required) | string |  |
 | `purge_after` (required) | string or null | When a trashed database is removed for good, or null. |
-| `size_bytes` (required) | integer | Space all branches take on disk. |
+| `size_bytes` (required) | integer | Space the branches the token reaches take on disk. |
 | `updated_at` (required) | string |  |
+| `workspace_id` (required) | string | The workspace the database is in. |
 
 ### Move a database to the trash
 
@@ -129,17 +132,18 @@ Response `200`:
 
 | Field | Type | Description |
 |---|---|---|
-| `branch_count` (required) | integer |  |
+| `branch_count` (required) | integer | Branches the token reaches: all of them, unless it is limited to some. |
 | `created_at` (required) | string |  |
-| `default_branch` (required) | string | Name of the default branch. |
-| `default_branch_id` (required) | string |  |
+| `default_branch` (required) | string | Name of the default branch. Empty for a token that can't reach that branch. |
+| `default_branch_id` (required) | string | Empty for a token that can't reach the default branch. |
 | `deleted_at` (required) | string or null | When it went to the trash, or null. |
 | `id` (required) | string |  |
-| `last_activity_at` (required) | string or null | Start of the last minute with a query, or null. |
+| `last_activity_at` (required) | string or null | Start of the last minute with a query on a branch the token reaches, or null. |
 | `name` (required) | string |  |
 | `purge_after` (required) | string or null | When a trashed database is removed for good, or null. |
-| `size_bytes` (required) | integer | Space all branches take on disk. |
+| `size_bytes` (required) | integer | Space the branches the token reaches take on disk. |
 | `updated_at` (required) | string |  |
+| `workspace_id` (required) | string | The workspace the database is in. |
 
 ### Restore a database from the trash
 
@@ -159,17 +163,18 @@ Response `200`:
 
 | Field | Type | Description |
 |---|---|---|
-| `branch_count` (required) | integer |  |
+| `branch_count` (required) | integer | Branches the token reaches: all of them, unless it is limited to some. |
 | `created_at` (required) | string |  |
-| `default_branch` (required) | string | Name of the default branch. |
-| `default_branch_id` (required) | string |  |
+| `default_branch` (required) | string | Name of the default branch. Empty for a token that can't reach that branch. |
+| `default_branch_id` (required) | string | Empty for a token that can't reach the default branch. |
 | `deleted_at` (required) | string or null | When it went to the trash, or null. |
 | `id` (required) | string |  |
-| `last_activity_at` (required) | string or null | Start of the last minute with a query, or null. |
+| `last_activity_at` (required) | string or null | Start of the last minute with a query on a branch the token reaches, or null. |
 | `name` (required) | string |  |
 | `purge_after` (required) | string or null | When a trashed database is removed for good, or null. |
-| `size_bytes` (required) | integer | Space all branches take on disk. |
+| `size_bytes` (required) | integer | Space the branches the token reaches take on disk. |
 | `updated_at` (required) | string |  |
+| `workspace_id` (required) | string | The workspace the database is in. |
 
 ### List databases in the trash
 
@@ -768,6 +773,7 @@ Response `201`:
 | `public_read` (required) | boolean | Anyone may read objects without a token. |
 | `size_bytes` (required) | integer | Bytes the objects take. |
 | `updated_at` (required) | string |  |
+| `workspace_id` (required) | string | The workspace the bucket is in. |
 
 ### Get a bucket
 
@@ -789,6 +795,7 @@ Response `200`:
 | `public_read` (required) | boolean | Anyone may read objects without a token. |
 | `size_bytes` (required) | integer | Bytes the objects take. |
 | `updated_at` (required) | string |  |
+| `workspace_id` (required) | string | The workspace the bucket is in. |
 
 ### Change a bucket's name or settings
 
@@ -818,6 +825,7 @@ Response `200`:
 | `public_read` (required) | boolean | Anyone may read objects without a token. |
 | `size_bytes` (required) | integer | Bytes the objects take. |
 | `updated_at` (required) | string |  |
+| `workspace_id` (required) | string | The workspace the bucket is in. |
 
 ### Delete an empty bucket
 
@@ -963,7 +971,7 @@ Response `200`:
 
 ## Tokens
 
-### List tokens
+### List the workspace's tokens
 
 `GET /v1/tokens`
 
@@ -979,7 +987,7 @@ Response `200`:
 | `data` (required) | TokenOut[] |  |
 | `next_cursor` (required) | string |  |
 
-### Create a token
+### Create a token in the workspace
 
 `POST /v1/tokens`
 
@@ -991,7 +999,7 @@ Request body:
 | `access_key` | boolean | Also make an S3 access key for this token. Its secret is shown once, like the token. |
 | `branch` | string | Branch name or id, to limit a database token to one branch. |
 | `bucket` | string | Bucket name or id, for a bucket token. Not with database. |
-| `database` | string | Database name or id. Omit for an instance token. |
+| `database` | string | Database name or id, for a token that reaches one database. Without database, bucket and grants the token reaches the whole workspace. |
 | `expires_in_days` | integer | 0: never expires. A token that expires can't create one that outlives it: the expiry is capped at the creator's. |
 | `grants` | GrantIn[] | Reach several databases and buckets with one token, each at its own level. Use it instead of database, branch, bucket and access. |
 | `name` (required) | string |  |
@@ -1000,23 +1008,24 @@ Response `201`:
 
 | Field | Type | Description |
 |---|---|---|
-| `access` (required) | string: read, write, admin | The token's level. For a grants token, the highest level among its grants; each grant has its own. |
+| `access` (required) | string: read, write, admin | The token's level. For a workspace token it holds for everything in the workspace. For a grants token it is the highest level among its grants; each grant has its own. |
 | `access_key_id` (required) | string | The S3 access key id, when the token has an access key. |
 | `branch_id` (required) | string | When set, the token only reaches this branch. |
 | `bucket_id` (required) | string | For a bucket token, the bucket it reaches. |
 | `created_at` (required) | string |  |
 | `database_id` (required) | string | For a database token, the database it reaches. |
 | `expires_at` (required) | string or null |  |
-| `grants` (required) | GrantOut[] | Everything the token reaches below the instance: one entry for a database or bucket token, several for a grants token, none for an instance token. |
+| `grants` (required) | GrantOut[] | What the token reaches below a whole workspace: one entry for a database or bucket token, several for a grants token, none for a workspace or instance token. |
 | `id` (required) | string |  |
 | `last_used_at` (required) | string or null |  |
 | `name` (required) | string |  |
-| `scope` (required) | string: instance, database, bucket, grants |  |
+| `scope` (required) | string: instance, workspace, database, bucket, grants |  |
 | `secret_access_key` | string | The S3 secret access key, when access_key was set. Shown once. |
 | `service` (required) | boolean | The dashboard's service token. |
 | `token` (required) | string | The full token. Shown once; only its hash is stored. |
+| `workspace_id` (required) | string | The workspace the token belongs to. Empty for an instance token. |
 
-### Revoke a token
+### Revoke a token of the workspace
 
 `DELETE /v1/tokens/{token_id}`
 
@@ -1028,7 +1037,7 @@ Response `204`: no content.
 
 ## Audit
 
-### Read the audit log
+### Read the workspace's audit log
 
 `GET /v1/audit`
 
@@ -1043,4 +1052,205 @@ Response `200`:
 |---|---|---|
 | `data` (required) | AuditOut[] |  |
 | `next_cursor` (required) | string |  |
+
+## Instance
+
+### Read the audit log of every workspace and of the instance
+
+`GET /v1/instance/audit`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `limit` | query | integer | Most items to return. |
+| `cursor` | query | string | The next_cursor from the previous page. |
+| `workspace` | query | string | Only entries of this workspace, by name or id. An id also finds a deleted workspace's entries. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `data` (required) | AuditOut[] |  |
+| `next_cursor` (required) | string |  |
+
+### List instance tokens
+
+`GET /v1/instance/tokens`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `limit` | query | integer | Most items to return. |
+| `cursor` | query | string | The next_cursor from the previous page. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `data` (required) | TokenOut[] |  |
+| `next_cursor` (required) | string |  |
+
+### Create an instance token
+
+`POST /v1/instance/tokens`
+
+Request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `access` (required) | string: read, write, admin | The token's level in every workspace. Only admin may manage workspaces, instance tokens and the instance audit log. |
+| `access_key` | boolean | Also make an S3 access key for this token. Its secret is shown once, like the token. |
+| `expires_in_days` | integer | 0: never expires. The expiry is capped at the creator's. |
+| `name` (required) | string |  |
+
+Response `201`:
+
+| Field | Type | Description |
+|---|---|---|
+| `access` (required) | string: read, write, admin | The token's level. For a workspace token it holds for everything in the workspace. For a grants token it is the highest level among its grants; each grant has its own. |
+| `access_key_id` (required) | string | The S3 access key id, when the token has an access key. |
+| `branch_id` (required) | string | When set, the token only reaches this branch. |
+| `bucket_id` (required) | string | For a bucket token, the bucket it reaches. |
+| `created_at` (required) | string |  |
+| `database_id` (required) | string | For a database token, the database it reaches. |
+| `expires_at` (required) | string or null |  |
+| `grants` (required) | GrantOut[] | What the token reaches below a whole workspace: one entry for a database or bucket token, several for a grants token, none for a workspace or instance token. |
+| `id` (required) | string |  |
+| `last_used_at` (required) | string or null |  |
+| `name` (required) | string |  |
+| `scope` (required) | string: instance, workspace, database, bucket, grants |  |
+| `secret_access_key` | string | The S3 secret access key, when access_key was set. Shown once. |
+| `service` (required) | boolean | The dashboard's service token. |
+| `token` (required) | string | The full token. Shown once; only its hash is stored. |
+| `workspace_id` (required) | string | The workspace the token belongs to. Empty for an instance token. |
+
+### Revoke an instance token
+
+`DELETE /v1/instance/tokens/{token_id}`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `token_id` (required) | path | string |  |
+
+Response `204`: no content.
+
+## Workspaces
+
+### Get the workspace this request acts in
+
+`GET /v1/workspace`
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `created_at` (required) | string |  |
+| `default` (required) | boolean | The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted. |
+| `deleted_at` (required) | string or null | When it went to the trash, or null. |
+| `id` (required) | string |  |
+| `limits` (required) | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. |
+| `name` (required) | string |  |
+| `purge_after` (required) | string or null | When a trashed workspace is removed for good, or null. |
+| `updated_at` (required) | string |  |
+| `usage` (required) | WorkspaceUsageOut |  |
+
+### List workspaces
+
+`GET /v1/workspaces`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `limit` | query | integer | Most items to return. |
+| `cursor` | query | string | The next_cursor from the previous page. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `data` (required) | WorkspaceOut[] |  |
+| `next_cursor` (required) | string | Pass as cursor for the next page; empty on the last page. |
+
+### Create a workspace
+
+`POST /v1/workspaces`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `Idempotency-Key` | header | string | Retrying with the same key returns the first response instead of creating twice. |
+
+Request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `max_buckets` | integer |  |
+| `max_database_bytes` | integer |  |
+| `max_databases` | integer | Omit for the instance's setting for new workspaces. 0: no limit of its own. |
+| `max_object_bytes` | integer |  |
+| `name` (required) | string | Lowercase letters, digits and hyphens. Unique on the instance. |
+
+Response `201`:
+
+| Field | Type | Description |
+|---|---|---|
+| `created_at` (required) | string |  |
+| `default` (required) | boolean | The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted. |
+| `deleted_at` (required) | string or null | When it went to the trash, or null. |
+| `id` (required) | string |  |
+| `limits` (required) | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. |
+| `name` (required) | string |  |
+| `purge_after` (required) | string or null | When a trashed workspace is removed for good, or null. |
+| `updated_at` (required) | string |  |
+| `usage` (required) | WorkspaceUsageOut |  |
+
+### Get a workspace
+
+`GET /v1/workspaces/{ws}`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `ws` (required) | path | string | Workspace name or id. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `created_at` (required) | string |  |
+| `default` (required) | boolean | The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted. |
+| `deleted_at` (required) | string or null | When it went to the trash, or null. |
+| `id` (required) | string |  |
+| `limits` (required) | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. |
+| `name` (required) | string |  |
+| `purge_after` (required) | string or null | When a trashed workspace is removed for good, or null. |
+| `updated_at` (required) | string |  |
+| `usage` (required) | WorkspaceUsageOut |  |
+
+### Rename a workspace or change its limits
+
+`PATCH /v1/workspaces/{ws}`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `ws` (required) | path | string | Workspace name or id. |
+
+Request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `max_buckets` | integer |  |
+| `max_database_bytes` | integer |  |
+| `max_databases` | integer | 0: no limit of its own. |
+| `max_object_bytes` | integer |  |
+| `name` | string |  |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `created_at` (required) | string |  |
+| `default` (required) | boolean | The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted. |
+| `deleted_at` (required) | string or null | When it went to the trash, or null. |
+| `id` (required) | string |  |
+| `limits` (required) | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. |
+| `name` (required) | string |  |
+| `purge_after` (required) | string or null | When a trashed workspace is removed for good, or null. |
+| `updated_at` (required) | string |  |
+| `usage` (required) | WorkspaceUsageOut |  |
 

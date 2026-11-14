@@ -396,15 +396,16 @@ func (e *Engine) checkDisk() error {
 	return nil
 }
 
-// CreateDatabase creates a database with an empty default branch, main.
-func (e *Engine) CreateDatabase(ctx context.Context, name string) (meta.Database, error) {
+// CreateDatabase creates a database in a workspace, with an empty default
+// branch, main.
+func (e *Engine) CreateDatabase(ctx context.Context, ws, name string) (meta.Database, error) {
 	if e.refused != nil {
 		return meta.Database{}, e.refused
 	}
 	if !ids.ValidName(name) {
 		return meta.Database{}, apierr.Newf(apierr.InvalidName, "invalid database name %q", name)
 	}
-	if _, err := e.meta.GetDatabase(ctx, name); err == nil {
+	if _, err := e.meta.GetDatabase(ctx, ws, name); err == nil {
 		return meta.Database{}, apierr.Newf(apierr.NameTaken, "a database named %q already exists", name)
 	}
 	n, err := e.meta.CountDatabases(ctx)
@@ -436,7 +437,7 @@ func (e *Engine) CreateDatabase(ctx context.Context, name string) (meta.Database
 		_ = os.RemoveAll(e.layout.DatabaseDir(dbID))
 		return meta.Database{}, mapAcquire(err)
 	}
-	d, _, err := e.meta.CreateDatabase(ctx, name, dbID, branchID, e.cfg.MaxDatabases)
+	d, _, err := e.meta.CreateDatabase(ctx, ws, name, dbID, branchID, e.cfg.MaxDatabases)
 	if err != nil {
 		e.dropPool(branchID)
 		_ = os.RemoveAll(e.layout.DatabaseDir(dbID))
@@ -469,16 +470,33 @@ type target struct {
 	path   string
 }
 
-// resolve finds a database and branch by name or id. An empty branch means
-// the database's default branch.
-func (e *Engine) resolve(ctx context.Context, dbRef, branchRef string) (target, error) {
+// resolve finds a database of a workspace and a branch of it, by name or id.
+// An empty branch means the database's default branch.
+func (e *Engine) resolve(ctx context.Context, ws, dbRef, branchRef string) (target, error) {
 	if e.refused != nil {
 		return target{}, e.refused
 	}
-	d, err := e.meta.GetDatabase(ctx, dbRef)
+	d, err := e.meta.GetDatabase(ctx, ws, dbRef)
 	if err != nil {
 		return target{}, err
 	}
+	return e.resolveIn(ctx, d, branchRef)
+}
+
+// resolveByID finds a database and branch by their ids alone, for the
+// engine's own jobs, which start from ids in meta.db and not from a request.
+func (e *Engine) resolveByID(ctx context.Context, dbID, branchID string) (target, error) {
+	if e.refused != nil {
+		return target{}, e.refused
+	}
+	d, err := e.meta.DatabaseByID(ctx, dbID)
+	if err != nil {
+		return target{}, err
+	}
+	return e.resolveIn(ctx, d, branchID)
+}
+
+func (e *Engine) resolveIn(ctx context.Context, d meta.Database, branchRef string) (target, error) {
 	if branchRef == "" {
 		branchRef = d.DefaultBranchID
 	}
