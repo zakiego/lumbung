@@ -13,6 +13,8 @@ import {
   groupSearch,
   matchesQuery,
   type ObjectSort,
+  ObjectGroupMenu,
+  ObjectSearch,
   ObjectSortMenu,
   ObjectTable,
   PART_BYTES,
@@ -257,8 +259,46 @@ test("object table: search filters folders and files, a group adds labeled secti
   expect(screen.getByRole("rowheader", { name: /Documents/ })).toBeTruthy()
 })
 
-test("object table: a search with no hits says so and keeps the footer", async () => {
-  await render(<ObjectTable bucket="docs" prefix="" objects={files} prefixes={[]} canWrite onDelete={noop} query="nope" footer={<button type="button">Load more</button>} />)
+test("object table: a search with no hits says so, offers a way out and keeps the footer", async () => {
+  const user = userEvent.setup()
+  let cleared = 0
+  await render(
+    <ObjectTable
+      bucket="docs"
+      prefix=""
+      objects={files}
+      prefixes={[]}
+      canWrite
+      onDelete={noop}
+      query="nope"
+      onQueryClear={() => cleared++}
+      footer={<button type="button">Load more</button>}
+    />,
+  )
   expect(screen.getByText("No matches")).toBeTruthy()
+  expect(screen.getByText("Nothing loaded here has \u201cnope\u201d in its name.")).toBeTruthy()
+  expect(screen.getByRole("status").textContent).toBe("0 matches")
   expect(screen.getByRole("button", { name: "Load more" })).toBeTruthy()
+  await user.click(screen.getByRole("button", { name: "Clear search" }))
+  expect(cleared).toBe(1)
+})
+
+test("object table: the match count is announced, and only while searching", async () => {
+  const { unmount } = await render(<ObjectTable bucket="docs" prefix="" objects={files} prefixes={[]} canWrite onDelete={noop} query="img_9" />)
+  expect(screen.getByRole("status").textContent).toBe("1 match")
+  unmount()
+  await render(<ObjectTable bucket="docs" prefix="" objects={files} prefixes={[]} canWrite onDelete={noop} />)
+  expect(screen.getByRole("status").textContent).toBe("")
+})
+
+test("search and group controls have names that say what they do", async () => {
+  await render(
+    <>
+      <ObjectSearch value="" onValueChange={() => {}} />
+      <ObjectGroupMenu group="type" onGroupChange={() => {}} />
+      <ObjectTable bucket="docs" prefix="" objects={files} prefixes={[]} canWrite onDelete={noop} />
+    </>,
+  )
+  expect(screen.getByRole("searchbox", { name: "Search this folder" })).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Group: Type" })).toBeTruthy()
 })

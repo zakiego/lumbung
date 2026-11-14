@@ -383,9 +383,9 @@ export function ObjectSortMenu({ sort, onSortChange, className }: { sort: Object
 export function ObjectGroupMenu({ group, onGroupChange, className }: { group: ObjectGroup; onGroupChange: (group: ObjectGroup) => void; className?: string }) {
   return (
     <Menu>
-      <MenuTrigger aria-label={group === "none" ? "Group" : `Group by ${GROUP_LABEL[group]}`} className={buttonVariants({ variant: "ghost", size: "sm", className })}>
+      <MenuTrigger className={buttonVariants({ variant: "ghost", size: "sm", className })}>
         <GroupIcon aria-hidden="true" />
-        {group === "none" ? "Group" : GROUP_LABEL[group]}
+        {group === "none" ? "Group" : `Group: ${GROUP_LABEL[group]}`}
       </MenuTrigger>
       <MenuContent align="end">
         <MenuGroup>
@@ -403,17 +403,22 @@ export function ObjectGroupMenu({ group, onGroupChange, className }: { group: Ob
   )
 }
 
+export const OBJECT_SEARCH_ID = "object-search"
+
 export function ObjectSearch({ value, onValueChange, className }: { value: string; onValueChange: (value: string) => void; className?: string }) {
   return (
     <Field className={className}>
       <FieldLabel className="sr-only">Search this folder</FieldLabel>
       <div className="relative">
         <SearchIcon aria-hidden="true" className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-faint" />
-        <Input type="search" value={value} onValueChange={onValueChange} placeholder="Search by name" maxLength={200} className="pl-8" autoComplete="off" spellCheck={false} />
+        <Input id={OBJECT_SEARCH_ID} type="search" value={value} onValueChange={onValueChange} placeholder="Search by name" maxLength={200} className="pl-8" autoComplete="off" spellCheck={false} />
       </div>
     </Field>
   )
 }
+
+const plural = new Intl.PluralRules("en")
+const matchCount = (n: number) => (plural.select(n) === "one" ? "1 match" : `${number.format(n)} matches`)
 
 export function ObjectTable({
   bucket,
@@ -425,6 +430,7 @@ export function ObjectTable({
   sort = DEFAULT_OBJECT_SORT,
   onSortChange,
   query = "",
+  onQueryClear,
   group = "none",
   footer,
 }: {
@@ -437,6 +443,7 @@ export function ObjectTable({
   sort?: ObjectSort
   onSortChange?: (sort: ObjectSort) => void
   query?: string
+  onQueryClear?: () => void
   group?: ObjectGroup
   footer?: ReactNode
 }) {
@@ -457,19 +464,39 @@ export function ObjectTable({
     group === "none"
       ? [{ label: "", rows: [...folders, ...(files[0]?.rows ?? [])] }]
       : [...(folders.length ? [{ label: "Folders", rows: folders }] : []), ...files]
-  if (sections.every((g) => g.rows.length === 0)) {
+  const matches = sections.reduce((n, g) => n + g.rows.length, 0)
+  // Mounted in every branch, so the region exists before its text changes.
+  const status = (
+    <p role="status" className="sr-only">
+      {query.trim() ? matchCount(matches) : ""}
+    </p>
+  )
+  if (matches === 0) {
     if (query.trim() && (listed.length > 0 || prefixes.length > 0)) {
       return (
         <>
-          <Empty icon={<SearchXIcon />} title="No matches" description={`Nothing loaded here has "${query.trim()}" in its name.`} />
+          {status}
+          <Empty icon={<SearchXIcon />} title="No matches" description={`Nothing loaded here has “${query.trim()}” in its name.`}>
+            {onQueryClear && (
+              <Button variant="secondary" onClick={onQueryClear}>
+                Clear search
+              </Button>
+            )}
+          </Empty>
           {footer}
         </>
       )
     }
-    return <Empty icon={<FolderIcon />} title={prefix ? "This folder is empty" : "No objects yet"} description="Upload files here, or put them with an S3 client, the CLI or the SDK." />
+    return (
+      <>
+        {status}
+        <Empty icon={<FolderIcon />} title={prefix ? "This folder is empty" : "No objects yet"} description="Upload files here, or put them with an S3 client, the CLI or the SDK." />
+      </>
+    )
   }
   return (
     <>
+      {status}
       <Table>
         <thead>
           <tr>
@@ -487,7 +514,7 @@ export function ObjectTable({
             {section.label && (
               <tr>
                 <TableHead colSpan={5} scope="rowgroup" className="h-auto pt-5 pb-1.5">
-                  {section.label} <span className="font-normal text-faint tabular-nums">{number.format(section.rows.length)}</span>
+                  {section.label} <span className="font-normal text-muted-foreground tabular-nums">{number.format(section.rows.length)}</span>
                 </TableHead>
               </tr>
             )}

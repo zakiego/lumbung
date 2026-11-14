@@ -6,6 +6,7 @@ import { z } from "zod"
 import {
   DEFAULT_OBJECT_SORT,
   OBJECT_GROUP_KEYS,
+  OBJECT_SEARCH_ID,
   OBJECT_SORT_KEYS,
   defaultSortDir,
   groupSearch,
@@ -226,6 +227,11 @@ function BucketPage() {
         sort={sort}
         onSortChange={setSort}
         query={query}
+        onQueryClear={() => {
+          changeQuery("")
+          // The button goes away with the empty state, so focus returns to the field.
+          document.getElementById(OBJECT_SEARCH_ID)?.focus()
+        }}
         group={group}
         footer={
           more.cursor && (
