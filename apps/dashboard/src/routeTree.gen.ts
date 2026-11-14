@@ -19,7 +19,9 @@ import { Route as AppMembersRouteImport } from './routes/_app/members'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppTokensRouteImport } from './routes/_app/tokens'
 import { Route as AppTrashRouteImport } from './routes/_app/trash'
+import { Route as ApiExportRouteImport } from './routes/api/export'
 import { Route as ApiHealthRouteImport } from './routes/api/health'
+import { Route as ApiImportRouteImport } from './routes/api/import'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
 import { Route as AppDbDbRouteRouteImport } from './routes/_app/db/$db/route'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -80,9 +82,19 @@ const AppTrashRoute = AppTrashRouteImport.update({
   path: '/trash',
   getParentRoute: () => AppRoute,
 } as any)
+const ApiExportRoute = ApiExportRouteImport.update({
+  id: '/api/export',
+  path: '/api/export',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiHealthRoute = ApiHealthRouteImport.update({
   id: '/api/health',
   path: '/api/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiImportRoute = ApiImportRouteImport.update({
+  id: '/api/import',
+  path: '/api/import',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InviteTokenRoute = InviteTokenRouteImport.update({
@@ -146,7 +158,9 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRoute
   '/tokens': typeof AppTokensRoute
   '/trash': typeof AppTrashRoute
+  '/api/export': typeof ApiExportRoute
   '/api/health': typeof ApiHealthRoute
+  '/api/import': typeof ApiImportRoute
   '/invite/$token': typeof InviteTokenRoute
   '/db/$db': typeof AppDbDbRouteRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -167,7 +181,9 @@ export interface FileRoutesByTo {
   '/settings': typeof AppSettingsRoute
   '/tokens': typeof AppTokensRoute
   '/trash': typeof AppTrashRoute
+  '/api/export': typeof ApiExportRoute
   '/api/health': typeof ApiHealthRoute
+  '/api/import': typeof ApiImportRoute
   '/invite/$token': typeof InviteTokenRoute
   '/': typeof AppIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -190,7 +206,9 @@ export interface FileRoutesById {
   '/_app/settings': typeof AppSettingsRoute
   '/_app/tokens': typeof AppTokensRoute
   '/_app/trash': typeof AppTrashRoute
+  '/api/export': typeof ApiExportRoute
   '/api/health': typeof ApiHealthRoute
+  '/api/import': typeof ApiImportRoute
   '/invite/$token': typeof InviteTokenRoute
   '/_app/': typeof AppIndexRoute
   '/_app/db/$db': typeof AppDbDbRouteRouteWithChildren
@@ -215,7 +233,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/tokens'
     | '/trash'
+    | '/api/export'
     | '/api/health'
+    | '/api/import'
     | '/invite/$token'
     | '/db/$db'
     | '/api/auth/$'
@@ -236,7 +256,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/tokens'
     | '/trash'
+    | '/api/export'
     | '/api/health'
+    | '/api/import'
     | '/invite/$token'
     | '/'
     | '/api/auth/$'
@@ -258,7 +280,9 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/tokens'
     | '/_app/trash'
+    | '/api/export'
     | '/api/health'
+    | '/api/import'
     | '/invite/$token'
     | '/_app/'
     | '/_app/db/$db'
@@ -276,7 +300,9 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
   SetupRoute: typeof SetupRoute
+  ApiExportRoute: typeof ApiExportRoute
   ApiHealthRoute: typeof ApiHealthRoute
+  ApiImportRoute: typeof ApiImportRoute
   InviteTokenRoute: typeof InviteTokenRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
@@ -353,11 +379,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTrashRouteImport
       parentRoute: typeof AppRoute
     }
+    '/api/export': {
+      id: '/api/export'
+      path: '/api/export'
+      fullPath: '/api/export'
+      preLoaderRoute: typeof ApiExportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/health': {
       id: '/api/health'
       path: '/api/health'
       fullPath: '/api/health'
       preLoaderRoute: typeof ApiHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/import': {
+      id: '/api/import'
+      path: '/api/import'
+      fullPath: '/api/import'
+      preLoaderRoute: typeof ApiImportRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/invite/$token': {
@@ -485,7 +525,9 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
   SetupRoute: SetupRoute,
+  ApiExportRoute: ApiExportRoute,
   ApiHealthRoute: ApiHealthRoute,
+  ApiImportRoute: ApiImportRoute,
   InviteTokenRoute: InviteTokenRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }

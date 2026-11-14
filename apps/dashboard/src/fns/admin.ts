@@ -166,10 +166,11 @@ export const removeUser = createServerFn({ method: "POST" })
 export const getInstance = createServerFn({ method: "GET" }).handler(async () => {
   await requireCan("admin")
   const cfg = config()
-  let health: { status: string; version?: string; meta_version?: number } | null = null
+  type Health = { status: string; version?: string; meta_version?: number }
+  let health: Health | null
   try {
     const res = await fetch(`${cfg.engineUrl}/health`, { signal: AbortSignal.timeout(3000) })
-    health = (await res.json()) as typeof health
+    health = (await res.json()) as Health
   } catch {
     health = null
   }

@@ -28,7 +28,7 @@ export function AlertDialogContent({ className, children, ...props }: Omit<Style
 }
 
 export function AlertDialogTitle({ className, ...props }: Styled<typeof AlertDialogTitlePart>) {
-  return <AlertDialogTitlePart className={cn("text-[15px] font-[590] tracking-[-0.012em]", className)} {...props} />
+  return <AlertDialogTitlePart className={cn("text-[15px] font-[590] tracking-[-0.012em] break-words [overflow-wrap:anywhere]", className)} {...props} />
 }
 
 export function AlertDialogDescription({ className, ...props }: Styled<typeof AlertDialogDescriptionPart>) {
@@ -58,10 +58,10 @@ export function TypedConfirm({ trigger, triggerClassName, title, description, co
       <AlertDialogTrigger className={triggerClassName ?? buttonVariants({ variant: "destructive" })}>{trigger}</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogTitle>{title}</AlertDialogTitle>
-        {description && <AlertDialogDescription>{description}</AlertDialogDescription>}
+        {description && <AlertDialogDescription className="[overflow-wrap:anywhere]">{description}</AlertDialogDescription>}
         <Field>
           <FieldLabel>
-            Type <span className="font-mono">{confirmText}</span> to confirm
+            Type <span className="font-mono [overflow-wrap:anywhere]">{confirmText}</span> to confirm
           </FieldLabel>
           <Input value={typed} onValueChange={setTyped} autoComplete="off" spellCheck={false} className="font-mono" />
         </Field>
