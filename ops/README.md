@@ -134,12 +134,14 @@ docker run --rm --network none --user 65532 -v lumbung_data:/data --entrypoint r
 | Kind | Where | Kept |
 |---|---|---|
 | Pre-deploy `meta.db` | `lumbung_data:/data/backups/pre-deploy/<time>-meta` | 5 good ones |
-| Pre-deploy `dashboard.db` | `lumbung_dashboard:/data/backups/pre-deploy-<time>.db` | 5 |
+| Pre-deploy `dashboard.db` | `lumbung_dashboard:/data/backups/pre-deploy-<time>.db` and `.auth-secret` | 5 |
 | Before a meta-only rollback, every branch | `lumbung_data:/data/backups/pre-rollback/<time>` | until removed by hand |
 | Nightly, full engine | `lumbung_data:/data/backups/nightly/<time>` and `~/selfhost/lumbung-backups/engine/<time>` | 7 each |
-| Nightly `dashboard.db` | `lumbung_dashboard:/data/backups/nightly-dashboard-<time>.db` and `~/selfhost/lumbung-backups/dashboard/` | 7 each |
+| Nightly `dashboard.db` | `lumbung_dashboard:/data/backups/nightly-dashboard-<time>.db` and `.auth-secret`, and `~/selfhost/lumbung-backups/dashboard/` | 7 each |
 
-The host copies hold the service token (folder mode 700). They survive a lost volume, not a lost disk.
+Each `dashboard.db` copy has the dashboard's generated sign-in secret (`secrets/auth-secret`) next to it as `<name>.auth-secret`. `dashboard.db` restored without its secret signs everyone out.
+
+The host copies hold the service token and the sign-in secret (folder mode 700, secret files 600). They survive a lost volume, not a lost disk.
 
 Every deploy checks the nightly agent (`ops/install-backup.sh --check`) and reinstalls it when the installed script or plist differs from the repo or launchd doesn't have the job loaded. A failed install warns in the deploy log and the next deploy tries again. By hand:
 
@@ -163,6 +165,30 @@ docker compose up -d --no-build --wait
 ```
 
 The bind-mounted files must be readable by uid 65532. If they aren't, copy them in the way `restore-drill.sh` does.
+
+Restoring `dashboard.db`: with the dashboard stopped, put a copy and its `.auth-secret` in place. The argument is the copy's path without the extension: `/b/nightly-dashboard-<time>` for a host copy, `/data/backups/pre-deploy-<time>` for one in the volume. The files it replaces go to `/data/backups/before-restore-<time>` in the volume.
+
+```bash
+docker compose stop dashboard
+docker run --rm --network none --user 0 --entrypoint sh \
+  -v lumbung_dashboard:/data -v ~/selfhost/lumbung-backups/dashboard:/b:ro lumbung-dashboard:latest -c '
+  set -e
+  src="$1"
+  [ -f "$src.db" ] || { echo "no $src.db"; exit 1; }
+  aside="/data/backups/before-restore-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$aside"
+  for f in dashboard.db dashboard.db-wal dashboard.db-shm; do [ ! -e "/data/$f" ] || mv "/data/$f" "$aside/"; done
+  cp "$src.db" /data/dashboard.db
+  if [ -f "$src.auth-secret" ]; then
+    mkdir -p /data/secrets
+    [ ! -e /data/secrets/auth-secret ] || mv /data/secrets/auth-secret "$aside/"
+    cp "$src.auth-secret" /data/secrets/auth-secret
+  fi
+  chown -R 65532:65532 /data
+  chmod 700 /data/secrets "$aside"
+  chmod 600 /data/dashboard.db /data/secrets/auth-secret' _ /b/nightly-dashboard-<time>
+docker compose up -d --no-build --wait
+```
 
 ## Alerts
 
