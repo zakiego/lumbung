@@ -244,8 +244,72 @@ describe("the workspace option", () => {
     expect(await paths(() => plain.query("SELECT 1"))).toEqual(["/v1/databases/notes/query"])
     expect(await paths(() => plain.workspaces.current())).toEqual(["/v1/workspace"])
     expect(await paths(() => plain.workspace("acme").databases.list())).toEqual(["/v1/workspaces/acme/databases"])
-    // A name that could change the path is a path segment, nothing more.
-    const odd = plain.workspace("a/../b")
-    expect(await paths(() => odd.databases.list())).toEqual(["/v1/workspaces/a%2F..%2Fb/databases"])
+  })
+
+  // ".." is resolved away when a URL is parsed, and an empty workspace
+  // reads as "none": both would act in the default workspace.
+  test("refuses a workspace that isn't a name or an id, before any request", async () => {
+    const plain = createClient({ url: "http://engine.test", token: "lmb_x", fetch: recorder })
+    calls.length = 0
+    for (const bad of ["", "..", ".", "a/../b", "../default", "Acme", " ", "%2e%2e", "ws_short", "a".repeat(64), null, 7]) {
+      expect(() => createClient({ url: "http://engine.test", token: "lmb_x", workspace: bad as string, fetch: recorder }), JSON.stringify(bad)).toThrow(TypeError)
+      expect(() => plain.workspace(bad as string), JSON.stringify(bad)).toThrow(TypeError)
+    }
+    expect(calls).toEqual([])
+    for (const good of ["default", "a", "agent-1", "ws_174a999a2be2baa5443f"]) {
+      expect(await paths(() => plain.workspace(good).databases.list())).toEqual([`/v1/workspaces/${good}/databases`])
+    }
+    expect(await paths(() => createClient({ url: "http://engine.test", token: "lmb_x", workspace: undefined, fetch: recorder }).databases.list())).toEqual(["/v1/databases"])
+  })
+
+  test("refuses a name that would leave its place in the path", async () => {
+    const c = createClient({ url: "http://engine.test", token: "lmb_x", workspace: "acme", fetch: recorder })
+    const tries: (() => Promise<unknown>)[] = [
+      () => c.databases.restore(".."),
+      () => c.databases.delete(".."),
+      () => c.databases.get("."),
+      () => c.databases.rename("..", "x"),
+      () => c.databases.move("..", "other"),
+      () => c.branches.list(".."),
+      () => c.branches.delete("notes", ".."),
+      () => c.snapshots.restore("..", "..", "x"),
+      () => c.snapshots.delete("notes", ""),
+      () => c.tokens.revoke(".."),
+      () => c.instance.tokens.revoke(""),
+      () => c.buckets.delete(".."),
+      () => c.buckets.move("..", "other"),
+      () => c.bucket("..").list(),
+      () => c.bucket("..").put("k", "v"),
+      () => c.workspaces.get(".."),
+      () => c.workspaces.delete(""),
+      () => c.workspaces.restore(".."),
+      () => c.database("..").query("SELECT 1"),
+      () => c.database("notes", "..").query("SELECT 1"),
+      () => c.download("..", "main"),
+    ]
+    calls.length = 0
+    for (const run of tries) {
+      let thrown: unknown
+      try {
+        await run()
+      } catch (err) {
+        thrown = err
+      }
+      expect(thrown, run.toString()).toBeInstanceOf(TypeError)
+    }
+    expect(calls).toEqual([])
+    // A slash or a percent sign is still just part of one segment.
+    expect(await paths(() => c.databases.get("a/../b"))).toEqual(["/v1/workspaces/acme/databases/a%2F..%2Fb"])
+  })
+})
+
+describe("names that would leave their place, against a real engine", () => {
+  test("a database called .. never reaches the workspace's own endpoints", async () => {
+    const { name, client } = await workspaceWithToken("dots")
+    await admin.workspaces.delete(name)
+    // In the trash. Restoring "the database .." must not restore the workspace.
+    await expect(admin.workspace(name).databases.restore("..")).rejects.toBeInstanceOf(TypeError)
+    expect((await admin.workspaces.trash({ limit: 200 })).data.map((w) => w.name)).toContain(name)
+    expect(await code(client.databases.list())).toBe("unauthorized")
   })
 })

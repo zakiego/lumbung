@@ -167,7 +167,7 @@ console.log(mine.name, mine.usage?.databases, (await agent.databases.list()).dat
 
 | Call | What it does |
 |---|---|
-| `createClient({ workspace })`, `client.workspace(name)` | Act in a workspace by name or id. A workspace token can only name its own; any other answers `workspace_not_found`. |
+| `createClient({ workspace })`, `client.workspace(name)` | Act in a workspace by name or id. A workspace token can only name its own; any other answers `workspace_not_found`. A value that isn't a name or an id, an empty string included, throws a `TypeError`. |
 | `workspaces.current()` | The workspace this client acts in. `limits` and `usage` are only there for a token that reaches the whole workspace. |
 | `workspaces.create(name, limits)`, `update`, `delete`, `restore`, `trash` | Need an instance admin token. `delete` moves the workspace to the trash with everything in it. |
 | `databases.move(db, workspace)`, `buckets.move(bucket, workspace)` | Need an instance admin token. Every token that reached the moved database or bucket is revoked. |
