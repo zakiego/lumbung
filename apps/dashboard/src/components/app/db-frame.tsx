@@ -11,10 +11,13 @@ import {
   TableIcon,
   TerminalIcon,
 } from "lucide-react"
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
+import { buttonVariants } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs"
-import { PageBody, PageHeader } from "./shell"
+import { TruncatedTip } from "@/components/ui/tooltip"
+import { ScrollArea } from "@/components/ui/layout"
+import { CONTAINER, PageBody, PageHeader } from "./shell"
 
 const dbRoute = getRouteApi("/_app/db/$db")
 
@@ -38,8 +41,19 @@ export function useDb() {
   return { database, branches, branch, branchParam: branch === database.default_branch ? undefined : branch }
 }
 
-export function DbFrame({ section, actions, wide, children }: { section: DbSection; actions?: ReactNode; wide?: boolean; children: ReactNode }) {
+export function DbFrame({ section, actions, children }: { section: DbSection; actions?: ReactNode; children: ReactNode }) {
   const { database, branches, branch, branchParam } = useDb()
+  const tabRow = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    // Scroll only the tab row; scrollIntoView can move the window too.
+    const row = tabRow.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')
+    const tab = row?.querySelector<HTMLElement>("[data-selected]")
+    if (!row || !tab) return
+    const r = row.getBoundingClientRect()
+    const t = tab.getBoundingClientRect()
+    if (t.left < r.left) row.scrollLeft += t.left - r.left - 16
+    else if (t.right > r.right) row.scrollLeft += t.right - r.right + 16
+  }, [section])
   return (
     <>
       <PageHeader actions={actions}>
@@ -54,39 +68,66 @@ export function DbFrame({ section, actions, wide, children }: { section: DbSecti
               /
             </li>
             <li className="min-w-0">
-              <h1 aria-current="page" className="truncate font-[590]">
-                {database.name}
-              </h1>
+              <TruncatedTip text={database.name} side="bottom">
+                <h1 aria-current="page" className="truncate font-[590]">
+                  {database.name}
+                </h1>
+              </TruncatedTip>
             </li>
           </ol>
         </nav>
         <BranchSwitcher branches={branches} value={branch} defaultBranch={database.default_branch} />
       </PageHeader>
       <Tabs value={section}>
-        <div className="overflow-x-auto [scrollbar-width:none]">
-          <TabsList aria-label="Database pages" className="w-full min-w-max px-4 md:px-6">
-            {SECTIONS.map((s) => (
-              <TabsTab
-                key={s.value}
-                value={s.value}
-                icon={<s.icon />}
-                render={<Link to={s.to} params={{ db: database.name }} search={{ branch: branchParam }} />}
-              >
-                {s.label}
-              </TabsTab>
-            ))}
-          </TabsList>
+        <div ref={tabRow} className="shadow-[inset_0_-1px_0_var(--border)]">
+          <div className={CONTAINER}>
+            <ScrollArea axis="x" fade>
+              <TabsList aria-label="Database pages" className="w-full min-w-max shadow-none">
+                {SECTIONS.map((s) => (
+                  <TabsTab
+                    key={s.value}
+                    value={s.value}
+                    icon={<s.icon />}
+                    render={<Link to={s.to} params={{ db: database.name }} search={{ branch: branchParam }} />}
+                  >
+                    {s.label}
+                  </TabsTab>
+                ))}
+              </TabsList>
+            </ScrollArea>
+          </div>
         </div>
         <TabsPanel value={section}>
-          <PageBody wide={wide}>{children}</PageBody>
+          <PageBody>{children}</PageBody>
         </TabsPanel>
       </Tabs>
     </>
   )
 }
 
+export function OpenSql() {
+  const { database, branchParam } = useDb()
+  return (
+    <Link to="/db/$db/sql" params={{ db: database.name }} search={{ branch: branchParam }} className={buttonVariants({ variant: "secondary" })}>
+      <TerminalIcon aria-hidden="true" />
+      Open SQL
+    </Link>
+  )
+}
+
 function BranchSwitcher({ branches, value, defaultBranch }: { branches: BranchOut[]; value: string; defaultBranch: string }) {
   const navigate = useNavigate()
+  return (
+    <BranchPicker
+      branches={branches}
+      value={value}
+      // Stay on the current page; only the branch in the URL changes.
+      onChange={(next) => void navigate({ to: ".", search: ((prev: Record<string, unknown>) => ({ ...prev, branch: next === defaultBranch ? undefined : next })) as never })}
+    />
+  )
+}
+
+export function BranchPicker({ branches, value, onChange }: { branches: BranchOut[]; value: string; onChange: (branch: string) => void }) {
   const [selected, setSelected] = useState(value)
   useEffect(() => setSelected(value), [value])
   return (
@@ -96,8 +137,7 @@ function BranchSwitcher({ branches, value, defaultBranch }: { branches: BranchOu
       onValueChange={(next) => {
         if (typeof next !== "string") return
         setSelected(next)
-        // Stay on the current page; only the branch in the URL changes.
-        void navigate({ to: ".", search: ((prev: Record<string, unknown>) => ({ ...prev, branch: next === defaultBranch ? undefined : next })) as never })
+        onChange(next)
       }}
     >
       <SelectTrigger aria-label="Branch" className="max-w-56 border-transparent font-mono text-[13px] hover:border-input">
@@ -107,7 +147,7 @@ function BranchSwitcher({ branches, value, defaultBranch }: { branches: BranchOu
       <SelectContent className="font-mono">
         {branches.map((b) => (
           <SelectItem key={b.id} value={b.name}>
-            <span className="truncate">{b.name}</span>
+            <span className="min-w-0 [overflow-wrap:anywhere]">{b.name}</span>
           </SelectItem>
         ))}
       </SelectContent>

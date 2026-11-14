@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { DbFrame } from "@/components/app/db-frame"
+import { DbFrame, OpenSql } from "@/components/app/db-frame"
 import { SchemaView } from "@/components/app/schema-view"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
 import { getSchema } from "@/fns/databases"
 import { pageTitle } from "@/lib/paths"
+import { can } from "@/lib/roles"
 
 export const Route = createFileRoute("/_app/db/$db/schema")({
   loaderDeps: ({ search }) => ({ branch: search.branch }),
@@ -30,9 +31,10 @@ export const Route = createFileRoute("/_app/db/$db/schema")({
 
 function SchemaPage() {
   const { schema } = Route.useLoaderData()
+  const { viewer } = Route.useRouteContext()
   return (
     <DbFrame section="schema">
-      <SchemaView schema={schema} />
+      <SchemaView schema={schema} emptyAction={can(viewer.role, "write") && <OpenSql />} />
     </DbFrame>
   )
 }

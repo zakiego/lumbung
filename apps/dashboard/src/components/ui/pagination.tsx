@@ -37,7 +37,7 @@ export function Pagination({ className, label = "Pages", ...props }: PaginationP
                   className={buttonVariants({ variant: "ghost", size: "icon", className: "tabular-nums data-current:bg-accent data-current:text-foreground" })}
                 />
               ) : (
-                <PaginationEllipsis className="inline-flex size-8 items-center justify-center text-faint" />
+                <PaginationEllipsis className="inline-flex size-8 items-center justify-center text-muted-foreground" />
               )}
             </PaginationItem>
           ))}

@@ -1,7 +1,7 @@
 "use client"
 
 // A data grid built on ui-sdk's grid focus: one tab stop, arrow keys between
-// cells, Enter opens a cell, Space selects its row. The header row is row 0
+// cells, Enter, a double click or a tap opens a cell, Space selects its row. The header row is row 0
 // and sorts on Enter or a click; with selection on, column 0 holds the row
 // checkboxes. ui-sdk ships no grid, so this is the primitive for one.
 import { type ChangeDetails, byCell, createChange, createGridFocus, definePrimitive, selects } from "@ui-sdk/core"
@@ -100,8 +100,14 @@ export const dataGrid = definePrimitive({
       context.options().onOpenCell?.(rowId, column)
       return true
     }
-    /** What a press, Enter or Space does on a cell. */
-    const activate = (cell: Cell, how: "press" | "enter" | "space", event?: Event) => {
+    // A touch has no double click, so a tap opens the cell.
+    let touch = false
+    const notePointer = (event: Event) => {
+      touch = (event as PointerEvent).pointerType === "touch"
+    }
+    const pressKind = (): "press" | "tap" => (touch ? "tap" : "press")
+    /** What a press, a tap, Enter or Space does on a cell. */
+    const activate = (cell: Cell, how: "press" | "tap" | "enter" | "space", event?: Event) => {
       const col = cell.col - offset()
       if (cell.row === 0) {
         if (col < 0) return toggleAll(event)
@@ -110,7 +116,7 @@ export const dataGrid = definePrimitive({
       const rowId = s().rowIds[cell.row - 1]
       if (rowId === undefined) return false
       if (col < 0 || how === "space") return toggleRow(rowId, event)
-      if (how === "enter") return openCell(rowId, s().columns[col]!)
+      if (how === "enter" || how === "tap") return openCell(rowId, s().columns[col]!)
       return false
     }
     const keydown = (event: KeyboardEvent, cell: Cell) => {
@@ -121,7 +127,7 @@ export const dataGrid = definePrimitive({
       }
     }
     const items = () => s().rowIds.map((value, i) => ({ value, label: context.options().rowLabels?.[i] ?? value }))
-    return { grid, toggleRow, toggleAll, sortBy, openCell, activate, keydown, items }
+    return { grid, toggleRow, toggleAll, sortBy, openCell, activate, keydown, items, notePointer, pressKind }
   },
   slots: (slot) => ({
     root: slot({
@@ -187,8 +193,11 @@ export const dataGrid = definePrimitive({
       }),
       on: {
         keydown: (event, { api, props }) => api.keydown(event as KeyboardEvent, props),
-        pointerdown: (event, { api, props }) => api.grid.focus(props, { reason: "item-press", event }),
-        click: (event, { api, props }) => api.activate(props, "press", event),
+        pointerdown: (event, { api, props }) => {
+          api.notePointer(event)
+          api.grid.focus(props, { reason: "item-press", event })
+        },
+        click: (event, { api, props }) => api.activate(props, api.pressKind(), event),
         dblclick: (event, { api, props }) => api.activate(props, "enter", event),
       },
       bind: (el, { api, props }) => api.grid.bind(el, props),

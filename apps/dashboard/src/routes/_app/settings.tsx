@@ -1,17 +1,14 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import { CircleAlertIcon, CircleCheckIcon } from "lucide-react"
-import { type ReactNode, useEffect, useState } from "react"
+import type { ReactNode } from "react"
 import { CopyButton } from "@/components/app/connect"
 import { SettingsSection } from "@/components/app/db-settings"
 import { PageBody, PageHeader, PageTitle } from "@/components/app/shell"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
-import { Field, FieldLabel } from "@/components/ui/field"
-import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control"
 import { StatusText } from "@/components/ui/surface"
 import { getInstance } from "@/fns/admin"
 import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
-import { type Theme, applyTheme, readTheme } from "@/lib/theme"
 
 export const Route = createFileRoute("/_app/settings")({
   beforeLoad: ({ context }) => {
@@ -38,7 +35,9 @@ function Frame({ children }: { children: ReactNode }) {
       <PageHeader>
         <PageTitle>Settings</PageTitle>
       </PageHeader>
-      <PageBody className="max-w-4xl">{children}</PageBody>
+      <PageBody>
+        <div className="max-w-4xl">{children}</div>
+      </PageBody>
     </>
   )
 }
@@ -77,9 +76,6 @@ function SettingsPage() {
           </Row>
         </dl>
       </SettingsSection>
-      <SettingsSection title="Appearance">
-        <ThemeField />
-      </SettingsSection>
     </Frame>
   )
 }
@@ -96,32 +92,10 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 function Url({ value, label }: { value: string; label: string }) {
   return (
     <span className="flex min-w-0 items-center gap-1">
-      <span className="truncate font-mono" title={value}>
+      <code className="truncate font-mono" title={value}>
         {value}
-      </span>
+      </code>
       <CopyButton text={value} label={label} className="shrink-0" />
     </span>
-  )
-}
-
-function ThemeField() {
-  const [theme, setTheme] = useState<Theme>("system")
-  useEffect(() => setTheme(readTheme()), [])
-  return (
-    <Field>
-      <FieldLabel>Theme</FieldLabel>
-      <SegmentedControl
-        value={theme}
-        onValueChange={(v) => {
-          if (v !== "light" && v !== "dark" && v !== "system") return
-          setTheme(v)
-          applyTheme(v)
-        }}
-      >
-        <SegmentedControlItem value="light">Light</SegmentedControlItem>
-        <SegmentedControlItem value="dark">Dark</SegmentedControlItem>
-        <SegmentedControlItem value="system">System</SegmentedControlItem>
-      </SegmentedControl>
-    </Field>
   )
 }

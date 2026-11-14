@@ -1,8 +1,10 @@
 // Dashboard settings, read from the environment once. Every setting has a
 // default that works next to `pnpm dev:engine`, so dev needs no env file.
 import { randomBytes } from "node:crypto"
+import { BlockList, isIP } from "node:net"
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { settingDefault } from "./settings"
 
 export interface DashboardConfig {
   /** Where the engine's REST API answers, e.g. http://engine:4870 in compose. */
@@ -13,6 +15,36 @@ export interface DashboardConfig {
   dataDir: string
   /** The engine URL people's apps use, shown in connect snippets. Defaults to publicUrl. */
   publicEngineUrl: string
+  /** LUMBUNG_CLIENT_IP_HEADER, like X-Forwarded-For or CF-Connecting-IP. Empty uses the connection's address. Same as the engine. */
+  clientIpHeader: string
+  /** LUMBUNG_TRUSTED_PROXIES: networks whose connections may set that header. Same default as the engine. */
+  trustedProxies: BlockList
+}
+
+export const DEFAULT_TRUSTED_PROXIES = settingDefault("LUMBUNG_TRUSTED_PROXIES")
+
+/** Comma-separated IPs or CIDR networks, parsed the way the engine's ParseNetworks does. */
+export function parseNetworks(list: string): BlockList {
+  const out = new BlockList()
+  for (const raw of list.split(",")) {
+    const part = raw.trim()
+    if (!part) continue
+    const [ip, bits, extra] = part.split("/")
+    const family = isIP(ip ?? "")
+    const max = family === 4 ? 32 : 128
+    const prefix = bits === undefined ? max : /^\d{1,3}$/.test(bits) ? Number(bits) : Number.NaN
+    if (!family || extra !== undefined || !(prefix >= 0 && prefix <= max)) throw new Error(`${JSON.stringify(part)} isn't an IP or a CIDR network`)
+    out.addSubnet(ip!, prefix, family === 4 ? "ipv4" : "ipv6")
+  }
+  return out
+}
+
+function trustedProxiesFrom(value: string | undefined): BlockList {
+  try {
+    return parseNetworks(value?.trim() ? value : DEFAULT_TRUSTED_PROXIES)
+  } catch (e) {
+    throw new Error(`LUMBUNG_TRUSTED_PROXIES: ${e instanceof Error ? e.message : String(e)}`)
+  }
 }
 
 let cached: DashboardConfig | undefined
@@ -20,13 +52,15 @@ let cached: DashboardConfig | undefined
 export function config(): DashboardConfig {
   if (cached) return cached
   const env = process.env
-  const publicUrl = (env.LUMBUNG_DASHBOARD_URL || "http://localhost:4871").replace(/\/+$/, "")
+  const publicUrl = (env.LUMBUNG_DASHBOARD_URL || settingDefault("LUMBUNG_DASHBOARD_URL")).replace(/\/+$/, "")
   const origin = new URL(publicUrl).origin
   cached = {
-    engineUrl: (env.LUMBUNG_ENGINE_URL || "http://127.0.0.1:4870").replace(/\/+$/, ""),
+    engineUrl: (env.LUMBUNG_ENGINE_URL || settingDefault("LUMBUNG_ENGINE_URL")).replace(/\/+$/, ""),
     publicUrl: origin,
-    dataDir: resolve(env.LUMBUNG_DASHBOARD_DATA_DIR || "./data"),
+    dataDir: resolve(env.LUMBUNG_DASHBOARD_DATA_DIR || settingDefault("LUMBUNG_DASHBOARD_DATA_DIR")),
     publicEngineUrl: (env.LUMBUNG_PUBLIC_ENGINE_URL || origin).replace(/\/+$/, ""),
+    clientIpHeader: (env.LUMBUNG_CLIENT_IP_HEADER || "").trim(),
+    trustedProxies: trustedProxiesFrom(env.LUMBUNG_TRUSTED_PROXIES),
   }
   return cached
 }
@@ -51,7 +85,7 @@ export function engineToken(): string {
   const env = process.env
   let token = env.LUMBUNG_SERVICE_TOKEN?.trim()
   if (!token) {
-    const file = env.LUMBUNG_SERVICE_TOKEN_FILE || "../engine/data/secrets/service-token"
+    const file = env.LUMBUNG_SERVICE_TOKEN_FILE || settingDefault("LUMBUNG_SERVICE_TOKEN_FILE")
     try {
       token = readFileSync(resolve(file), "utf8").trim()
     } catch {

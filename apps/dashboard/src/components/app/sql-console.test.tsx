@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createAgent } from "@ui-sdk/react/agent"
 import { afterEach, beforeEach, expect, test, vi } from "vitest"
@@ -24,7 +24,10 @@ function setup(run = vi.fn(async (_s: string[]): Promise<RunResult> => ({ result
   return { run, explain, editor: screen.getByLabelText("SQL") as HTMLTextAreaElement }
 }
 
-beforeEach(() => localStorage.clear())
+beforeEach(() => {
+  localStorage.clear()
+  sessionStorage.clear()
+})
 afterEach(() => vi.restoreAllMocks())
 
 test("an agent can write SQL and run it", async () => {
@@ -126,6 +129,18 @@ test("history survives storage that throws", () => {
   expect(pushHistory("shop", "SELECT 1", [])).toHaveLength(1)
 })
 
+test("the draft survives leaving the tab, per database", async () => {
+  const user = userEvent.setup()
+  const { editor } = setup()
+  await user.type(editor, "SELECT 42")
+  cleanup()
+  render(<SqlConsole db="shop" readOnly={false} run={vi.fn()} explain={vi.fn()} />)
+  expect((screen.getByLabelText("SQL") as HTMLTextAreaElement).value).toBe("SELECT 42")
+  cleanup()
+  render(<SqlConsole db="blog" readOnly={false} run={vi.fn()} explain={vi.fn()} />)
+  expect((screen.getByLabelText("SQL") as HTMLTextAreaElement).value).toBe("")
+})
+
 test("a read-only role sees it", () => {
   render(<SqlConsole db="shop" readOnly run={vi.fn()} explain={vi.fn()} />)
   expect(screen.getByText("Read-only")).toBeTruthy()
@@ -142,7 +157,7 @@ test("worst case: 300 columns and a 5 MB value open without the full value", asy
   const cell = within(within(grid).getAllByRole("row")[1]!).getAllByRole("gridcell")[2]!
   await user.dblClick(cell)
   const dialog = await screen.findByRole("dialog", { name: /notes/ })
-  expect((within(dialog).getByLabelText("Value") as HTMLTextAreaElement).value).toBe(bigText.t === "text" ? bigText.v : "")
+  expect(within(dialog).getByLabelText("Value").textContent).toBe(bigText.t === "text" ? bigText.v : "")
   expect(within(dialog).getByText("First 1,000 of 5,242,880 characters")).toBeTruthy()
 })
 

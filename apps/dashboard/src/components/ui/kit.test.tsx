@@ -10,7 +10,8 @@ import { Pagination } from "./pagination"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "./select"
 import { Tabs, TabsList, TabsPanel, TabsTab } from "./tabs"
 import { Toaster, toast } from "./toast"
-import { Tooltip } from "./tooltip"
+import { SegmentedControl, SegmentedControlItem } from "./segmented-control"
+import { Tooltip, TruncatedTip } from "./tooltip"
 
 let approve = false
 const agent = createAgent({ allow: (step) => !step.confirm || approve })
@@ -137,16 +138,18 @@ test("the kit's parts render and work together", async () => {
     </>,
   )
   expect(screen.getByRole("tab", { name: "B 3" }).getAttribute("href")).toBe("#b")
-  await user.click(screen.getByRole("combobox", { name: "Branch" }))
-  await user.click(screen.getByRole("option", { name: "dev" }))
-  expect(onBranch.mock.calls[0]?.[0]).toBe("dev")
-
+  // The menu runs before the select: ui-sdk's Menu hands focus back to
+  // whatever was focused before a click opened it, which would be the select.
   const account = screen.getByRole("button", { name: "Account" })
   await user.click(account)
-  expect(screen.getByRole("menuitem", { name: "Profile" })).toBeTruthy()
+  expect(await screen.findByRole("menuitem", { name: "Profile" })).toBeTruthy()
   await user.keyboard("{Escape}")
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull())
   await waitFor(() => expect(document.activeElement).toBe(account))
+
+  await user.click(screen.getByRole("combobox", { name: "Branch" }))
+  await user.click(screen.getByRole("option", { name: "dev" }))
+  expect(onBranch.mock.calls[0]?.[0]).toBe("dev")
 
   const keep = screen.getByRole("checkbox", { name: "Keep it" })
   keep.focus()
@@ -160,4 +163,30 @@ test("the kit's parts render and work together", async () => {
   expect(screen.getByRole("navigation", { name: "Pages" })).toBeTruthy()
   toast.success("Saved")
   expect(await screen.findByText("Saved")).toBeTruthy()
+})
+
+test("a truncation tip describes its trigger and keeps the trigger's own name and element", () => {
+  render(
+    <TruncatedTip text="feature-x">
+      <a href="#x">
+        <span data-truncate>feature-x</span> <span>default</span> <span className="sr-only">Protected</span>
+      </a>
+    </TruncatedTip>,
+  )
+  const link = screen.getByRole("link", { name: "feature-x default Protected" })
+  expect(link.hasAttribute("type")).toBe(false)
+})
+
+test("the segmented indicator doesn't slide on its first placement, only after a change", async () => {
+  const user = userEvent.setup()
+  const { container } = render(
+    <SegmentedControl aria-label="Format" defaultValue="db">
+      <SegmentedControlItem value="db">SQLite file</SegmentedControlItem>
+      <SegmentedControlItem value="sql">SQL dump</SegmentedControlItem>
+    </SegmentedControl>,
+  )
+  const indicator = container.querySelector<HTMLElement>('[data-slot="segmented-control-indicator"]')!
+  expect(indicator.hasAttribute("data-moved")).toBe(false)
+  await user.click(screen.getByRole("radio", { name: "SQL dump" }))
+  expect(indicator.hasAttribute("data-moved")).toBe(true)
 })

@@ -1,12 +1,11 @@
 // Import and export move whole databases, too big for server functions, so they
 // use plain routes under /app/api. Each checks the session itself. Imports are
-// buffered (capped) because the SDK's import takes bytes.
+// buffered (capped, one at a time) because the SDK's import takes bytes.
 import { type Client, LumbungError } from "@lumbung/client"
-import { type Permission, can, isRole } from "@/lib/roles"
-import { getAuth } from "./auth"
-import { config } from "./config"
+import { type Permission, can } from "@/lib/roles"
+import { crossOriginWrite } from "./auth"
 import { engineFor, userMessage } from "./engine"
-import type { Viewer } from "./session"
+import { type Viewer, viewerFromRequest } from "./session"
 
 export const MAX_IMPORT_BYTES = 512 * 1024 * 1024
 
@@ -15,28 +14,14 @@ export type TransferDeps = {
   engine: (viewer: Viewer) => Pick<Client, "import" | "download">
 }
 
-async function viewerFromRequest(request: Request): Promise<Viewer | null> {
-  const auth = await getAuth()
-  const session = await auth.api.getSession({ headers: request.headers })
-  if (!session) return null
-  const u = session.user as { id: string; name: string; email: string; role?: unknown }
-  return { id: u.id, name: u.name, email: u.email, role: isRole(u.role) ? u.role : "readonly" }
-}
-
 const defaults: TransferDeps = { viewer: viewerFromRequest, engine: engineFor }
 
 function fail(status: number, message: string): Response {
   return Response.json({ error: message }, { status, headers: { "cache-control": "no-store" } })
 }
 
-function crossSite(request: Request): boolean {
-  if (request.headers.get("sec-fetch-site") === "cross-site") return true
-  const origin = request.headers.get("origin")
-  return !!origin && origin !== config().publicUrl
-}
-
 async function guard(request: Request, p: Permission, deps: TransferDeps): Promise<Viewer | Response> {
-  if (request.method !== "GET" && crossSite(request)) return fail(403, "Invalid origin.")
+  if (crossOriginWrite(request)) return fail(403, "Invalid origin.")
   const viewer = await deps.viewer(request)
   if (!viewer) return fail(401, "Sign in again.")
   if (!can(viewer.role, p)) return fail(403, "Your role can't do that.")
@@ -50,21 +35,39 @@ function engineFailure(e: unknown): Response {
   return fail(status, userMessage(e))
 }
 
-/** Reads the body up to the cap, so a huge upload stops early instead of filling memory. */
-async function readCapped(request: Request, cap: number): Promise<Uint8Array | null> {
-  if (!request.body) return new Uint8Array()
+export const IMPORT_STALL_MS = 30_000
+
+type Read = { bytes: Uint8Array } | { fail: "too-big" | "stalled" | "aborted" }
+
+/**
+ * Reads the body up to the cap, so a huge upload stops early instead of
+ * filling memory, and gives up when no bytes arrive for `stallMs`.
+ */
+async function readCapped(request: Request, cap: number, stallMs: number): Promise<Read> {
+  if (!request.body) return { bytes: new Uint8Array() }
   const chunks: Uint8Array[] = []
   let size = 0
   const reader = request.body.getReader()
+  const stop = (fail: "too-big" | "stalled" | "aborted"): Read => {
+    reader.cancel().catch(() => {})
+    return { fail }
+  }
   for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    size += value.byteLength
-    if (size > cap) {
-      await reader.cancel()
-      return null
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const stalled = new Promise<"stalled">((resolve) => (timer = setTimeout(() => resolve("stalled"), stallMs)))
+    let step: ReadableStreamReadResult<Uint8Array> | "stalled"
+    try {
+      step = await Promise.race([reader.read(), stalled])
+    } catch {
+      return stop("aborted")
+    } finally {
+      clearTimeout(timer)
     }
-    chunks.push(value)
+    if (step === "stalled") return stop("stalled")
+    if (step.done) break
+    size += step.value.byteLength
+    if (size > cap) return stop("too-big")
+    chunks.push(step.value)
   }
   const out = new Uint8Array(size)
   let at = 0
@@ -72,10 +75,12 @@ async function readCapped(request: Request, cap: number): Promise<Uint8Array | n
     out.set(c, at)
     at += c.byteLength
   }
-  return out
+  return { bytes: out }
 }
 
-export async function importRoute(request: Request, deps: TransferDeps = defaults, cap = MAX_IMPORT_BYTES): Promise<Response> {
+let importing = false
+
+export async function importRoute(request: Request, deps: TransferDeps = defaults, cap = MAX_IMPORT_BYTES, stallMs = IMPORT_STALL_MS): Promise<Response> {
   const viewer = await guard(request, "write", deps)
   if (viewer instanceof Response) return viewer
   const q = new URL(request.url).searchParams
@@ -88,15 +93,25 @@ export async function importRoute(request: Request, deps: TransferDeps = default
   if (mode !== "empty" && mode !== "replace") return fail(400, "Mode must be empty or replace.")
   const tooBig = `The file is over ${Math.round(cap / 1024 / 1024)} MB.`
   if (Number(request.headers.get("content-length")) > cap) return fail(413, tooBig)
-  const body = await readCapped(request, cap)
-  if (!body) return fail(413, tooBig)
-  if (body.byteLength === 0) return fail(400, "The file is empty.")
+  // Each import buffers up to the cap, so only one runs at a time.
+  if (importing) return fail(429, "Another import is running. Try again soon.")
+  importing = true
   try {
+    const read = await readCapped(request, cap, stallMs)
+    if ("fail" in read) {
+      if (read.fail === "too-big") return fail(413, tooBig)
+      if (read.fail === "stalled") return fail(408, "The upload stalled. Try again.")
+      return fail(400, "The upload was cut off. Try again.")
+    }
+    const body = read.bytes
+    if (body.byteLength === 0) return fail(400, "The file is empty.")
     const data = format === "sql" ? new TextDecoder().decode(body) : body
     const out = await deps.engine(viewer).import(db, branch, data, { format, mode })
     return Response.json(out)
   } catch (e) {
     return engineFailure(e)
+  } finally {
+    importing = false
   }
 }
 

@@ -41,14 +41,16 @@ type ScrollAreaProps = {
   /** Which scrollbars to draw. The native ones stay hidden. */
   axis?: "x" | "y" | "both"
   label?: string
+  /** Fades the inline edges while there's more to scroll that way. */
+  fade?: boolean
 }
 
 const bar =
   "flex touch-none p-0.5 opacity-0 transition-opacity duration-150 select-none data-visible:opacity-100 data-[orientation=horizontal]:h-2 data-[orientation=horizontal]:flex-col data-[orientation=vertical]:w-2"
 
-export function ScrollArea({ className, viewportClassName, children, axis = "y", label }: ScrollAreaProps) {
+export function ScrollArea({ className, viewportClassName, children, axis = "y", label, fade }: ScrollAreaProps) {
   return (
-    <ScrollAreaPart type="hover" className={cn("relative overflow-hidden", className)}>
+    <ScrollAreaPart type="hover" data-fade-x={fade ? "" : undefined} className={cn("relative overflow-hidden", className)}>
       <ScrollAreaViewport aria-label={label} className={cn("size-full overscroll-contain [scrollbar-width:none]", viewportClassName)}>
         <ScrollAreaContent className={axis === "y" ? undefined : "w-max min-w-full"}>{children}</ScrollAreaContent>
       </ScrollAreaViewport>

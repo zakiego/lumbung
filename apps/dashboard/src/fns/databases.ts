@@ -3,7 +3,7 @@ import type { BranchOut, DatabaseOut, Diff, Schema, StatsOutBody } from "@lumbun
 import { createServerFn } from "@tanstack/react-start"
 import { z } from "zod"
 import { config } from "@/server/config"
-import { call, engineFor } from "@/server/engine"
+import { allPages, call, engineFor } from "@/server/engine"
 import { requireCan } from "@/server/session"
 
 const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "Use lowercase letters, digits and dashes, up to 63 characters.")
@@ -11,27 +11,16 @@ const ref = z.string().min(1).max(100)
 const db = z.object({ db: ref })
 const branch = z.object({ db: ref, branch: ref })
 
-async function all<T>(page: (cursor?: string) => Promise<{ data: T[]; nextCursor: string }>, max = 1000): Promise<T[]> {
-  const out: T[] = []
-  let cursor: string | undefined
-  do {
-    const p = await page(cursor)
-    out.push(...p.data)
-    cursor = p.nextCursor || undefined
-  } while (cursor && out.length < max)
-  return out
-}
-
 export const listDatabases = createServerFn({ method: "GET" }).handler(async (): Promise<DatabaseOut[]> => {
   const viewer = await requireCan("read")
   const e = engineFor(viewer)
-  return call(() => all((cursor) => e.databases.list({ limit: 100, cursor })))
+  return call(() => allPages((cursor) => e.databases.list({ limit: 100, cursor })))
 })
 
 export const listTrash = createServerFn({ method: "GET" }).handler(async (): Promise<DatabaseOut[]> => {
   const viewer = await requireCan("read")
   const e = engineFor(viewer)
-  return call(() => all((cursor) => e.databases.trash({ limit: 100, cursor })))
+  return call(() => allPages((cursor) => e.databases.trash({ limit: 100, cursor })))
 })
 
 export const getDatabase = createServerFn({ method: "GET" })
@@ -40,7 +29,7 @@ export const getDatabase = createServerFn({ method: "GET" })
     const viewer = await requireCan("read")
     const e = engineFor(viewer)
     return call(async () => {
-      const [database, branches] = await Promise.all([e.databases.get(data.db), all((cursor) => e.branches.list(data.db, { limit: 100, cursor }))])
+      const [database, branches] = await Promise.all([e.databases.get(data.db), allPages((cursor) => e.branches.list(data.db, { limit: 100, cursor }))])
       return { database, branches }
     })
   })

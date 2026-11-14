@@ -1,10 +1,11 @@
 import { createFileRoute, useRouter, useRouterState } from "@tanstack/react-router"
 import { z } from "zod"
 import { type BrowseQuery, type DataActions, DataBrowser } from "@/components/app/data-browser"
-import { DbFrame } from "@/components/app/db-frame"
+import { DbFrame, OpenSql } from "@/components/app/db-frame"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
 import { browseTable, deleteRows, getCell, insertRow, updateCell } from "@/fns/data"
 import { pageTitle } from "@/lib/paths"
+import { can } from "@/lib/roles"
 import { FILTER_OPS, FILTER_VALUE_MAX } from "@/server/grid"
 
 // A bad value in a shared link drops that one param instead of failing the page.
@@ -42,12 +43,12 @@ export const Route = createFileRoute("/_app/db/$db/data")({
   },
   head: ({ params }) => ({ meta: [{ title: pageTitle("Data", params.db) }] }),
   pendingComponent: () => (
-    <DbFrame section="data" wide>
+    <DbFrame section="data">
       <RowsSkeleton rows={6} />
     </DbFrame>
   ),
   errorComponent: ({ error }) => (
-    <DbFrame section="data" wide>
+    <DbFrame section="data">
       <ErrorState error={error} title="Couldn't load this branch" />
     </DbFrame>
   ),
@@ -61,6 +62,8 @@ function DataPage() {
   const navigate = Route.useNavigate()
   const router = useRouter()
   const busy = useRouterState({ select: (state) => state.isLoading })
+  const { viewer } = Route.useRouteContext()
+  const canWrite = can(viewer.role, "write")
 
   const table = result.table?.name ?? s.table
   const query: BrowseQuery = {
@@ -102,8 +105,8 @@ function DataPage() {
   }
 
   return (
-    <DbFrame section="data" wide>
-      <DataBrowser result={result} query={query} onQueryChange={onQueryChange} actions={actions} busy={busy} />
+    <DbFrame section="data">
+      <DataBrowser result={result} query={query} onQueryChange={onQueryChange} actions={actions} busy={busy} emptyAction={canWrite && <OpenSql />} />
     </DbFrame>
   )
 }

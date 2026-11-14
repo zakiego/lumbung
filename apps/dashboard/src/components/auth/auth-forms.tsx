@@ -81,7 +81,7 @@ export function LoginForm({ onSignIn, onPasskey }: LoginProps) {
           {form.pending ? "Signing in…" : "Sign in"}
         </Button>
       </form>
-      <div className="flex items-center gap-3 text-xs text-faint">
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <Separator className="flex-1" />
         or
         <Separator className="flex-1" />

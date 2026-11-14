@@ -9,8 +9,8 @@ import {
 import { ArrowDownIcon, ArrowUpIcon, CheckIcon, MinusIcon } from "lucide-react"
 import { type ReactNode, useId, useMemo } from "react"
 import { DataGridParts, type GridSort } from "@/components/ui/data-grid"
-import { type Cell, affinity, isNumeric } from "@/lib/cells"
-import { formatBytes, number } from "@/lib/format"
+import { type Cell, affinity, blobSizeText, isNumeric } from "@/lib/cells"
+import { number } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 const { Root, Row, Head, Cell: GridCell } = DataGridParts
@@ -54,11 +54,11 @@ const bar =
 export function CellValue({ cell }: { cell: Cell }) {
   switch (cell.t) {
     case "null":
-      return <span className="text-[11px] tracking-wide text-faint">NULL</span>
+      return <span className="text-[11px] tracking-wide text-muted-foreground">NULL</span>
     case "blob":
       return (
         <span className="text-muted-foreground">
-          <span className="text-[11px] tracking-wide text-faint">BLOB</span> {formatBytes(cell.size)}
+          <span className="text-[11px] tracking-wide text-muted-foreground">BLOB</span> {blobSizeText(cell.size)}
         </span>
       )
     case "text":
@@ -138,7 +138,7 @@ export function TableGrid({ label, columns, rows, sort = null, onSortChange, sel
                   >
                     <span className={cn("inline-flex max-w-64 items-center gap-1.5", numeric[i] && "flex-row-reverse")}>
                       <span className="truncate">{c.name}</span>
-                      {c.type && <span className="shrink-0 font-mono text-[10.5px] font-normal text-faint uppercase">{c.type.length > 16 ? `${c.type.slice(0, 15)}…` : c.type}</span>}
+                      {c.type && <span className="shrink-0 font-mono text-[10.5px] font-normal text-muted-foreground uppercase">{c.type.length > 16 ? `${c.type.slice(0, 15)}…` : c.type}</span>}
                       <SortIcon dir={sort?.column === ids[i] ? sort.dir : undefined} />
                     </span>
                   </Head>

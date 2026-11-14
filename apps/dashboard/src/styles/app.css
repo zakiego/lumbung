@@ -44,6 +44,7 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-destructive: var(--destructive);
+  --color-destructive-fill: var(--destructive-fill);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -74,17 +75,18 @@
   --secondary: #f4f4f5;
   --secondary-foreground: #282a30;
   --muted: #f4f4f5;
-  --muted-foreground: #6f6e77;
+  --muted-foreground: #6b6a73;
   --faint: #9b9aa2;
   --accent: #f1f1f3;
   --accent-foreground: #282a30;
   --brand: #5e6ad2;
-  --success: #1f8a3b;
-  --warning: #b7791f;
-  --destructive: #d93f3f;
+  --success: #1a7f37;
+  --warning: #94621a;
+  --destructive: #c93636;
+  --destructive-fill: #c93636;
   --code: #f7f7f8;
   --border: #e9e8ea;
-  --input: #e2e1e4;
+  --input: #868590;
   --ring: #5e6ad2;
   --overlay: rgb(0 0 0 / 0.4);
   --chart-1: #5e6ad2;
@@ -117,9 +119,11 @@
   --success: #27a644;
   --warning: #f0bf00;
   --destructive: #eb5757;
+  /* White text on #eb5757 is 3.5:1, so filled buttons use a deeper red. */
+  --destructive-fill: #c93636;
   --code: #1c1c1f;
   --border: #23252a;
-  --input: #2a2b30;
+  --input: #66696f;
   --ring: #5e6ad2;
   --overlay: rgb(0 0 0 / 0.85);
   --chart-1: #7b83eb;
@@ -135,6 +139,13 @@
 @layer base {
   * {
     @apply border-border;
+  }
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button,
+  a {
+    touch-action: manipulation;
   }
   body {
     @apply bg-background text-foreground antialiased;
@@ -159,6 +170,24 @@
   from {
     scale: 0.8;
     opacity: 0;
+  }
+}
+
+/* Edge fades on a sideways scroll area, off at whichever end is reached. */
+@layer components {
+  [data-slot="scroll-area"][data-fade-x] {
+    --fade-start: 24px;
+    --fade-end: 24px;
+    mask-image: linear-gradient(to right, transparent, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent);
+  }
+  [data-slot="scroll-area"][data-fade-x]:dir(rtl) {
+    mask-image: linear-gradient(to left, transparent, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent);
+  }
+  [data-slot="scroll-area"][data-fade-x][data-at-x-start] {
+    --fade-start: 0px;
+  }
+  [data-slot="scroll-area"][data-fade-x][data-at-x-end] {
+    --fade-end: 0px;
   }
 }
 

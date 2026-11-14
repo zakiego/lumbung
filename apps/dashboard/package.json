@@ -7,7 +7,8 @@
     "build": "vite build",
     "start": "node .output/server/index.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "docs:gen": "node scripts/docgen.ts"
   },
   "dependencies": {
     "@better-auth/passkey": "1.7.22",

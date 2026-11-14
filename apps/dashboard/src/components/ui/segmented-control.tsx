@@ -3,13 +3,26 @@ import {
   SegmentedControlItem as SegmentedControlItemPart,
   SegmentedControl as SegmentedControlPart,
 } from "@ui-sdk/react/segmented-control"
-import type { ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 import { type Styled, cn } from "@/lib/utils"
 
-export function SegmentedControl({ className, children, ...props }: Omit<Styled<typeof SegmentedControlPart>, "children"> & { children?: ReactNode }) {
+export function SegmentedControl({ className, children, onValueChange, ...props }: Omit<Styled<typeof SegmentedControlPart>, "children"> & { children?: ReactNode }) {
+  // The indicator only slides once a choice changes, never on its first
+  // measure (mount, hydration, font load), which would slide in from x=0.
+  const [moved, setMoved] = useState(false)
   return (
-    <SegmentedControlPart className={cn("relative isolate inline-flex h-8 w-fit items-center rounded-md border bg-secondary p-0.5", className)} {...props}>
-      <SegmentedControlIndicator className="absolute top-(--segmented-control-indicator-top) left-(--segmented-control-indicator-left) -z-10 h-(--segmented-control-indicator-height) w-(--segmented-control-indicator-width) rounded-[5px] bg-background shadow-xs transition-[left,width] duration-200 ease-out-quad motion-reduce:transition-none dark:bg-accent" />
+    <SegmentedControlPart
+      className={cn("relative isolate inline-flex h-8 w-fit items-center rounded-md border bg-secondary p-0.5", className)}
+      onValueChange={(...args: Parameters<NonNullable<typeof onValueChange>>) => {
+        setMoved(true)
+        onValueChange?.(...args)
+      }}
+      {...props}
+    >
+      <SegmentedControlIndicator
+        data-moved={moved ? "" : undefined}
+        className="absolute top-(--segmented-control-indicator-top) left-0 -z-10 h-(--segmented-control-indicator-height) w-(--segmented-control-indicator-width) translate-x-(--segmented-control-indicator-left) rounded-[5px] bg-background shadow-xs transition-none ease-out-quad data-moved:transition-[translate] data-moved:duration-200 motion-reduce:data-moved:transition-none dark:bg-accent"
+      />
       {children}
     </SegmentedControlPart>
   )

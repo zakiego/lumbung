@@ -38,7 +38,7 @@ export function MenuRadioItem({ className, children, ...props }: Omit<Styled<typ
 }
 
 export function MenuGroupLabel({ className, ...props }: Styled<typeof MenuGroupLabelPart>) {
-  return <MenuGroupLabelPart className={cn("px-2 pt-1.5 pb-1 text-xs font-[510] text-faint", className)} {...props} />
+  return <MenuGroupLabelPart className={cn("px-2 pt-1.5 pb-1 text-xs font-[510] text-muted-foreground", className)} {...props} />
 }
 
 export function MenuSeparator({ className, ...props }: Styled<typeof MenuSeparatorPart>) {

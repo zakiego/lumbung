@@ -39,7 +39,7 @@ function SettingsPage() {
           </SettingsSection>
         )}
         {canWrite && (
-          <SettingsSection title="Import" description={`Loads a file into ${branch}.`}>
+          <SettingsSection title="Import">
             <ImportForm
               branch={branch}
               onImport={async (file, mode) => {
@@ -50,7 +50,7 @@ function SettingsPage() {
             />
           </SettingsSection>
         )}
-        <SettingsSection title="Export" description={`Downloads ${branch} as it is now.`}>
+        <SettingsSection title="Export">
           <ExportForm db={db} branch={branch} />
         </SettingsSection>
         {canWrite && (

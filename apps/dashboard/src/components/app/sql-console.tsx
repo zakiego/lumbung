@@ -21,6 +21,22 @@ export interface HistoryEntry {
 }
 
 const historyKey = (db: string) => `lumbung:sql-history:${db}`
+const draftKey = (db: string) => `lumbung:sql-draft:${db}`
+
+export function readDraft(db: string): string {
+  try {
+    return sessionStorage.getItem(draftKey(db)) ?? ""
+  } catch {
+    return ""
+  }
+}
+
+function saveDraft(db: string, text: string) {
+  try {
+    if (text) sessionStorage.setItem(draftKey(db), text)
+    else sessionStorage.removeItem(draftKey(db))
+  } catch {}
+}
 
 export function readHistory(db: string): HistoryEntry[] {
   try {
@@ -68,6 +84,7 @@ export function SqlConsole({ db, readOnly, run, explain }: SqlConsoleProps) {
   const runs = useRef(0)
 
   useEffect(() => setHistory(readHistory(db)), [db])
+  useEffect(() => setText(readDraft(db)), [db])
   useEffect(() => setMac(/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)), [])
 
   function selected(): string {
@@ -118,7 +135,10 @@ export function SqlConsole({ db, readOnly, run, explain }: SqlConsoleProps) {
         <Textarea
           ref={editor}
           value={text}
-          onValueChange={setText}
+          onValueChange={(v) => {
+            setText(v)
+            saveDraft(db, v)
+          }}
           submitShortcut="mod+enter"
           onSubmit={() => void runNow()}
           autoResize
@@ -126,7 +146,7 @@ export function SqlConsole({ db, readOnly, run, explain }: SqlConsoleProps) {
           autoCapitalize="off"
           autoCorrect="off"
           placeholder="SELECT 1"
-          className="max-h-[50svh] min-h-40 bg-code font-mono text-[13px] leading-relaxed"
+          className="max-h-[50svh] min-h-40 bg-code font-mono text-base leading-relaxed md:text-[13px]"
         />
       </Field>
 
@@ -149,9 +169,16 @@ export function SqlConsole({ db, readOnly, run, explain }: SqlConsoleProps) {
           </MenuTrigger>
           <MenuContent align="start" className="max-h-80 w-[min(28rem,calc(100vw-32px))] overflow-y-auto">
             {history.map((h) => (
-              <MenuItem key={`${h.at}:${h.sql}`} onSelect={() => setText(h.sql)} className="justify-between gap-4">
+              <MenuItem
+                key={`${h.at}:${h.sql}`}
+                onSelect={() => {
+                  setText(h.sql)
+                  saveDraft(db, h.sql)
+                }}
+                className="justify-between gap-4"
+              >
                 <span className="truncate font-mono text-xs">{h.sql.replace(/\s+/g, " ")}</span>
-                <span className="shrink-0 text-xs text-faint" suppressHydrationWarning>
+                <span className="shrink-0 text-xs text-muted-foreground" suppressHydrationWarning>
                   {timeAgo(new Date(h.at).toISOString())}
                 </span>
               </MenuItem>
@@ -165,7 +192,11 @@ export function SqlConsole({ db, readOnly, run, explain }: SqlConsoleProps) {
         )}
       </div>
 
-      <div aria-live="polite" aria-busy={pending ? true : undefined} className="flex flex-col gap-6">
+      <div aria-busy={pending ? true : undefined} className="relative flex flex-col gap-6">
+        {/* Always mounted, so screen readers hear each new summary. Empty, it leaves the flow. */}
+        <p aria-live="polite" className="text-[13px] text-muted-foreground tabular-nums empty:absolute">
+          {output?.kind === "results" && summary(output.run)}
+        </p>
         {output?.kind === "error" && (
           <pre role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 font-mono text-xs leading-relaxed whitespace-pre-wrap text-destructive [overflow-wrap:anywhere]">
             {output.message}
@@ -178,6 +209,10 @@ export function SqlConsole({ db, readOnly, run, explain }: SqlConsoleProps) {
   )
 }
 
+function summary(run: RunResult): string {
+  return `${run.results.length > 1 ? `${run.results.length} statements · ` : ""}${number.format(run.ms)} ms`
+}
+
 function Results({ run, statements }: { run: RunResult; statements: string[] }) {
   const [open, setOpen] = useState<{ result: number; row: string; col: number } | null>(null)
   const [extra, setExtra] = useState<Record<number, number>>({})
@@ -185,10 +220,6 @@ function Results({ run, statements }: { run: RunResult; statements: string[] }) 
   const openResult = open ? run.results[open.result] : undefined
   return (
     <>
-      <p className="text-[13px] text-muted-foreground tabular-nums">
-        {many ? `${run.results.length} statements · ` : ""}
-        {number.format(run.ms)} ms
-      </p>
       {run.results.map((r, i) => {
         const label = `Result ${i + 1}`
         const sql = statements[i] ?? ""
@@ -197,7 +228,7 @@ function Results({ run, statements }: { run: RunResult; statements: string[] }) 
         return (
           <section key={`${i}:${sql}`} className="flex min-w-0 flex-col gap-2">
             <div className="flex min-w-0 items-baseline gap-3 text-[13px]">
-              {many && <span className="truncate font-mono text-xs text-faint" title={sql}>{sql.replace(/\s+/g, " ")}</span>}
+              {many && <span className="truncate font-mono text-xs text-muted-foreground" title={sql}>{sql.replace(/\s+/g, " ")}</span>}
               <span className="ml-auto shrink-0 text-muted-foreground tabular-nums">
                 {r.columns.length ? rowCountLabel(r.rowCount) : `${number.format(r.rowsAffected)} ${r.rowsAffected === 1 ? "row" : "rows"} changed`}
               </span>

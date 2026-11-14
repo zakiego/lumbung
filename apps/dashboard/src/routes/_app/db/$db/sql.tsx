@@ -15,7 +15,7 @@ function SqlPage() {
   const { viewer } = Route.useRouteContext()
   const db = database.name
   return (
-    <DbFrame section="sql" wide>
+    <DbFrame section="sql">
       <SqlConsole
         key={db}
         db={db}

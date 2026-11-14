@@ -2,6 +2,7 @@
 // carry previews: long text is cut and blobs are only a size and a few bytes,
 // so a 5 MB value never reaches a page of rows.
 import type { Value } from "@lumbung/client"
+import { formatBytes } from "./format"
 
 export const TEXT_PREVIEW = 1000
 export const BLOB_PREVIEW = 16
@@ -10,9 +11,10 @@ export type Cell =
   | { t: "null" }
   | { t: "int"; v: string }
   | { t: "real"; v: string }
-  /** `len` is the full length in characters; the value was cut when it's longer than `v`. */
-  | { t: "text"; v: string; len: number; cut: boolean }
-  | { t: "blob"; size: number; hex: string }
+  /** `len` is the full length in characters, or null when a cut value's length isn't known. */
+  | { t: "text"; v: string; len: number | null; cut: boolean }
+  /** `size` is null when the blob is bigger than its preview and its size isn't known. */
+  | { t: "blob"; size: number | null; hex: string }
 
 /** A value that identifies a row, sent back exactly as it was read. */
 export type KeyValue = { t: "null" } | { t: "int"; v: string } | { t: "real"; v: string } | { t: "text"; v: string } | { t: "blob"; b64: string }
@@ -56,10 +58,19 @@ export function encodeCell(v: Value): Cell {
 
 /**
  * Encodes a value the engine already cut down (grid.ts selects a prefix of
- * long text and blobs), with the full length it reported, or null when the
- * value wasn't cut.
+ * long text and blobs). `fullLength` is the length it reported, null when the
+ * value wasn't cut, or "unknown" when no length was selected: then the prefix
+ * is one longer than a preview, so anything longer than a preview was cut.
  */
-export function encodePreview(v: Value, fullLength: Value): Cell {
+export function encodePreview(v: Value, fullLength: Value | "unknown"): Cell {
+  if (fullLength === "unknown") {
+    if (typeof v === "string") {
+      const c = cutText(v)
+      return { t: "text", v: c.v, len: c.cut ? null : c.len, cut: c.cut }
+    }
+    if (v instanceof Uint8Array) return { t: "blob", size: v.byteLength > BLOB_PREVIEW ? null : v.byteLength, hex: hexOf(v) }
+    return encodeCell(v)
+  }
   const full = typeof fullLength === "bigint" ? Number(fullLength) : typeof fullLength === "number" ? fullLength : null
   if (typeof v === "string") {
     if (full === null) return { t: "text", ...cutText(v) }
@@ -119,6 +130,10 @@ export function cellText(c: Cell): string | null {
     default:
       return c.v
   }
+}
+
+export function blobSizeText(size: number | null): string {
+  return size === null ? `over ${formatBytes(BLOB_PREVIEW)}` : formatBytes(size)
 }
 
 export function isNumeric(c: Cell): boolean {

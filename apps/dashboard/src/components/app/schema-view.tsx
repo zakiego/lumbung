@@ -30,7 +30,7 @@ function Section({ title, count, children }: { title: string; count: number; chi
   return (
     <section aria-label={title} className="flex flex-col gap-2">
       <h2 className="text-[13px] font-[590]">
-        {title} <span className="font-normal text-faint tabular-nums">{number.format(count)}</span>
+        {title} <span className="font-normal text-muted-foreground tabular-nums">{number.format(count)}</span>
       </h2>
       <div className="flex flex-col divide-y rounded-lg border">{children}</div>
     </section>
@@ -40,7 +40,7 @@ function Section({ title, count, children }: { title: string; count: number; chi
 function Item({ icon, name, meta, defaultOpen, children }: { icon: ReactNode; name: string; meta?: ReactNode; defaultOpen?: boolean; children: ReactNode }) {
   return (
     <Collapsible defaultOpen={defaultOpen} className="group/item min-w-0">
-      <CollapsibleTrigger className="flex h-10 w-full min-w-0 cursor-default items-center gap-2 px-3 text-left text-[13px] outline-none transition-colors duration-150 hover:bg-accent/50 hover:duration-0 focus-visible:bg-accent/50">
+      <CollapsibleTrigger className="flex h-10 w-full min-w-0 cursor-default items-center gap-2 px-3 text-left text-[13px] transition-colors duration-150 hover:bg-accent/50 hover:duration-0 focus-visible:bg-accent/50 focus-visible:-outline-offset-2">
         <ChevronRightIcon aria-hidden="true" className="size-3.5 shrink-0 text-faint transition-transform duration-150 group-data-open/item:rotate-90 motion-reduce:transition-none" />
         <span className="flex shrink-0 text-faint [&_svg]:size-4">{icon}</span>
         <span className="min-w-0 truncate font-mono" title={name}>
@@ -76,16 +76,16 @@ function Columns({ table }: { table: SchemaTable }) {
                   <span className="truncate" title={c.name}>
                     {c.name}
                   </span>
-                  {c.pk > 0 && <KeyRoundIcon aria-label="Primary key" className="size-3.5 shrink-0 text-faint" />}
+                  {c.pk > 0 && <KeyRoundIcon aria-label="Primary key" className="size-3.5 shrink-0 text-muted-foreground" />}
                   {(c.hidden === 2 || c.hidden === 3) && <Badge className="h-4 px-1.5 text-[10px]">generated</Badge>}
                 </span>
               </TableCell>
               <TableCell className="h-9 max-w-48 truncate font-mono text-xs text-muted-foreground uppercase" title={c.type}>
-                {c.type || <span className="text-faint normal-case">none</span>}
+                {c.type || <span className="text-muted-foreground normal-case">none</span>}
               </TableCell>
-              <TableCell className="h-9 text-xs text-muted-foreground">{c.not_null ? "Yes" : <span className="text-faint">No</span>}</TableCell>
+              <TableCell className="h-9 text-xs text-muted-foreground">{c.not_null ? "Yes" : <span className="text-muted-foreground">No</span>}</TableCell>
               <TableCell className="h-9 max-w-64 truncate font-mono text-xs text-muted-foreground" title={c.default ?? undefined}>
-                {c.default ?? <span className="text-faint">-</span>}
+                {c.default ?? <span className="text-muted-foreground">-</span>}
               </TableCell>
             </TableRow>
           ))}
@@ -116,13 +116,18 @@ function SubHead({ children }: { children: ReactNode }) {
 
 const OPEN_UP_TO = 3
 
-export function SchemaView({ schema }: { schema: Schema }) {
+export function SchemaView({ schema, emptyAction }: { schema: Schema; emptyAction?: ReactNode }) {
   const [q, setQ] = useState("")
   const query = useDeferredValue(q.trim().toLowerCase())
   const match = (name: string) => !query || name.toLowerCase().includes(query)
 
   const tables = schema.tables.filter((t) => !t.name.startsWith("sqlite_"))
-  if (!tables.length && !schema.views.length) return <Empty icon={<CodeIcon />} title="No tables yet" description="Create one in the SQL tab." />
+  if (!tables.length && !schema.views.length)
+    return (
+      <Empty icon={<CodeIcon />} title="No tables yet">
+        {emptyAction}
+      </Empty>
+    )
 
   const shownTables = tables.filter((t) => match(t.name))
   const shownViews = schema.views.filter((v) => match(v.name))

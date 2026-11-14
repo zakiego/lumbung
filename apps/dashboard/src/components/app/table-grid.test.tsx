@@ -145,3 +145,15 @@ test("zero rows shows the header and the empty message", async () => {
   expect(screen.getAllByRole("columnheader")).toHaveLength(4)
   expect(screen.getByText("No rows")).toBeTruthy()
 })
+
+test("a tap opens a cell on touch, a mouse click doesn't", async () => {
+  const onOpenCell = vi.fn()
+  render(<Editable onOpenCell={onOpenCell} />)
+  await tick()
+  const cell = within(screen.getAllByRole("row")[1]!).getAllByRole("gridcell")[2]!
+  const user = userEvent.setup()
+  await user.pointer({ keys: "[MouseLeft]", target: cell })
+  expect(onOpenCell).not.toHaveBeenCalled()
+  await user.pointer({ keys: "[TouchA]", target: cell })
+  expect(onOpenCell).toHaveBeenCalledOnce()
+})

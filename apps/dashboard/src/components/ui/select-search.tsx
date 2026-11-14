@@ -12,7 +12,7 @@ export function SelectSearch({ className, ...props }: Styled<typeof SelectInputP
   return (
     <SelectInputPart
       className={cn(
-        "mb-1 h-8 w-full rounded-md border-b-0 bg-transparent px-2 font-sans text-base text-foreground caret-brand outline-none placeholder:text-faint md:text-[13px]",
+        "mb-1 h-8 w-full rounded-md border-b-0 bg-transparent px-2 font-sans text-base text-foreground caret-brand outline-none placeholder:text-muted-foreground md:text-[13px]",
         className,
       )}
       {...props}
@@ -29,5 +29,5 @@ export function SelectEmpty({ className, ...props }: Styled<typeof SelectEmptyPa
 }
 
 export function SelectGroupLabel({ className, ...props }: Styled<typeof SelectGroupLabelPart>) {
-  return <SelectGroupLabelPart className={cn("px-2 pt-1.5 pb-1 font-sans text-xs font-[510] text-faint", className)} {...props} />
+  return <SelectGroupLabelPart className={cn("px-2 pt-1.5 pb-1 font-sans text-xs font-[510] text-muted-foreground", className)} {...props} />
 }

@@ -30,3 +30,15 @@ export async function call<T>(fn: () => Promise<T>): Promise<T> {
     throw err
   }
 }
+
+/** Every page of a cursor list, up to `max` items. */
+export async function allPages<T>(page: (cursor?: string) => Promise<{ data: T[]; nextCursor: string }>, max = 1000): Promise<T[]> {
+  const out: T[] = []
+  let cursor: string | undefined
+  do {
+    const p = await page(cursor)
+    out.push(...p.data)
+    cursor = p.nextCursor || undefined
+  } while (cursor && out.length < max)
+  return out
+}

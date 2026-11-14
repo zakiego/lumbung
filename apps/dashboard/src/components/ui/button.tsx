@@ -7,14 +7,14 @@ export type ButtonVariant = "default" | "secondary" | "outline" | "ghost" | "des
 export type ButtonSize = "sm" | "default" | "icon" | "icon-sm"
 
 const base =
-  "group/button relative inline-flex shrink-0 cursor-default items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[13px] font-[510] select-none transition-[background-color,color,border-color,scale] duration-100 ease-out-quad active:scale-[0.97] data-disabled:pointer-events-none data-disabled:opacity-50 aria-disabled:opacity-50 data-pending:cursor-progress [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 motion-reduce:active:scale-100"
+  "group/button relative inline-flex shrink-0 cursor-default items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[13px] font-[510] select-none transition-[background-color,color,border-color,scale] duration-100 ease-out-quad active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50 data-disabled:pointer-events-none data-disabled:opacity-50 aria-disabled:opacity-50 data-pending:cursor-progress [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 motion-reduce:active:scale-100"
 
 const variants: Record<ButtonVariant, string> = {
   default: "bg-primary text-primary-foreground hover:bg-primary/90",
   secondary: "border bg-secondary text-secondary-foreground hover:bg-accent",
   outline: "border bg-transparent text-foreground hover:bg-accent",
   ghost: "text-muted-foreground hover:bg-accent hover:text-foreground data-open:bg-accent data-open:text-foreground",
-  destructive: "bg-destructive text-white hover:bg-destructive/90",
+  destructive: "bg-destructive-fill text-white hover:bg-destructive-fill/90",
 }
 
 const sizes: Record<ButtonSize, string> = {

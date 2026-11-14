@@ -2,9 +2,10 @@
 import type { AuditOut, ScheduleOut, SnapshotOut, TokenOut } from "@lumbung/client"
 import { createServerFn } from "@tanstack/react-start"
 import { z } from "zod"
+import { APP_BASE } from "@/lib/paths"
 import { ROLES } from "@/lib/roles"
 import { config } from "@/server/config"
-import { call, engineFor } from "@/server/engine"
+import { allPages, call, engineFor } from "@/server/engine"
 import { requireCan } from "@/server/session"
 import { UserError, createInvite, listInvites, listMembers, removeMember, revokeInvite, setRole } from "@/server/users"
 
@@ -83,16 +84,7 @@ export const deleteSchedule = createServerFn({ method: "POST" })
 export const listTokens = createServerFn({ method: "GET" }).handler(async (): Promise<TokenOut[]> => {
   const viewer = await requireCan("admin")
   const e = engineFor(viewer)
-  return call(async () => {
-    const out: TokenOut[] = []
-    let cursor: string | undefined
-    do {
-      const p = await e.tokens.list({ limit: 100, cursor })
-      out.push(...p.data)
-      cursor = p.nextCursor || undefined
-    } while (cursor && out.length < 2000)
-    return out
-  })
+  return call(() => allPages((cursor) => e.tokens.list({ limit: 100, cursor }), 2000))
 })
 
 export const createToken = createServerFn({ method: "POST" })
@@ -136,7 +128,7 @@ export const inviteMember = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const viewer = await requireCan("admin")
     const { invite, token } = await userError(() => createInvite(viewer.id, data.email, data.role))
-    return { invite, url: `${config().publicUrl}/app/invite/${token}` }
+    return { invite, url: `${config().publicUrl}${APP_BASE}/invite/${token}` }
   })
 
 export const cancelInvite = createServerFn({ method: "POST" })

@@ -108,10 +108,12 @@ type ConfirmProps = {
   actionLabel: string
   agentConfirm: string
   onConfirm: () => Promise<unknown>
+  /** `default` for an action that changes things but loses nothing. */
+  tone?: "danger" | "default"
 }
 
 // A plain yes or no, for actions that are easy to undo or lose nothing big.
-export function Confirm({ trigger, triggerStyle = {}, title, description, actionLabel, agentConfirm, onConfirm }: ConfirmProps) {
+export function Confirm({ trigger, triggerStyle = {}, title, description, actionLabel, agentConfirm, onConfirm, tone = "danger" }: ConfirmProps) {
   return (
     <AlertDialog>
       <AlertDialogTrigger aria-label={triggerStyle.label} className={buttonVariants({ variant: triggerStyle.variant ?? "ghost", size: triggerStyle.size, className: triggerStyle.className })}>
@@ -126,10 +128,14 @@ export function Confirm({ trigger, triggerStyle = {}, title, description, action
           data-agent-confirm={agentConfirm}
           render={(props, state) => (
             <div className="flex flex-col gap-3">
-              {state.error instanceof Error && <p className="text-xs text-destructive">{state.error.message}</p>}
+              {state.error instanceof Error && (
+                <p role="alert" className="text-xs text-destructive">
+                  {state.error.message}
+                </p>
+              )}
               <div className="flex justify-end gap-2">
                 <AlertDialogClose className={buttonVariants({ variant: "ghost" })}>Cancel</AlertDialogClose>
-                <button {...props} className={buttonVariants({ variant: "destructive" })}>
+                <button {...props} className={buttonVariants({ variant: tone === "danger" ? "destructive" : "default" })}>
                   {state.pending ? "Working…" : actionLabel}
                 </button>
               </div>

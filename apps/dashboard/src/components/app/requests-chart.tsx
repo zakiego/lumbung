@@ -22,7 +22,7 @@ export function RequestsChart({ series }: { series: Point[] }) {
         </span>
         <span className="sr-only">{number.format(total)} queries in this window</span>
       </figcaption>
-      <div aria-hidden="true" className="h-52 w-full text-faint">
+      <div aria-hidden="true" className="h-52 w-full text-muted-foreground">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={rows} margin={{ left: 0, right: 4, top: 4, bottom: 0 }}>
             <defs>

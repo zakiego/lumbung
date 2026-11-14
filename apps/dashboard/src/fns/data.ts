@@ -125,7 +125,7 @@ export const browseTable = createServerFn({ method: "POST" })
         key: identity ? v.slice(0, keyCount).map(encodeKey) : null,
         cells: t.columns.map((_, i) => {
           const pos = keyCount + (withLength ? i * 2 : i)
-          return encodePreview(v[pos] ?? null, withLength ? (v[pos + 1] ?? null) : null)
+          return encodePreview(v[pos] ?? null, withLength ? (v[pos + 1] ?? null) : "unknown")
         }),
       }))
       return { ...empty, table, missing: false, rows, total, page: at }

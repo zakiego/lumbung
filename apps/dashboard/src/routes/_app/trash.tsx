@@ -6,6 +6,7 @@ import { ErrorState, RowsSkeleton } from "@/components/app/states"
 import { Button } from "@/components/ui/button"
 import { Empty, Table, TableCell, TableHead, TableRow } from "@/components/ui/surface"
 import { withToast } from "@/components/ui/toast"
+import { TruncatedTip } from "@/components/ui/tooltip"
 import { listTrash, restoreDatabase } from "@/fns/databases"
 import { formatBytes, formatDate } from "@/lib/format"
 import { pageTitle } from "@/lib/paths"
@@ -88,7 +89,11 @@ function TrashPage() {
             {databases.map((d) => (
               <TableRow key={d.id}>
                 <TableCell className="max-w-0 w-1/3">
-                  <span className="block truncate font-mono font-[510]">{d.name}</span>
+                  <TruncatedTip text={d.name}>
+                    <span tabIndex={0} className="block truncate rounded-sm font-mono font-[510]">
+                      {d.name}
+                    </span>
+                  </TruncatedTip>
                 </TableCell>
                 <TableCell className="text-right text-muted-foreground tabular-nums">{formatBytes(d.size_bytes)}</TableCell>
                 <TableCell className="text-right whitespace-nowrap text-muted-foreground">{d.deleted_at ? formatDate(d.deleted_at) : "-"}</TableCell>

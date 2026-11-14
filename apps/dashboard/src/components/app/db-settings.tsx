@@ -46,7 +46,7 @@ export function RenameForm({ name, onRename }: { name: string; onRename: (next: 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
       <Field invalid={error ? true : undefined}>
-        <FieldLabel>Database name</FieldLabel>
+        <FieldLabel className="sr-only">Database name</FieldLabel>
         <Input
           value={value}
           onValueChange={(v) => {
@@ -142,7 +142,7 @@ export function ImportForm({ branch, onImport }: { branch: string; onImport: (fi
                 <span className="shrink-0 text-muted-foreground tabular-nums">{formatFileSize(file.size)}</span>
               </span>
             ) : (
-              <span className="text-[13px] text-faint">.db or .sql, up to {MAX_IMPORT_MB} MB</span>
+              <span className="text-[13px] text-muted-foreground">.db or .sql, up to {MAX_IMPORT_MB} MB</span>
             )}
           </div>
         </FileInput>

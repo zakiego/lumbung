@@ -97,7 +97,12 @@ test("an agent can pick a table, select a row and delete it after asking", async
 test("a double click edits a cell, and NULL sends null", async () => {
   const user = userEvent.setup()
   const a = actions()
-  render(<DataBrowser result={result()} query={query} onQueryChange={() => {}} actions={a} />)
+  render(
+    <>
+      <DataBrowser result={result()} query={query} onQueryChange={() => {}} actions={a} />
+      <Toaster />
+    </>,
+  )
   await tick()
 
   await user.dblClick(screen.getByRole("gridcell", { name: "sam@acme.com" }))
@@ -165,7 +170,10 @@ test("a read-only table shows values but no edit controls", async () => {
   expect(screen.getByRole("grid", { name: "active_users" }).getAttribute("aria-multiselectable")).toBeNull()
   await user.dblClick(screen.getByRole("gridcell", { name: "jane@acme.com" }))
   const dialog = await screen.findByRole("dialog", { name: /email/ })
-  expect((within(dialog).getByLabelText("Value") as HTMLTextAreaElement).readOnly).toBe(true)
+  const value = within(dialog).getByLabelText("Value")
+  expect(value.tagName).toBe("PRE")
+  expect(value.textContent).toBe("jane@acme.com")
+  expect(within(dialog).queryByRole("textbox")).toBeNull()
   expect(within(dialog).queryByRole("button", { name: "Save" })).toBeNull()
 })
 
@@ -204,7 +212,12 @@ test("filters show as chips that can be removed", async () => {
 test("insert sends only the filled fields and skips generated columns", async () => {
   const user = userEvent.setup()
   const a = actions()
-  render(<DataBrowser result={result()} query={query} onQueryChange={() => {}} actions={a} />)
+  render(
+    <>
+      <DataBrowser result={result()} query={query} onQueryChange={() => {}} actions={a} />
+      <Toaster />
+    </>,
+  )
   await tick()
   await user.click(screen.getByRole("button", { name: "Insert row" }))
   const dialog = await screen.findByRole("dialog", { name: "Insert into users" })
@@ -245,4 +258,24 @@ test("states: no tables, a missing table, and an engine error", async () => {
   expect(screen.getByText("This table doesn't exist on this branch")).toBeTruthy()
   rerender(<DataBrowser result={result({ rows: [], total: 0, error: "Can't reach the engine." })} query={query} onQueryChange={() => {}} actions={actions()} />)
   expect(screen.getByText("Can't reach the engine.")).toBeTruthy()
+})
+
+test("a read-only role sees the same Read-only status on a writable table", async () => {
+  render(<DataBrowser result={result({ table: { name: "users", kind: "table", columns, readOnly: null, editable: false } })} query={query} onQueryChange={() => {}} actions={actions()} />)
+  await tick()
+  expect(screen.getByText("Read-only")).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "Insert row" })).toBeNull()
+})
+
+test("a value cut without a known length opens in full before editing", async () => {
+  const user = userEvent.setup()
+  const cut: Cell = { t: "text", v: "x".repeat(1000), len: null, cut: true }
+  const loadCell = vi.fn(async (): Promise<FullCell> => ({ t: "text", v: "x".repeat(1500) }))
+  const rows = [{ key: [encodeKey(1n)], cells: [{ t: "int", v: "1" } as Cell, cut, text("b"), { t: "null" } as Cell, text("s")] }]
+  render(<DataBrowser result={result({ rows })} query={query} onQueryChange={() => {}} actions={actions({ loadCell })} />)
+  await tick()
+  await user.dblClick(screen.getAllByRole("gridcell")[2]!)
+  const dialog = await screen.findByRole("dialog", { name: /email/ })
+  await waitFor(() => expect((within(dialog).getByLabelText("Value") as HTMLTextAreaElement).value).toHaveLength(1500))
+  expect(loadCell).toHaveBeenCalledOnce()
 })

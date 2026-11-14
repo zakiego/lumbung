@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/layout"
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs"
+import { toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 
 export function CopyButton({ text, label, className }: { text: string; label: string; className?: string }) {
@@ -15,8 +16,16 @@ export function CopyButton({ text, label, className }: { text: string; label: st
       size="icon-sm"
       aria-label={label}
       className={cn("rounded-full", className)}
-      onClick={async () => {
-        await navigator.clipboard?.writeText(text)
+      onClick={async (event) => {
+        const button = event.currentTarget
+        try {
+          if (!navigator.clipboard) throw new Error("No clipboard")
+          await navigator.clipboard.writeText(text)
+        } catch {
+          selectNear(button)
+          toast.error("Couldn't copy. Select it and copy.")
+          return
+        }
         setCopied(true)
         clearTimeout(timer.current)
         timer.current = setTimeout(() => setCopied(false), 1500)
@@ -28,6 +37,17 @@ export function CopyButton({ text, label, className }: { text: string; label: st
       </span>
     </Button>
   )
+}
+
+// Selects the code next to the button, so it can be copied by hand.
+function selectNear(button: HTMLElement) {
+  const code = button.parentElement?.querySelector("code")
+  const selection = window.getSelection()
+  if (!code || !selection) return
+  const range = document.createRange()
+  range.selectNodeContents(code)
+  selection.removeAllRanges()
+  selection.addRange(range)
 }
 
 export function CodeBlock({ code, copyLabel, className }: { code: string; copyLabel: string; className?: string }) {

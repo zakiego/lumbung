@@ -24,8 +24,8 @@ function AccountPage() {
       <PageHeader>
         <PageTitle>Account</PageTitle>
       </PageHeader>
-      <PageBody className="max-w-2xl">
-        <div className="flex flex-col gap-6">
+      <PageBody>
+        <div className="flex max-w-2xl flex-col gap-6">
           <p className="text-[13px] text-muted-foreground">
             Signed in as <span className="text-foreground">{viewer.email}</span>
           </p>

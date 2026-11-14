@@ -7,6 +7,7 @@ import { ErrorState, RowsSkeleton } from "@/components/app/states"
 import { buttonVariants } from "@/components/ui/button"
 import { Empty, Table, TableCell, TableHead, TableRow } from "@/components/ui/surface"
 import { toast } from "@/components/ui/toast"
+import { TruncatedTip } from "@/components/ui/tooltip"
 import { createDatabase, listDatabases } from "@/fns/databases"
 import { formatBytes, number, timeAgo } from "@/lib/format"
 import { pageTitle } from "@/lib/paths"
@@ -66,7 +67,9 @@ function DatabasesPage() {
   return (
     <Frame actions={actions}>
       {databases.length === 0 ? (
-        <Empty icon={<DatabaseIcon />} title="No databases yet" />
+        <Empty icon={<DatabaseIcon />} title="No databases yet">
+          {canWrite && <CreateDatabaseDialog onCreate={create} />}
+        </Empty>
       ) : (
         <DatabaseTable databases={databases} />
       )}
@@ -89,10 +92,14 @@ function DatabaseTable({ databases }: { databases: DatabaseOut[] }) {
         {databases.map((d) => (
           <TableRow key={d.id} className="relative">
             <TableCell className="max-w-0 w-1/2">
-              <Link to="/db/$db" params={{ db: d.name }} className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0">
-                <DatabaseIcon aria-hidden="true" className="size-4 shrink-0 text-faint" />
-                <span className="truncate">{d.name}</span>
-              </Link>
+              <TruncatedTip text={d.name}>
+                <Link to="/db/$db" params={{ db: d.name }} className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0">
+                  <DatabaseIcon aria-hidden="true" className="size-4 shrink-0 text-faint" />
+                  <span data-truncate className="truncate">
+                    {d.name}
+                  </span>
+                </Link>
+              </TruncatedTip>
             </TableCell>
             <TableCell className="text-right text-muted-foreground tabular-nums">{formatBytes(d.size_bytes)}</TableCell>
             <TableCell className="text-right text-muted-foreground tabular-nums">{number.format(d.branch_count)}</TableCell>

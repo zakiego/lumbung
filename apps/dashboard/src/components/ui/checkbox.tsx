@@ -23,7 +23,7 @@ export function Switch({ className, ...props }: Omit<Styled<typeof SwitchPart>, 
   return (
     <SwitchPart
       className={cn(
-        "inline-flex h-5 w-8 shrink-0 items-center rounded-full bg-faint p-[3px] transition-[background-color] duration-150 data-checked:bg-brand data-disabled:opacity-50",
+        "inline-flex h-5 w-8 shrink-0 items-center rounded-full bg-muted-foreground p-[3px] transition-[background-color] duration-150 data-checked:bg-brand data-disabled:opacity-50",
         className,
       )}
       {...props}

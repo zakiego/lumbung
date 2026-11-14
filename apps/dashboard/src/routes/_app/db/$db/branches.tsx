@@ -92,7 +92,7 @@ function BranchesPage() {
         {current && (
           <section aria-labelledby="branch-title" className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 id="branch-title" className="min-w-0 truncate font-mono text-[15px] font-[590]" title={branch}>
+              <h2 id="branch-title" className="min-w-0 font-mono text-[15px] font-[590] [overflow-wrap:anywhere]">
                 {branch}
               </h2>
               {canWrite && (
@@ -186,7 +186,6 @@ function BranchesPage() {
           ) : (
             <Empty icon={<GitCompareIcon />} title="Nothing to compare" description="Create a branch to compare it with this one." />
           )}
-          <p className="text-xs text-muted-foreground">Branches don't merge data back. Apply the same migration to the default branch.</p>
         </section>
       </div>
     </DbFrame>

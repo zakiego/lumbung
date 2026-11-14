@@ -1,4 +1,4 @@
-import { GitBranchPlusIcon, PlusIcon } from "lucide-react"
+import { PlusIcon } from "lucide-react"
 import { type FormEvent, type ReactNode, useState } from "react"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
@@ -94,20 +94,4 @@ export function NameDialog({ trigger, triggerIcon = <PlusIcon aria-hidden="true"
 
 export function CreateDatabaseDialog({ onCreate }: { onCreate: (name: string) => Promise<unknown> }) {
   return <NameDialog trigger="New database" title="Create database" label="Name" placeholder="my-app" submit="Create" pendingSubmit="Creating…" onSubmit={onCreate} />
-}
-
-export function CreateBranchDialog({ from, onCreate }: { from: string; onCreate: (name: string) => Promise<unknown> }) {
-  return (
-    <NameDialog
-      trigger="New branch"
-      triggerVariant="secondary"
-      triggerIcon={<GitBranchPlusIcon aria-hidden="true" />}
-      title={`Branch from ${from}`}
-      label="Branch name"
-      placeholder="try-new-index"
-      submit="Create"
-      pendingSubmit="Creating…"
-      onSubmit={onCreate}
-    />
-  )
 }

@@ -11,12 +11,13 @@ import { type Styled, cn } from "@/lib/utils"
 export { Tabs } from "@ui-sdk/react/tabs"
 
 // The hairline is an inset shadow, not a border, so the 2px bar can sit on it
-// without overflowing a row that scrolls sideways.
+// without overflowing a row that scrolls sideways. The bar slides on transform
+// only; its width snaps, so no frame runs layout.
 export function TabsList({ className, children, ...props }: Omit<Styled<typeof TabsListPart>, "children"> & { children?: ReactNode }) {
   return (
     <TabsListPart className={cn("relative flex items-center gap-5 shadow-[inset_0_-1px_0_var(--border)]", className)} {...props}>
       {children}
-      <TabsIndicator className="absolute bottom-0 left-(--active-tab-left) h-0.5 w-(--active-tab-width) rounded-full bg-foreground transition-[left,width] duration-200 ease-out-quad data-[activation-direction=none]:transition-none motion-reduce:transition-none" />
+      <TabsIndicator className="absolute bottom-0 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) rounded-full bg-foreground transition-[translate] duration-200 ease-out-quad data-[activation-direction=none]:transition-none motion-reduce:transition-none" />
     </TabsListPart>
   )
 }
@@ -41,7 +42,7 @@ export function TabsTab({ className, children, icon, count, ...props }: TabProps
       {count !== undefined && (
         <>
           {" "}
-          <span className="text-xs font-normal text-faint tabular-nums">{count}</span>
+          <span className="text-xs font-normal text-muted-foreground tabular-nums">{count}</span>
         </>
       )}
     </TabsTabPart>
@@ -49,5 +50,5 @@ export function TabsTab({ className, children, icon, count, ...props }: TabProps
 }
 
 export function TabsPanel({ className, ...props }: Styled<typeof TabsPanelPart>) {
-  return <TabsPanelPart className={cn("outline-none", className)} {...props} />
+  return <TabsPanelPart className={className} {...props} />
 }

@@ -1,5 +1,6 @@
 import { TooltipContent as TooltipContentPart, Tooltip as TooltipPart, TooltipTrigger } from "@ui-sdk/react/tooltip"
-import type { ComponentProps, ReactElement, ReactNode } from "react"
+import { mergeProps } from "@ui-sdk/react/primitive"
+import { type ComponentProps, type ReactElement, type ReactNode, cloneElement, useRef } from "react"
 import { type Styled, cn } from "@/lib/utils"
 
 export { TooltipTrigger } from "@ui-sdk/react/tooltip"
@@ -9,7 +10,7 @@ export function TooltipContent({ className, ...props }: Styled<typeof TooltipCon
     <TooltipContentPart
       sideOffset={6}
       className={cn(
-        "max-w-72 rounded-lg border bg-background px-2 py-1.5 text-xs font-[510] text-foreground/90 shadow-lg shadow-black/10 origin-(--transform-origin) transition-[opacity,scale] duration-120 ease-out-quad data-starting-style:scale-90 data-starting-style:opacity-0 data-ending-style:opacity-0 motion-reduce:transition-none dark:shadow-black/50",
+        "max-w-72 rounded-lg border bg-background px-2 py-1.5 text-xs font-[510] text-foreground/90 shadow-lg shadow-black/10 origin-(--transform-origin) transition-[opacity,scale] duration-120 ease-out-quad data-starting-style:scale-90 data-starting-style:opacity-0 data-ending-style:opacity-0 data-instant:transition-none motion-reduce:transition-opacity motion-reduce:data-starting-style:scale-100 dark:shadow-black/50",
         className,
       )}
       {...props}
@@ -29,6 +30,38 @@ export function Tooltip({ children, content, side, ...props }: TipProps) {
     <TooltipPart delay={500} {...props}>
       <TooltipTrigger render={children} />
       <TooltipContent side={side}>{content}</TooltipContent>
+    </TooltipPart>
+  )
+}
+
+/**
+ * The full text of a cut-off name, on hover and on focus. Opens only while the
+ * `[data-truncate]` element inside the trigger (or the trigger) is cut off. It
+ * describes the trigger, so the trigger keeps its own name (badges, sr-only text).
+ */
+export function TruncatedTip({ text, children, side }: { text: string; children: ReactElement<Record<string, unknown>>; side?: TipProps["side"] }) {
+  const trigger = useRef<HTMLButtonElement>(null)
+  return (
+    <TooltipPart
+      delay={500}
+      type="description"
+      onOpenChange={(open, details) => {
+        const root = trigger.current
+        const el = root?.querySelector<HTMLElement>("[data-truncate]") ?? root
+        if (open && el && el.scrollWidth <= el.clientWidth) details.cancel()
+      }}
+    >
+      <TooltipTrigger
+        ref={trigger}
+        render={(props) => {
+          // The trigger defaults to a button; a link, heading or span keeps its own semantics.
+          const { type, ...rest } = props
+          return cloneElement(children, mergeProps(children.props, children.type === "button" ? props : rest))
+        }}
+      />
+      <TooltipContent side={side} className="[overflow-wrap:anywhere]">
+        {text}
+      </TooltipContent>
     </TooltipPart>
   )
 }

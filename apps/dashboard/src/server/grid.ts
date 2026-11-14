@@ -81,12 +81,19 @@ export function gridTable(schema: Schema, name: string, viewColumns?: { name: st
       .filter((c) => c.hidden !== 1)
       .map((c) => ({ name: c.name, type: c.type, notNull: c.not_null, pk: c.pk, default: c.default, generated: c.hidden === 2 || c.hidden === 3 }))
     const pk = columns.filter((c) => c.pk > 0).sort((a, b) => a.pk - b.pk)
+    const pkIdentity: Identity | null = pk.length ? { kind: "pk", columns: pk.map((c) => c.name) } : null
+    const withoutRowid = /\bWITHOUT\s+ROWID\b/i.test(table.sql)
+    // A key on a rowid table can hold several NULLs unless it's INTEGER PRIMARY
+    // KEY (the rowid alias) or every column is NOT NULL. Only then is rowid
+    // used, since VACUUM can renumber rowids.
+    const rowidAlias = pk.length === 1 && pk[0]!.type.trim().toUpperCase() === "INTEGER"
+    const nonNullKey = pk.length > 0 && pk.every((c) => c.notNull)
     let identity: Identity | null = null
-    if (pk.length) identity = { kind: "pk", columns: pk.map((c) => c.name) }
+    if (withoutRowid || rowidAlias || nonNullKey) identity = pkIdentity
     else {
       const taken = new Set(table.columns.map((c) => c.name.toLowerCase()))
       const free = ROWID_NAMES.find((n) => !taken.has(n))
-      if (free && !/\bWITHOUT\s+ROWID\b/i.test(table.sql)) identity = { kind: "rowid", name: free }
+      identity = free ? { kind: "rowid", name: free } : pkIdentity
     }
     let readOnly: string | null = null
     if (table.virtual) readOnly = "Virtual tables can't be edited here."
@@ -106,10 +113,15 @@ function identityExprs(t: GridTable): string[] {
   return t.identity.kind === "rowid" ? [t.identity.name] : t.identity.columns.map(quoteIdent)
 }
 
-/** Text and blobs come back cut down, with their full length beside them when cut. */
+/**
+ * Text and blobs come back cut down, with their full length beside them when
+ * cut. Without the length column, one extra character or byte is selected so
+ * a cut value is still known to be cut.
+ */
 function previewExprs(column: string, withLength: boolean): string[] {
   const c = quoteIdent(column)
-  const value = `CASE typeof(${c}) WHEN 'text' THEN substr(${c}, 1, ${TEXT_PREVIEW}) WHEN 'blob' THEN substr(${c}, 1, ${BLOB_PREVIEW}) ELSE ${c} END`
+  const extra = withLength ? 0 : 1
+  const value = `CASE typeof(${c}) WHEN 'text' THEN substr(${c}, 1, ${TEXT_PREVIEW + extra}) WHEN 'blob' THEN substr(${c}, 1, ${BLOB_PREVIEW + extra}) ELSE ${c} END`
   if (!withLength) return [value]
   const length = `CASE typeof(${c}) WHEN 'text' THEN CASE WHEN length(${c}) > ${TEXT_PREVIEW} THEN length(${c}) END WHEN 'blob' THEN length(${c}) END`
   return [value, length]
@@ -133,7 +145,8 @@ function whereClause(t: GridTable, filters: GridFilter[]): Stmt {
   const parts: string[] = []
   const args: InValue[] = []
   for (const f of filters) {
-    const c = quoteIdent(column(t, f.column).name)
+    const col = column(t, f.column)
+    const c = quoteIdent(col.name)
     switch (f.op) {
       case "is null":
         parts.push(`${c} IS NULL`)
@@ -147,7 +160,7 @@ function whereClause(t: GridTable, filters: GridFilter[]): Stmt {
         break
       default:
         parts.push(`${c} ${f.op} ?`)
-        args.push(f.value ?? "")
+        args.push(paramFor(col, f.value ?? ""))
     }
   }
   return { sql: parts.length ? ` WHERE ${parts.join(" AND ")}` : "", args }
@@ -193,8 +206,9 @@ function keyWhere(t: GridTable, key: RowKey): Stmt {
   writable(t)
   const exprs = identityExprs(t)
   if (key.length !== exprs.length) throw new GridError("That row key doesn't match the table.")
+  // `=`, not IS: a NULL key matches no row rather than every NULL row.
   const args = key.map(decodeKey)
-  return { sql: ` WHERE ${exprs.map((e) => `${e} IS ?`).join(" AND ")}`, args }
+  return { sql: ` WHERE ${exprs.map((e) => `${e} = ?`).join(" AND ")}`, args }
 }
 
 const INT = /^[+-]?\d+$/
@@ -210,9 +224,10 @@ const INT64_MAX = 2n ** 63n - 1n
 export function paramFor(c: GridColumn, text: string | null): InValue {
   if (text === null) return null
   if (c.type.trim() !== "" && c.type.toUpperCase() !== "ANY") return text
+  // Only canonical digits become a number, so '007' and '+7' stay text.
   if (INT.test(text)) {
     const n = BigInt(text)
-    if (n >= INT64_MIN && n <= INT64_MAX) return n
+    if (n >= INT64_MIN && n <= INT64_MAX && String(n) === text) return n
   }
   if (REAL.test(text) && /[.eE]/.test(text)) return Number(text)
   return text

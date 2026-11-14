@@ -54,7 +54,7 @@ export function AppShell({ viewer, databases, children }: { viewer: Viewer; data
       <div className="flex min-h-svh">
         <aside
           data-sidebar-rail=""
-          className="sticky top-0 hidden h-svh w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-out-quad md:flex sidebar-collapsed:w-[53px] motion-reduce:transition-none"
+          className="sticky top-0 hidden h-svh w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex sidebar-collapsed:w-[53px]"
         >
           <SidebarBody viewer={viewer} databases={databases} rail={collapsed} />
         </aside>
@@ -94,8 +94,8 @@ function SidebarBody({ viewer, databases, rail = false, onNavigate }: { viewer: 
       <ScrollArea className="min-h-0 flex-1" viewportClassName="px-2 pb-4">
         <nav aria-label="Main" className="flex flex-col gap-5">
           <NavGroup label="Databases">
-            {databases === null && <p className="px-2 text-xs text-faint sidebar-collapsed:hidden">Can't load databases</p>}
-            {databases?.length === 0 && <p className="px-2 text-xs text-faint sidebar-collapsed:hidden">None yet</p>}
+            {databases === null && <p className="px-2 text-xs text-muted-foreground sidebar-collapsed:hidden">Can't load databases</p>}
+            {databases?.length === 0 && <p className="px-2 text-xs text-muted-foreground sidebar-collapsed:hidden">None yet</p>}
             {databases?.map((d) => (
               <NavItem key={d.id} to="/db/$db" params={{ db: d.name }} label={d.name} icon={<DatabaseIcon />} rail={rail} onNavigate={onNavigate} />
             ))}
@@ -119,7 +119,7 @@ function SidebarBody({ viewer, databases, rail = false, onNavigate }: { viewer: 
 function NavGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <h2 className="flex h-7 items-center px-2 text-xs font-[510] text-faint sidebar-collapsed:sr-only">{label}</h2>
+      <h2 className="flex h-7 items-center px-2 text-xs font-[510] text-muted-foreground sidebar-collapsed:sr-only">{label}</h2>
       {children}
     </div>
   )
@@ -148,10 +148,15 @@ function UserMenu({ viewer }: { viewer: Viewer }) {
   useEffect(() => setTheme(readTheme()), [])
 
   async function signOut() {
+    let message = ""
     try {
-      await authClient().signOut()
+      const { error } = await authClient().signOut()
+      if (error) message = error.message || error.statusText || "Try again."
     } catch (e) {
-      toast.error({ title: "Couldn't sign out", description: e instanceof Error ? e.message : String(e) })
+      message = e instanceof Error ? e.message : String(e)
+    }
+    if (message) {
+      toast.error({ title: "Couldn't sign out", description: message })
       return
     }
     forgetSession()
@@ -202,7 +207,7 @@ function UserMenu({ viewer }: { viewer: Viewer }) {
 export function PageHeader({ children, actions }: { children: ReactNode; actions?: ReactNode }) {
   const { drawer, collapsed, toggleCollapsed } = useShell()
   return (
-    <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 bg-background/85 px-4 backdrop-blur-md md:px-6">
+    <header className="sticky top-0 z-20 flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 bg-background/85 pt-[env(safe-area-inset-top)] pr-[max(1rem,env(safe-area-inset-right))] pl-[max(1rem,env(safe-area-inset-left))] backdrop-blur-md md:px-6">
       <DrawerTrigger controller={drawer} aria-label="Open navigation" className={buttonVariants({ variant: "ghost", size: "icon-sm", className: "-ml-1.5 md:hidden" })}>
         <MenuIcon aria-hidden="true" />
       </DrawerTrigger>
@@ -220,7 +225,9 @@ export function PageTitle({ children }: { children: ReactNode }) {
   return <h1 className="truncate text-[13px] font-[590]">{children}</h1>
 }
 
-// One content width per page; wide pages (grids, editors) take the full width.
-export function PageBody({ children, wide, className }: { children: ReactNode; wide?: boolean; className?: string }) {
-  return <main className={cn("mx-auto w-full flex-1 px-4 py-6 md:px-8 md:py-8", wide ? "max-w-none" : "max-w-6xl", className)}>{children}</main>
+// One content width for the tab row and every page body, so left edges line up.
+export const CONTAINER = "mx-auto w-full max-w-6xl px-4 md:px-6"
+
+export function PageBody({ children, className }: { children: ReactNode; className?: string }) {
+  return <main className={cn(CONTAINER, "flex-1 py-6 md:py-8", className)}>{children}</main>
 }

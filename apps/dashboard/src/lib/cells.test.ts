@@ -38,6 +38,15 @@ test("encodePreview trusts the engine's length", () => {
   expect(encodePreview(7n, null)).toEqual({ t: "int", v: "7" })
 })
 
+test("encodePreview without a length still knows a cut value was cut", () => {
+  const long = encodePreview("x".repeat(TEXT_PREVIEW + 1), "unknown")
+  expect(long).toMatchObject({ t: "text", len: null, cut: true })
+  expect(long.t === "text" && long.v.length).toBe(TEXT_PREVIEW)
+  expect(encodePreview("x".repeat(TEXT_PREVIEW), "unknown")).toMatchObject({ len: TEXT_PREVIEW, cut: false })
+  expect(encodePreview(new Uint8Array(17), "unknown")).toMatchObject({ t: "blob", size: null })
+  expect(encodePreview(new Uint8Array(16), "unknown")).toMatchObject({ t: "blob", size: 16 })
+})
+
 test("keys round-trip exactly", () => {
   for (const v of [null, -9223372036854775808n, 0.1, "a\"b", new Uint8Array([0, 255])]) {
     expect(decodeKey(encodeKey(v))).toEqual(v)

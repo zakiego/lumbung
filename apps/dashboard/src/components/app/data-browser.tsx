@@ -1,5 +1,5 @@
 import { EyeIcon, FilterIcon, LockIcon, PlusIcon, TableIcon, Trash2Icon, XIcon } from "lucide-react"
-import { type FormEvent, useEffect, useMemo, useState } from "react"
+import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react"
 import { TypedConfirm } from "@/components/ui/alert-dialog"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Switch } from "@/components/ui/checkbox"
@@ -15,8 +15,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { Tooltip } from "@/components/ui/tooltip"
 import type { BrowseResult, FullCell, GridObject } from "@/fns/data"
-import { type Cell, type RowKey, keyId } from "@/lib/cells"
-import { formatBytes, number } from "@/lib/format"
+import { type Cell, type RowKey, blobSizeText, keyId } from "@/lib/cells"
+import { number } from "@/lib/format"
 import type { GridSort } from "@/components/ui/data-grid"
 import { FILTER_OPS, FILTER_VALUE_MAX, type FilterOp, type GridFilter } from "@/server/grid"
 import { TableGrid } from "./table-grid"
@@ -41,6 +41,8 @@ type BrowserProps = {
   onQueryChange: (next: Partial<BrowseQuery>) => void
   actions: DataActions
   busy?: boolean
+  /** The next step when there are no tables, like a link to the SQL tab. */
+  emptyAction?: ReactNode
 }
 
 const OP_LABEL: Record<FilterOp, string> = {
@@ -57,7 +59,7 @@ const OP_LABEL: Record<FilterOp, string> = {
 
 const needsValue = (op: FilterOp) => op !== "is null" && op !== "is not null"
 
-export function DataBrowser({ result, query, onQueryChange, actions, busy }: BrowserProps) {
+export function DataBrowser({ result, query, onQueryChange, actions, busy, emptyAction }: BrowserProps) {
   const { table, rows, total, page, pageSize, objects } = result
   const [selected, setSelected] = useState<string[]>([])
   const [open, setOpen] = useState<{ row: string; col: number } | null>(null)
@@ -66,7 +68,12 @@ export function DataBrowser({ result, query, onQueryChange, actions, busy }: Bro
   const byId = useMemo(() => new Map(keyed.map((r) => [r.id, r])), [keyed])
   useEffect(() => setSelected([]), [keyed])
 
-  if (!objects.length) return <Empty icon={<TableIcon />} title="No tables yet" description="Create one in the SQL tab." />
+  if (!objects.length)
+    return (
+      <Empty icon={<TableIcon />} title="No tables yet">
+        {emptyAction}
+      </Empty>
+    )
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const editable = !!table?.editable
@@ -81,12 +88,14 @@ export function DataBrowser({ result, query, onQueryChange, actions, busy }: Bro
         <TablePicker objects={objects} value={table?.name ?? query.table ?? ""} onChange={(name) => onQueryChange({ table: name, page: 1, sort: null, filters: [] })} />
         {table && <FilterBar columns={table.columns.map((c) => c.name)} filters={query.filters} onChange={(filters) => onQueryChange({ filters, page: 1 })} />}
         <div className="ml-auto flex items-center gap-2">
-          {table?.readOnly && (
+          {table?.readOnly ? (
             <Tooltip content={table.readOnly}>
               <span tabIndex={0} aria-label={`Read-only. ${table.readOnly}`} className="inline-flex rounded-sm">
                 <StatusText icon={<LockIcon aria-hidden="true" />}>Read-only</StatusText>
               </span>
             </Tooltip>
+          ) : (
+            table && !editable && <StatusText icon={<LockIcon aria-hidden="true" />}>Read-only</StatusText>
           )}
           {editable && selected.length > 0 && (
             <TypedConfirm
@@ -225,7 +234,7 @@ export function FilterBar({ columns, filters, onChange }: { columns: string[]; f
         return (
           <span key={`${i}:${text}`} className="inline-flex h-7 max-w-64 items-center gap-1 rounded-md border bg-secondary pr-0.5 pl-2 font-mono text-xs">
             <span className="truncate" title={text}>
-              {f.column} <span className="text-muted-foreground">{OP_LABEL[f.op]}</span> {needsValue(f.op) && (f.value === "" ? <span className="text-faint">''</span> : f.value)}
+              {f.column} <span className="text-muted-foreground">{OP_LABEL[f.op]}</span> {needsValue(f.op) && (f.value === "" ? <span className="text-muted-foreground">''</span> : f.value)}
             </span>
             <Button variant="ghost" size="icon-sm" className="size-6" aria-label={`Remove filter ${text}`} onClick={() => onChange(filters.filter((_, j) => j !== i))}>
               <XIcon className="size-3.5" />
@@ -304,7 +313,8 @@ type CellDialogProps = {
 
 export function CellDialog({ column, type, cell, editable, load, onSave, onClose }: CellDialogProps) {
   const cut = cell.t === "text" && cell.cut
-  const canEdit = editable && cell.t !== "blob"
+  // A cut value that can't be read in full would save as its prefix.
+  const canEdit = editable && cell.t !== "blob" && !(cut && !load)
   const [text, setText] = useState(cell.t === "null" || cell.t === "blob" ? "" : cell.v)
   const [isNull, setNull] = useState(cell.t === "null")
   const [loading, setLoading] = useState(cut && !!load)
@@ -365,23 +375,23 @@ export function CellDialog({ column, type, cell, editable, load, onSave, onClose
           <span className="truncate font-mono" title={column}>
             {column}
           </span>
-          {type && <span className="shrink-0 font-mono text-[11px] font-normal text-faint uppercase">{type}</span>}
+          {type && <span className="shrink-0 font-mono text-[11px] font-normal text-muted-foreground uppercase">{type}</span>}
         </DialogTitle>
         {cell.t === "blob" ? (
           <div className="flex flex-col gap-2 text-[13px]">
-            <p className="tabular-nums">{formatBytes(cell.size)}</p>
-            {cell.hex && <code className="rounded-md border bg-code px-2 py-1.5 font-mono text-xs break-all text-muted-foreground">{cell.hex.replace(/(..)/g, "$1 ").trim()}{cell.size > cell.hex.length / 2 && " …"}</code>}
+            <p className="tabular-nums">{blobSizeText(cell.size)}</p>
+            {cell.hex && <code className="rounded-md border bg-code px-2 py-1.5 font-mono text-xs break-all text-muted-foreground">{cell.hex.replace(/(..)/g, "$1 ").trim()}{(cell.size ?? Number.POSITIVE_INFINITY) > cell.hex.length / 2 && " …"}</code>}
             <p className="text-muted-foreground">Blobs can't be edited here.</p>
           </div>
         ) : (
           <form onSubmit={save} className="flex flex-col gap-3">
-            <Field invalid={error ? true : undefined}>
-              <FieldLabel className="sr-only">Value</FieldLabel>
-              {loading ? (
-                <div className="flex h-40 items-center justify-center rounded-md border text-faint" aria-busy="true">
-                  <Spinner />
-                </div>
-              ) : (
+            {loading ? (
+              <div className="flex h-40 items-center justify-center rounded-md border text-faint" aria-busy="true">
+                <Spinner />
+              </div>
+            ) : canEdit ? (
+              <Field invalid={error ? true : undefined}>
+                <FieldLabel className="sr-only">Value</FieldLabel>
                 <Textarea
                   value={isNull ? "" : text}
                   onValueChange={(v) => {
@@ -392,15 +402,30 @@ export function CellDialog({ column, type, cell, editable, load, onSave, onClose
                   disabled={isNull}
                   placeholder={isNull ? "NULL" : undefined}
                   spellCheck={false}
-                  className="max-h-[50svh] min-h-40 resize-y font-mono text-[13px] leading-relaxed"
+                  className="max-h-[50svh] min-h-40 resize-y font-mono text-base leading-relaxed md:text-[13px]"
                 />
-              )}
-              <FieldError match={!!error}>{error}</FieldError>
-            </Field>
-            {loadError && <p className="text-xs text-destructive">{loadError}</p>}
+                <FieldError match={!!error}>{error}</FieldError>
+              </Field>
+            ) : isNull ? (
+              <p className="font-mono text-[13px] text-muted-foreground">NULL</p>
+            ) : (
+              <pre
+                tabIndex={0}
+                aria-label="Value"
+                className="max-h-[50svh] overflow-auto rounded-md border bg-code px-2.5 py-1.5 font-mono text-[13px] leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]"
+              >
+                {text}
+              </pre>
+            )}
+            {loadError && (
+              <p role="alert" className="text-xs text-destructive">
+                {loadError}
+              </p>
+            )}
             {cut && !load && cell.t === "text" && (
               <p className="text-xs text-muted-foreground tabular-nums">
-                First {number.format(cell.v.length)} of {number.format(cell.len)} characters
+                First {number.format([...cell.v].length)}
+                {cell.len !== null && ` of ${number.format(cell.len)}`} characters
               </p>
             )}
             {canEdit && (
@@ -477,7 +502,7 @@ export function InsertRowDialog({ table, onInsert }: { table: InsertTable; onIns
                   <span className="truncate font-mono" title={c.name}>
                     {c.name}
                   </span>
-                  {c.type && <span className="shrink-0 font-mono text-[10.5px] font-normal text-faint uppercase">{c.type}</span>}
+                  {c.type && <span className="shrink-0 font-mono text-[10.5px] font-normal text-muted-foreground uppercase">{c.type}</span>}
                 </FieldLabel>
                 <Input
                   value={values[c.name] ?? ""}
@@ -490,7 +515,11 @@ export function InsertRowDialog({ table, onInsert }: { table: InsertTable; onIns
               </Field>
             ))}
           </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && (
+            <p role="alert" className="text-xs text-destructive">
+              {error}
+            </p>
+          )}
           <DialogFooter className="sticky bottom-0 -mx-5 -mb-5 border-t bg-background px-5 py-3">
             <Button type="submit" disabled={pending}>
               {pending ? "Inserting…" : "Insert"}

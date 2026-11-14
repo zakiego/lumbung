@@ -89,6 +89,56 @@ describe("import", () => {
     expect(client.import).toHaveBeenLastCalledWith("shop", "dev", new Uint8Array([1, 2, 3]), { format: "db", mode: "empty" })
   })
 
+  test("runs one import at a time", async () => {
+    let finish!: () => void
+    const gate = new Promise<void>((r) => (finish = r))
+    const { d, client } = deps("member", {
+      import: vi.fn(async () => {
+        await gate
+        return { name: "main" } as never
+      }),
+    })
+    const first = importRoute(upload(ok), d)
+    await vi.waitFor(() => expect(client.import).toHaveBeenCalledTimes(1))
+    const busy = await importRoute(upload(ok), d)
+    expect(busy.status).toBe(429)
+    expect((await busy.json()).error).toBe("Another import is running. Try again soon.")
+    finish()
+    expect((await first).status).toBe(200)
+    expect((await importRoute(upload(ok), d)).status).toBe(200)
+  })
+
+  test("a stalled upload times out with 408 and frees the lock", async () => {
+    const { d, client } = deps("member")
+    const stalled = new ReadableStream({
+      start(c) {
+        c.enqueue(new Uint8Array(10))
+      },
+    })
+    const req = new Request(`${ORIGIN}/app/api/import?${ok}`, { method: "POST", body: stalled, duplex: "half", headers: { origin: ORIGIN } } as RequestInit)
+    const res = await importRoute(req, d, 1000, 20)
+    expect(res.status).toBe(408)
+    expect((await res.json()).error).toBe("The upload stalled. Try again.")
+    expect(client.import).not.toHaveBeenCalled()
+    expect((await importRoute(upload(ok), d)).status).toBe(200)
+  })
+
+  test("an upload the client cut off is a 400, not an engine error", async () => {
+    const { d, client } = deps("member")
+    const broken = new ReadableStream({
+      start(c) {
+        c.enqueue(new Uint8Array(10))
+        c.error(new Error("aborted"))
+      },
+    })
+    const req = new Request(`${ORIGIN}/app/api/import?${ok}`, { method: "POST", body: broken, duplex: "half", headers: { origin: ORIGIN } } as RequestInit)
+    const res = await importRoute(req, d)
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe("The upload was cut off. Try again.")
+    expect(client.import).not.toHaveBeenCalled()
+    expect((await importRoute(upload(ok), d)).status).toBe(200)
+  })
+
   test("shows the engine's error with its status", async () => {
     const { d } = deps("owner", {
       import: vi.fn(async () => {

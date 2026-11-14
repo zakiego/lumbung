@@ -4,10 +4,11 @@ import type { ReactNode } from "react"
 import { BranchMap } from "@/components/app/branch-map"
 import { Connect } from "@/components/app/connect"
 import { DbFrame, useDb } from "@/components/app/db-frame"
-import { CreateBranchDialog } from "@/components/app/name-dialog"
+import { NewBranchDialog } from "@/components/app/branches"
 import { RequestsChart } from "@/components/app/requests-chart"
 import { Card, CardContent, CardHeader, CardTitle, Skeleton, StatusText } from "@/components/ui/surface"
 import { toast } from "@/components/ui/toast"
+import { Tooltip } from "@/components/ui/tooltip"
 import { listSnapshots } from "@/fns/admin"
 import { createBranch, getConnectInfo, getSchema, getStats } from "@/fns/databases"
 import { formatBytes, number, timeAgo } from "@/lib/format"
@@ -48,15 +49,15 @@ function OverviewPage() {
   const router = useRouter()
   const current = branches.find((b) => b.name === branch)
 
-  async function newBranch(name: string) {
-    await createBranch({ data: { db: database.name, name, from: branch } })
-    toast.success(`Created ${name}`)
+  async function newBranch(b: { name: string; from: string; expiresInDays?: number }) {
+    await createBranch({ data: { db: database.name, ...b } })
+    toast.success(`Created ${b.name}`)
     await router.invalidate()
-    await router.navigate({ to: "/db/$db", params: { db: database.name }, search: { branch: name } })
+    await router.navigate({ to: "/db/$db", params: { db: database.name }, search: { branch: b.name } })
   }
 
   return (
-    <DbFrame section="overview" actions={can(viewer.role, "write") && <CreateBranchDialog from={branch} onCreate={newBranch} />}>
+    <DbFrame section="overview" actions={can(viewer.role, "write") && <NewBranchDialog branches={branches} from={branch} onCreate={newBranch} />}>
       <div className="flex flex-col gap-8">
         <BranchMap db={database.name} branches={branches} current={branch} defaultBranch={database.default_branch} />
 
@@ -122,9 +123,11 @@ function Deferred<T>({ promise, children }: { promise: Promise<Settled<T>>; chil
         r.ok ? (
           children(r.value)
         ) : (
-          <span title={r.error} className="text-base text-muted-foreground">
-            -
-          </span>
+          <Tooltip content={r.error}>
+            <span tabIndex={0} className="inline-flex rounded-sm">
+              <StatusText icon={<CircleAlertIcon aria-hidden="true" />}>Couldn't load</StatusText>
+            </span>
+          </Tooltip>
         )
       }
     </Await>

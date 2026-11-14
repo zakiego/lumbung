@@ -67,7 +67,7 @@ export function BranchMap({ db, branches, current, defaultBranch }: { db: string
               {b.default && <Badge>default</Badge>}
               {b.protected && (
                 <>
-                  <LockIcon aria-hidden="true" className="size-3.5 shrink-0 text-faint" />
+                  <LockIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="sr-only">Protected</span>
                 </>
               )}

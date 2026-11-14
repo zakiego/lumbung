@@ -21,10 +21,11 @@ import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@/components/
 import { NumberInput } from "@/components/ui/number-input"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { Badge, Empty, StatusText, Table, TableCell, TableHead, TableRow } from "@/components/ui/surface"
+import { TruncatedTip } from "@/components/ui/tooltip"
 import { formatBytes, formatDate, timeAgo, timeLeft } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { CodeBlock } from "./connect"
-import { FormDialog } from "./form-dialog"
+import { Confirm, FormDialog } from "./form-dialog"
 import { NAME_PATTERN } from "./name-dialog"
 
 export function parentName(branch: BranchOut, branches: BranchOut[]): string | undefined {
@@ -50,28 +51,35 @@ export function BranchTable({ db, branches, current }: { db: string; branches: B
           return (
             <TableRow key={b.id} className={cn("relative", b.name === current && "bg-accent/40")}>
               <TableCell className="w-1/2 max-w-0">
-                <Link
-                  to="/db/$db/branches"
-                  params={{ db }}
-                  search={{ branch: b.name === defaultBranch ? undefined : b.name }}
-                  aria-current={b.name === current ? "true" : undefined}
-                  title={b.name}
-                  className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0"
-                >
-                  <span className="truncate">{b.name}</span>
-                  {b.default && <Badge className="font-sans">default</Badge>}
-                  {b.protected && (
-                    <>
-                      <LockIcon aria-hidden="true" className="size-3.5 shrink-0 text-faint" />
-                      <span className="sr-only">Protected</span>
-                    </>
-                  )}
-                </Link>
+                <TruncatedTip text={b.name}>
+                  <Link
+                    to="/db/$db/branches"
+                    params={{ db }}
+                    search={{ branch: b.name === defaultBranch ? undefined : b.name }}
+                    aria-current={b.name === current ? "true" : undefined}
+                    className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0"
+                  >
+                    <span data-truncate className="truncate">
+                      {b.name}
+                    </span>
+                    {b.default && <Badge className="font-sans">default</Badge>}
+                    {b.protected && (
+                      <>
+                        <LockIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="sr-only">Protected</span>
+                      </>
+                    )}
+                  </Link>
+                </TruncatedTip>
               </TableCell>
               <TableCell className="hidden max-w-0 w-1/4 md:table-cell">
-                <span className="block truncate font-mono text-muted-foreground" title={parent}>
-                  {parent ?? "-"}
-                </span>
+                {parent ? (
+                  <TruncatedTip text={parent}>
+                    <span className="block truncate font-mono text-muted-foreground">{parent}</span>
+                  </TruncatedTip>
+                ) : (
+                  <span className="text-muted-foreground">-</span>
+                )}
               </TableCell>
               <TableCell className="text-right whitespace-nowrap text-muted-foreground tabular-nums">{formatBytes(b.size_bytes)}</TableCell>
               <TableCell className="hidden text-right whitespace-nowrap sm:table-cell">
@@ -202,7 +210,6 @@ export function ExpiryDialog({ branch, expiresAt, onSave }: { branch: string; ex
       <Field>
         <FieldLabel>Delete after (days)</FieldLabel>
         <NumberInput value={days} onValueChange={setDays} min={0} max={3650} placeholder="Keep" />
-        <FieldDescription>Empty or 0 keeps it.</FieldDescription>
       </Field>
     </FormDialog>
   )
@@ -211,7 +218,7 @@ export function ExpiryDialog({ branch, expiresAt, onSave }: { branch: string; ex
 export function ProtectSwitch({ branch, disabled, onChange }: { branch: BranchOut; disabled?: boolean; onChange: (protect: boolean) => Promise<unknown> }) {
   const [pending, setPending] = useState(false)
   return (
-    <Field className="flex-row items-center gap-2">
+    <Field className="flex-row flex-wrap items-center gap-x-2 gap-y-1">
       <Switch
         checked={branch.protected}
         disabled={disabled || pending}
@@ -223,26 +230,27 @@ export function ProtectSwitch({ branch, disabled, onChange }: { branch: BranchOu
         }}
       />
       <FieldLabel>Protected</FieldLabel>
+      {branch.default && <FieldDescription className="w-full sm:w-auto">Default branch is always protected</FieldDescription>}
     </Field>
   )
 }
 
 export function PromoteBranch({ branch, onPromote }: { branch: string; onPromote: () => Promise<unknown> }) {
   return (
-    <TypedConfirm
+    <Confirm
       trigger={
         <>
           <ArrowUpFromLineIcon aria-hidden="true" />
           Promote
         </>
       }
-      triggerClassName={buttonVariants({ variant: "secondary" })}
+      triggerStyle={{ variant: "secondary" }}
       title={`Make ${branch} the default?`}
       description="Apps without a branch will use it. The old default stays."
-      confirmText={branch}
       actionLabel="Make default"
       agentConfirm={`Makes ${branch} the default branch`}
       onConfirm={onPromote}
+      tone="default"
     />
   )
 }
@@ -376,7 +384,7 @@ function DdlSide({ title, ddl }: { title: string; ddl: string[] }) {
     <div className="flex min-w-0 flex-col gap-1.5">
       <span className="truncate font-mono text-xs text-muted-foreground">{title}</span>
       {ddl.length === 0 ? (
-        <p className="text-xs text-faint">No tables</p>
+        <p className="text-xs text-muted-foreground">No tables</p>
       ) : (
         <CodeBlock code={ddl.map((s) => (s.trimEnd().endsWith(";") ? s : `${s};`)).join("\n\n")} copyLabel={`Copy ${title} DDL`} />
       )}

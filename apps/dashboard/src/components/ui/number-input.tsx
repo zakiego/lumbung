@@ -21,7 +21,7 @@ export function NumberInput({ className, placeholder, "aria-label": ariaLabel, .
         <NumberInputControl
           aria-label={ariaLabel}
           placeholder={placeholder}
-          className="h-full w-full min-w-0 bg-transparent px-2.5 text-base text-foreground tabular-nums caret-brand outline-none placeholder:text-faint md:text-[13px]"
+          className="h-full w-full min-w-0 bg-transparent px-2.5 text-base text-foreground tabular-nums caret-brand outline-none placeholder:text-muted-foreground md:text-[13px]"
         />
       </NumberInputGroup>
     </NumberInputPart>

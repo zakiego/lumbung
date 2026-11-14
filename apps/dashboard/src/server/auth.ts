@@ -2,12 +2,13 @@
 // passkeys, with a role on each user. Nobody signs up through the API. The
 // owner comes from first-run setup and everyone else from an invite, both of
 // which create the user on the server (see users.ts).
+import { type BlockList, isIP } from "node:net"
 import { passkey } from "@better-auth/passkey"
 import { betterAuth } from "better-auth"
 import { getMigrations } from "better-auth/db/migration"
 import { tanstackStartCookies } from "better-auth/tanstack-start"
 import { AUTH_BASE } from "@/lib/paths"
-import { authSecretValue, config } from "./config"
+import { type DashboardConfig, authSecretValue, config } from "./config"
 import { getDb, migrateOwn } from "./db"
 
 export const COOKIE_PREFIX = "lumbung"
@@ -109,7 +110,7 @@ export function blockedAuthPath(request: Request): boolean {
   return !ALLOWED.some((re) => re.test(rest))
 }
 
-/** True for a write from another site. Better Auth checks origins too; this covers our own endpoints. */
+/** True for a write from another site. Better Auth, server functions and the transfer routes all use this one check. */
 export function crossOriginWrite(request: Request): boolean {
   if (request.method === "GET" || request.method === "HEAD" || request.method === "OPTIONS") return false
   if (request.headers.get("sec-fetch-site") === "cross-site") return true
@@ -117,19 +118,49 @@ export function crossOriginWrite(request: Request): boolean {
   return !!origin && origin !== config().publicUrl
 }
 
-/** The client address, from the proxy headers we trust, copied into one header Better Auth reads. */
-export function clientIp(headers: Headers): string {
-  return (
-    headers.get("cf-connecting-ip") ??
-    headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    headers.get("x-real-ip") ??
-    "local"
-  )
+/** The socket address, as the Node server (srvx) puts it on the request. Same source as Start's getRequestIP. */
+function socketAddress(request: Request): string | undefined {
+  const r = request as Request & { ip?: string; context?: { clientAddress?: string } }
+  return r.ip || r.context?.clientAddress || undefined
+}
+
+// An IPv4 client on a dual-stack socket shows up as ::ffff:a.b.c.d.
+function plainIp(value: string): string | null {
+  const v = value.trim()
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(v)?.[1]
+  if (mapped && isIP(mapped) === 4) return mapped
+  return isIP(v) ? v : null
+}
+
+function trusted(proxies: BlockList, ip: string | null): boolean {
+  if (!ip) return false
+  return proxies.check(ip, isIP(ip) === 4 ? "ipv4" : "ipv6")
+}
+
+type ClientIpSettings = Pick<DashboardConfig, "clientIpHeader" | "trustedProxies">
+
+/**
+ * The client address for rate limits, with the engine's rules: the socket
+ * address, unless the connection comes from a trusted proxy and the client IP
+ * header is set. A list (X-Forwarded-For) is read from the right, skipping
+ * trusted proxies, since the left end is whatever the client sent.
+ */
+export function clientIp(request: Request, settings: ClientIpSettings = config()): string {
+  const raw = socketAddress(request)
+  const host = (raw && plainIp(raw)) || raw || "local"
+  if (!settings.clientIpHeader || !trusted(settings.trustedProxies, plainIp(host))) return host
+  const parts = (request.headers.get(settings.clientIpHeader) ?? "").split(",")
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const ip = plainIp(parts[i]!)
+    if (!ip) return host
+    if (!trusted(settings.trustedProxies, ip)) return ip
+  }
+  return host
 }
 
 async function withClientIp(request: Request): Promise<Request> {
   const headers = new Headers(request.headers)
-  headers.set(CLIENT_IP_HEADER, clientIp(request.headers))
+  headers.set(CLIENT_IP_HEADER, clientIp(request))
   const hasBody = request.method !== "GET" && request.method !== "HEAD"
   return new Request(request.url, { method: request.method, headers, body: hasBody ? await request.arrayBuffer() : undefined })
 }
@@ -144,6 +175,6 @@ export async function handleAuth(request: Request): Promise<Response> {
 /** Headers for a server-side auth call made on behalf of the current request. */
 export function authHeaders(request: Request): Headers {
   const headers = new Headers(request.headers)
-  headers.set(CLIENT_IP_HEADER, clientIp(request.headers))
+  headers.set(CLIENT_IP_HEADER, clientIp(request))
   return headers
 }

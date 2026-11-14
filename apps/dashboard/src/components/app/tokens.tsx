@@ -53,7 +53,7 @@ export function TokenTable({ tokens, names, onRevoke }: { tokens: TokenOut[]; na
               </TableCell>
               <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">
                 <span className="inline-flex items-center gap-1">
-                  {t.access === "admin" && <ShieldIcon aria-hidden="true" className="size-3.5 text-faint" />}
+                  {t.access === "admin" && <ShieldIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />}
                   {ACCESS_LABEL[t.access]}
                 </span>
               </TableCell>

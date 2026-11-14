@@ -21,7 +21,7 @@ export function SelectTrigger({ className, children, ...props }: Omit<Styled<typ
   return (
     <SelectTriggerPart
       className={cn(
-        "inline-flex h-8 min-w-0 cursor-default items-center gap-1.5 rounded-md border border-input bg-transparent px-2.5 text-[13px] text-foreground transition-[background-color] duration-100 hover:bg-accent data-disabled:opacity-50 data-open:bg-accent data-placeholder:text-faint [&_svg]:size-4 [&_svg]:shrink-0",
+        "inline-flex h-8 min-w-0 cursor-default items-center gap-1.5 rounded-md border border-input bg-transparent px-2.5 text-[13px] text-foreground transition-[background-color] duration-100 hover:bg-accent data-disabled:opacity-50 data-open:bg-accent data-placeholder:text-muted-foreground [&_svg]:size-4 [&_svg]:shrink-0",
         className,
       )}
       {...props}

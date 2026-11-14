@@ -7,7 +7,8 @@ import {
   AlertDialogTitle as AlertDialogTitlePart,
   AlertDialogTrigger,
 } from "@ui-sdk/react/alert-dialog"
-import { useState, type ReactNode } from "react"
+import { mergeProps } from "@ui-sdk/react/primitive"
+import { type ReactNode, useRef, useState } from "react"
 import { type Styled, cn } from "@/lib/utils"
 import { buttonVariants } from "./button"
 import { backdrop, dialogSurface } from "./dialog"
@@ -53,6 +54,8 @@ type TypedConfirmProps = {
 
 export function TypedConfirm({ trigger, triggerClassName, title, description, confirmText, actionLabel, agentConfirm, onConfirm }: TypedConfirmProps) {
   const [typed, setTyped] = useState("")
+  const action = useRef<HTMLButtonElement>(null)
+  const ready = typed === confirmText
   return (
     <AlertDialog onOpenChange={(open) => !open && setTyped("")}>
       <AlertDialogTrigger className={triggerClassName ?? buttonVariants({ variant: "destructive" })}>{trigger}</AlertDialogTrigger>
@@ -63,19 +66,34 @@ export function TypedConfirm({ trigger, triggerClassName, title, description, co
           <FieldLabel>
             Type <span className="font-mono [overflow-wrap:anywhere]">{confirmText}</span> to confirm
           </FieldLabel>
-          <Input value={typed} onValueChange={setTyped} autoComplete="off" spellCheck={false} className="font-mono" />
+          <Input
+            value={typed}
+            onValueChange={setTyped}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.nativeEvent.isComposing || !ready) return
+              event.preventDefault()
+              action.current?.click()
+            }}
+            autoComplete="off"
+            spellCheck={false}
+            className="font-mono"
+          />
         </Field>
         <AlertDialogClose
           value="confirm"
           action={onConfirm}
           data-agent-confirm={agentConfirm}
-          disabled={typed !== confirmText}
+          disabled={!ready}
           render={(props, state) => (
             <div className="flex flex-col gap-3">
-              {state.error instanceof Error && <p className="text-xs text-destructive">{state.error.message}</p>}
+              {state.error instanceof Error && (
+                <p role="alert" className="text-xs text-destructive">
+                  {state.error.message}
+                </p>
+              )}
               <div className="flex justify-end gap-2">
                 <AlertDialogClose className={buttonVariants({ variant: "ghost" })}>Cancel</AlertDialogClose>
-                <button {...props} className={buttonVariants({ variant: "destructive" })}>
+                <button {...mergeProps(props, { ref: action })} className={buttonVariants({ variant: "destructive" })}>
                   {state.pending ? "Working…" : actionLabel}
                 </button>
               </div>
