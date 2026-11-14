@@ -14,6 +14,13 @@ import { type Viewer, viewerFromRequest } from "./session"
 /** A request to the engine's S3 API, with the service token as a bearer token. */
 export type S3Call = (method: string, path: string, query: Record<string, string>, init?: { body?: BodyInit | null; headers?: Record<string, string> }) => Promise<Response>
 
+const BUCKET_RE = /^(?:[a-z0-9][a-z0-9-]{1,61}[a-z0-9]|bk_[a-z0-9]{20})$/
+
+/** Whether a key has a "." or ".." segment, which URL parsers resolve away. */
+export function hasDotSegment(key: string): boolean {
+  return key.split("/").some((s) => s === "." || s === "..")
+}
+
 export type ObjectDeps = {
   viewer: (request: Request) => Promise<Viewer | null>
   engine: (viewer: Viewer) => Pick<Client, "bucket">
@@ -22,6 +29,12 @@ export type ObjectDeps = {
 
 const engineS3: S3Call = (method, path, query, init = {}) => {
   const url = `${config().engineUrl}${path}${Object.keys(query).length ? `?${new URLSearchParams(query)}` : ""}`
+  // The service token is an instance admin: the request must reach exactly
+  // the object path asked for, never another endpoint.
+  const expected = new URL(config().engineUrl).pathname.replace(/\/$/, "") + path
+  if (!path.startsWith("/v1/s3/") || new URL(url).pathname !== expected) {
+    return Promise.reject(new LumbungError("bad_request", 400, "That key can't be sent through the dashboard."))
+  }
   return fetch(url, {
     method,
     body: init.body,
@@ -33,18 +46,34 @@ const engineS3: S3Call = (method, path, query, init = {}) => {
 const defaults: ObjectDeps = { viewer: viewerFromRequest, engine: engineFor, s3: engineS3 }
 
 /**
- * The S3 path of an object. Dot segments are percent-encoded so nothing on
- * the way resolves them; the engine decodes them back into the key.
+ * The S3 path of an object. Callers check the bucket name and refuse keys
+ * with dot segments first: URL parsers resolve "." and ".." (and their
+ * percent-encoded forms), which would send the request somewhere else.
  */
 export function s3Path(bucket: string, key: string): string {
-  const segs = key.split("/").map((s) => (s === "." || s === ".." ? s.replace(/\./g, "%2E") : encodeURIComponent(s)))
-  return `/v1/s3/${encodeURIComponent(bucket)}/${segs.join("/")}`
+  if (!BUCKET_RE.test(bucket) || hasDotSegment(key)) throw new LumbungError("bad_request", 400, "That key can't be sent through the dashboard.")
+  return `/v1/s3/${bucket}/${key.split("/").map(encodeURIComponent).join("/")}`
+}
+
+function xmlText(s: string): string {
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
 }
 
 async function s3Failure(res: Response): Promise<Response> {
   const text = await res.text()
-  const message = text.match(/<Message>([^<]*)<\/Message>/)?.[1] ?? `HTTP ${res.status}`
+  const message = xmlText(text.match(/<Message>([^<]*)<\/Message>/)?.[1] ?? `HTTP ${res.status}`)
   return fail(res.status >= 400 && res.status < 600 ? res.status : 502, message)
+}
+
+/** The signed-in person, for the engine's audit log. */
+function actor(viewer: Viewer): Record<string, string> {
+  return { "x-lumbung-actor": `dashboard:${viewer.email}` }
 }
 
 function fail(status: number, message: string): Response {
@@ -68,8 +97,16 @@ function target(request: Request): { bucket: string; key: string } | null {
   const q = new URL(request.url).searchParams
   const bucket = q.get("bucket") ?? ""
   const key = q.get("key") ?? ""
-  if (!bucket || bucket.length > 100 || !key || new TextEncoder().encode(key).length > 1024) return null
+  if (!BUCKET_RE.test(bucket) || !key || new TextEncoder().encode(key).length > 1024) return null
   return { bucket, key }
+}
+
+/** A multipart target: a key the S3 path can carry as is. */
+function multipartTarget(request: Request): { bucket: string; key: string } | Response {
+  const t = target(request)
+  if (!t) return fail(400, "Pick a bucket and a key.")
+  if (hasDotSegment(t.key)) return fail(400, "A key with . or .. segments can't be uploaded in parts; upload it in one piece.")
+  return t
 }
 
 /**
@@ -88,10 +125,12 @@ export async function uploadObject(request: Request, deps: ObjectDeps = defaults
   if (uploadId !== null) {
     const part = q.get("partNumber") ?? ""
     if (!/^up_[a-z0-9]{20}$/.test(uploadId) || !/^[1-9][0-9]{0,4}$/.test(part)) return fail(400, "Pick an upload and a part number.")
+    const mt = multipartTarget(request)
+    if (mt instanceof Response) return mt
     try {
-      const res = await (deps.s3 ?? engineS3)("PUT", s3Path(t.bucket, t.key), { uploadId, partNumber: part }, {
+      const res = await (deps.s3 ?? engineS3)("PUT", s3Path(mt.bucket, mt.key), { uploadId, partNumber: part }, {
         body: request.body ?? "",
-        headers: { "content-length": String(length) },
+        headers: { "content-length": String(length), ...actor(viewer) },
       })
       if (!res.ok) return s3Failure(res)
       return Response.json({ etag: (res.headers.get("etag") ?? "").replace(/"/g, "") }, { headers: { "cache-control": "no-store" } })
@@ -152,14 +191,14 @@ export async function downloadObject(request: Request, deps: ObjectDeps = defaul
 export async function multipartObject(request: Request, deps: ObjectDeps = defaults): Promise<Response> {
   const viewer = await guard(request, "write", deps)
   if (viewer instanceof Response) return viewer
-  const t = target(request)
-  if (!t) return fail(400, "Pick a bucket and a key.")
+  const t = multipartTarget(request)
+  if (t instanceof Response) return t
   const q = new URL(request.url).searchParams
   const s3 = deps.s3 ?? engineS3
   try {
     if (q.has("uploads")) {
       const res = await s3("POST", s3Path(t.bucket, t.key), { uploads: "" }, {
-        headers: { "content-type": request.headers.get("x-object-content-type") || "application/octet-stream" },
+        headers: { "content-type": request.headers.get("x-object-content-type") || "application/octet-stream", ...actor(viewer) },
       })
       if (!res.ok) return s3Failure(res)
       const uploadId = (await res.text()).match(/<UploadId>([^<]+)<\/UploadId>/)?.[1]
@@ -173,13 +212,15 @@ export async function multipartObject(request: Request, deps: ObjectDeps = defau
     if (!Array.isArray(parts) || parts.length === 0 || parts.length > 10000) return fail(400, "List the uploaded parts.")
     const xml = parts
       .map((p) => {
-        if (!Number.isInteger(p.number) || typeof p.etag !== "string" || !/^[0-9a-f]{32}$/.test(p.etag)) throw new Error("bad part")
+        if (!p || typeof p !== "object" || !Number.isInteger(p.number) || p.number < 1 || p.number > 10000 || typeof p.etag !== "string" || !/^[0-9a-f]{32}$/.test(p.etag)) {
+          throw new Error("bad part")
+        }
         return `<Part><PartNumber>${p.number}</PartNumber><ETag>"${p.etag}"</ETag></Part>`
       })
       .join("")
     const res = await s3("POST", s3Path(t.bucket, t.key), { uploadId }, {
       body: `<CompleteMultipartUpload>${xml}</CompleteMultipartUpload>`,
-      headers: { "content-type": "application/xml" },
+      headers: { "content-type": "application/xml", ...actor(viewer) },
     })
     if (!res.ok) return s3Failure(res)
     const etag = (await res.text()).match(/<ETag>&#34;([^&<]+)&#34;<\/ETag>|<ETag>"?([^"<]+)"?<\/ETag>/)
@@ -194,11 +235,12 @@ export async function multipartObject(request: Request, deps: ObjectDeps = defau
 export async function abortUpload(request: Request, deps: ObjectDeps = defaults): Promise<Response> {
   const viewer = await guard(request, "write", deps)
   if (viewer instanceof Response) return viewer
-  const t = target(request)
+  const t = multipartTarget(request)
+  if (t instanceof Response) return t
   const uploadId = new URL(request.url).searchParams.get("uploadId") ?? ""
-  if (!t || !/^up_[a-z0-9]{20}$/.test(uploadId)) return fail(400, "Pick an upload.")
+  if (!/^up_[a-z0-9]{20}$/.test(uploadId)) return fail(400, "Pick an upload.")
   try {
-    const res = await (deps.s3 ?? engineS3)("DELETE", s3Path(t.bucket, t.key), { uploadId })
+    const res = await (deps.s3 ?? engineS3)("DELETE", s3Path(t.bucket, t.key), { uploadId }, { headers: actor(viewer) })
     if (!res.ok && res.status !== 404) return s3Failure(res)
     return new Response(null, { status: 204 })
   } catch (e) {

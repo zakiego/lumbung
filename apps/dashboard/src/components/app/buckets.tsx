@@ -109,7 +109,10 @@ export async function uploadFile(bucket: string, prefix: string, file: File, f: 
   const key = prefix + file.name
   const url = objectURL(bucket, key)
   const type = file.type || "application/octet-stream"
-  if (file.size <= PART_BYTES) {
+  // A key with a "." or ".." segment can't travel in an S3 path, so it goes
+  // up in one piece through the key-in-query route.
+  const dotted = key.split("/").some((s) => s === "." || s === "..")
+  if (file.size <= PART_BYTES || dotted) {
     return jsonOrThrow(await f(url, { method: "PUT", body: file, headers: { "content-type": type } }))
   }
   const { uploadId } = await jsonOrThrow<{ uploadId: string }>(await f(`${url}&uploads`, { method: "POST", headers: { "x-object-content-type": type } }))

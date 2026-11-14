@@ -126,10 +126,11 @@ describe("multipart", () => {
       if (method === "POST") return new Response(`<CompleteMultipartUploadResult><ETag>&#34;${"b".repeat(32)}-2&#34;</ETag></CompleteMultipartUploadResult>`)
       return new Response(null, { status: 204 })
     })
-    const key = "videos/../a b.mp4"
+    const key = "videos/2026 #1?/a b%.mp4"
     const start = await multipartObject(post(`bucket=photos&key=${encodeURIComponent(key)}&uploads`), d)
     expect(await start.json()).toEqual({ uploadId: UP })
-    expect(calls[0]!.path).toBe("/v1/s3/photos/videos/%2E%2E/a%20b.mp4")
+    expect(calls[0]!.path).toBe("/v1/s3/photos/videos/2026%20%231%3F/a%20b%25.mp4")
+    expect(calls[0]!.q).toEqual({ uploads: "" })
     const part = await uploadObject(put(`bucket=photos&key=${encodeURIComponent(key)}&uploadId=${UP}&partNumber=1`), d)
     expect(await part.json()).toEqual({ etag: "a".repeat(32) })
     expect(calls[1]!.q).toEqual({ uploadId: UP, partNumber: "1" })
@@ -160,5 +161,43 @@ describe("multipart", () => {
     const res = await multipartObject(post(`bucket=photos&key=a&uploadId=${UP}`, { parts: [{ number: 1, etag: "a".repeat(32) }] }), d)
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ error: "part 1 is too small" })
+  })
+})
+
+describe("multipart can't leave the object path", () => {
+  const UP = "up_aaaaaaaaaaaaaaaaaaaa"
+  test.each([
+    ["a bucket of ..", "bucket=..&key=tokens%2Ftok_x"],
+    ["a bucket with a slash", "bucket=..%2Fv1&key=x"],
+    ["a dot-dot key", "bucket=photos&key=..%2F..%2Ftokens%2Ftok_x"],
+    ["an encoded dot-dot key", "bucket=photos&key=%252E%252E%2F%252E%252E%2Ftokens"],
+    ["a dot key", "bucket=photos&key=a%2F.%2Fb"],
+  ])("refuses %s", async (_, q) => {
+    const calls: string[] = []
+    const d: ObjectDeps = {
+      ...deps("owner").d,
+      s3: async (_m, path) => {
+        calls.push(path)
+        return new Response(null, { status: 204 })
+      },
+    }
+    const del = await abortUpload(new Request(url(`${q}&uploadId=${UP}`), { method: "DELETE", headers: { origin: ORIGIN } }), d)
+    const start = await multipartObject(new Request(url(`${q}&uploads`), { method: "POST", headers: { origin: ORIGIN } }), d)
+    const part = await uploadObject(put(`${q}&uploadId=${UP}&partNumber=1`), d)
+    // An encoded %2E is a literal key here, not a dot segment: it may pass,
+    // but only as an object path under the bucket.
+    for (const p of calls) expect(p.startsWith("/v1/s3/photos/")).toBe(true)
+    if (!q.includes("%252E")) {
+      expect([del.status, start.status, part.status]).toEqual([400, 400, 400])
+      expect(calls).toHaveLength(0)
+    }
+  })
+
+  test("the engine call checks where the URL really goes", async () => {
+    const { s3Path } = await import("./objects")
+    expect(() => s3Path("..", "x")).toThrow()
+    expect(() => s3Path("photos", "a/../b")).toThrow()
+    expect(s3Path("photos", "%2E%2E/x")).toBe("/v1/s3/photos/%252E%252E/x")
+    expect(new URL("http://h" + s3Path("photos", "%2E%2E/x")).pathname).toBe("/v1/s3/photos/%252E%252E/x")
   })
 })
