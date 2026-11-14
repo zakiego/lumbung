@@ -68,7 +68,7 @@ Things to know:
 - A `"write"` or `"deferred"` transaction takes the branch's writer at its first statement. There's one writer per branch, so other writes (from this client, other clients, REST or MCP) wait until you commit or roll back. Reads don't wait.
 - A transaction open longer than `LUMBUNG_LIBSQL_TX_TIMEOUT` (60 s), or idle longer than `LUMBUNG_LIBSQL_STREAM_IDLE_TIMEOUT` (10 s), is rolled back. The next call fails with `invalid_baton`.
 - A `"read"` transaction, and any transaction from a read token, runs on a read-only connection.
-- If SQLite ends the transaction itself (the statement timeout, a full branch, or a result past the caps), later statements fail with `transaction_aborted` until you roll back, so nothing runs outside the transaction you think you have.
+- If the transaction ends without you asking (the transaction timeout, the statement timeout on a write, a full branch, or a write whose result passes the caps), later statements fail with `transaction_aborted` until you roll back, so nothing runs outside the transaction you think you have.
 
 ## Errors
 
@@ -116,7 +116,7 @@ await db.transaction(async (tx) => {
 })
 ```
 
-`migrate()` from `drizzle-orm/libsql/migrator` works as well. It turns foreign keys off for the migration, and Lumbung checks every foreign key once before committing, as with the REST `migration` batch option.
+`migrate()` from `drizzle-orm/libsql/migrator` works as well. It turns foreign keys off for the migration, and Lumbung checks every foreign key once before committing, as with the REST `migration` batch option. If you run a table rebuild yourself with `executeMultiple`, put it inside `BEGIN` and `COMMIT`: after `PRAGMA foreign_keys = OFF`, Lumbung refuses writes outside a transaction rather than let a `DROP TABLE` cascade.
 
 ## Branches and tokens
 

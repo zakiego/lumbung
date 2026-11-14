@@ -33,11 +33,11 @@ The Protobuf encoding (`v3-protobuf`) and the version 1 endpoints aren't served.
 | Request | Notes |
 |---|---|
 | `execute` | One statement, positional `args` or `named_args` (not both), `want_rows`. |
-| `batch` | Steps run in order. Conditions: `ok`, `error`, `not`, `and`, `or`, `is_autocommit`. A condition may only name an earlier step. At most 1000 steps. |
+| `batch` | Steps run in order. Conditions: `ok`, `error`, `not`, `and`, `or`, `is_autocommit`. A condition may only name an earlier step. Every condition is checked before any step runs. At most 1000 steps. |
 | `sequence` | Statements separated by semicolons, rows ignored, stops at the first error. |
 | `describe` | Parameters, columns, `is_explain` and `is_readonly`, without running the statement. |
 | `store_sql`, `close_sql` | At most 128 stored texts per stream, each within `LUMBUNG_MAX_SQL_BYTES`. |
-| `get_autocommit` | Whether a transaction is open on the stream. |
+| `get_autocommit` | False while a transaction is open, or while an ended one waits for `ROLLBACK`. |
 | `close` | Closes the stream and rolls back its open transaction. |
 
 A pipeline holds at most 1000 requests, and its body is capped by `LUMBUNG_MAX_REQUEST_BYTES`. Every request runs, even after an earlier one failed, as the protocol asks.
@@ -66,11 +66,11 @@ Any other form of transaction control (a named transaction, `BEGIN` inside a lon
 An open transaction ends:
 
 - at `COMMIT`, `ROLLBACK` or `close`;
-- when the stream goes idle, or the transaction passes `LUMBUNG_LIBSQL_TX_TIMEOUT` (60 s): it's rolled back and the next request gets `invalid_baton`;
-- when SQLite rolls it back after an error (the statement timeout, a full branch), or a statement fails with `result_too_large`: later statements get `transaction_aborted` until `ROLLBACK`;
+- when the stream goes idle: it's rolled back and the next request gets `invalid_baton`;
+- when it passes `LUMBUNG_LIBSQL_TX_TIMEOUT` (60 s), even in the middle of a statement, which is interrupted; when SQLite rolls it back after an error (the statement timeout, a full branch); or when a statement that changed rows fails with `result_too_large`: later statements get `transaction_aborted` until `ROLLBACK`. A read past the caps fails alone;
 - when the branch is reset, deleted or imported into, or the engine shuts down: it's rolled back first.
 
-`PRAGMA foreign_keys = OFF` outside a transaction applies to the next one, as the client's `migrate()` expects: foreign keys are off for it, and every foreign key is checked once before COMMIT. `PRAGMA foreign_keys = ON` clears it.
+`PRAGMA foreign_keys = OFF` outside a transaction applies to the next one, as the client's `migrate()` expects: foreign keys are off for it, and every foreign key is checked once before COMMIT. `PRAGMA foreign_keys = ON` clears it. While it's set, writes outside a transaction are refused with `bad_request`: wrap a table rebuild in `BEGIN` and `COMMIT`.
 
 ## Auth and limits
 
