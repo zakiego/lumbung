@@ -4,7 +4,23 @@ import { ArchiveIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { z } from "zod"
 import { BucketFrame } from "@/components/app/bucket-frame"
-import { DEFAULT_OBJECT_SORT, OBJECT_SORT_KEYS, defaultSortDir, type ObjectSort, ObjectSortMenu, ObjectTable, PublicBadge, UploadButton, sortSearch } from "@/components/app/buckets"
+import {
+  DEFAULT_OBJECT_SORT,
+  OBJECT_GROUP_KEYS,
+  OBJECT_SEARCH_ID,
+  OBJECT_SORT_KEYS,
+  defaultSortDir,
+  groupSearch,
+  type ObjectGroup,
+  ObjectGroupMenu,
+  ObjectSearch,
+  type ObjectSort,
+  ObjectSortMenu,
+  ObjectTable,
+  PublicBadge,
+  UploadButton,
+  sortSearch,
+} from "@/components/app/buckets"
 import { errorText } from "@/components/app/form-dialog"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -27,6 +43,9 @@ export const Route = createFileRoute("/_app/w/$ws/buckets/$bucket/")({
     // A bad sort in a hand-edited URL falls back to the default.
     sort: z.enum(OBJECT_SORT_KEYS).optional().catch(undefined),
     dir: z.enum(["asc", "desc"]).optional().catch(undefined),
+    // Search filters this folder by name. It stays in the URL so a link keeps it.
+    q: z.string().max(200).optional().catch(undefined),
+    group: z.enum(OBJECT_GROUP_KEYS).optional().catch(undefined),
   }),
   loaderDeps: ({ search }) => ({ prefix: search.prefix ?? "" }),
   // A new folder is a new page: no state, or a late "Load more", carries over.
@@ -62,7 +81,7 @@ function Frame({ children, actions }: { children: React.ReactNode; actions?: Rea
   const { bucket } = Route.useParams()
   const search = Route.useSearch()
   return (
-    <BucketFrame bucket={bucket} section="objects" prefix={search.prefix ?? ""} keep={{ sort: search.sort, dir: search.dir }} actions={actions}>
+    <BucketFrame bucket={bucket} section="objects" prefix={search.prefix ?? ""} keep={{ sort: search.sort, dir: search.dir, group: search.group }} actions={actions}>
       {children}
     </BucketFrame>
   )
@@ -76,8 +95,18 @@ function BucketPage() {
   const prefix = search.prefix ?? ""
   const sort: ObjectSort = { key: search.sort ?? DEFAULT_OBJECT_SORT.key, dir: search.dir ?? (search.sort ? defaultSortDir(search.sort) : DEFAULT_OBJECT_SORT.dir) }
   const navigate = useNavigate({ from: Route.fullPath })
+  const group: ObjectGroup = search.group ?? "none"
   const setSort = (next: ObjectSort) => {
-    void navigate({ search: (s) => ({ prefix: s.prefix, ...sortSearch(next) }), replace: true, resetScroll: false })
+    void navigate({ search: (s) => ({ ...s, sort: undefined, dir: undefined, ...sortSearch(next) }), replace: true, resetScroll: false })
+  }
+  const setGroup = (next: ObjectGroup) => {
+    void navigate({ search: (s) => ({ ...s, group: groupSearch(next).group }), replace: true, resetScroll: false })
+  }
+  // The field answers each key at once; the URL follows.
+  const [query, setQuery] = useState(search.q ?? "")
+  const changeQuery = (next: string) => {
+    setQuery(next)
+    void navigate({ search: (s) => ({ ...s, q: next.trim() ? next : undefined }), replace: true, resetScroll: false })
   }
   const router = useRouter()
   const canWrite = can(viewer.role, "write")
@@ -126,9 +155,15 @@ function BucketPage() {
           The bucket holds {number.format(page.bucket.object_count)} {page.bucket.object_count === 1 ? "object" : "objects"}, {formatBytes(page.bucket.size_bytes)}
         </span>
         {page.bucket.public_read && <PublicBadge />}
-        {/* Type and Modified are hidden on narrow screens, so their sort lives here. */}
-        {page.objects.length + page.prefixes.length > 0 && <ObjectSortMenu sort={sort} onSortChange={setSort} className="-mr-2 ml-auto md:hidden" />}
       </div>
+      {(page.objects.length + page.prefixes.length > 0 || query) && (
+        <div className="mb-3 flex items-center gap-1">
+          <ObjectSearch value={query} onValueChange={changeQuery} className="mr-auto min-w-0 flex-1 sm:max-w-xs" />
+          <ObjectGroupMenu group={group} onGroupChange={setGroup} className="md:-mr-2" />
+          {/* Type and Modified are hidden on narrow screens, so their sort lives here. */}
+          <ObjectSortMenu sort={sort} onSortChange={setSort} className="-mr-2 md:hidden" />
+        </div>
+      )}
       <ObjectTable
         bucket={name}
         prefix={prefix}
@@ -139,10 +174,17 @@ function BucketPage() {
         onDelete={remove}
         sort={sort}
         onSortChange={setSort}
+        query={query}
+        onQueryClear={() => {
+          changeQuery("")
+          // The button goes away with the empty state, so focus returns to the field.
+          document.getElementById(OBJECT_SEARCH_ID)?.focus()
+        }}
+        group={group}
         footer={
           more.cursor && (
             <div className="mt-4 flex flex-col items-center gap-2">
-              {sort.key !== "name" && <p className="text-xs text-muted-foreground">Sorted within loaded items</p>}
+              {(query.trim() || sort.key !== "name" || group !== "none") && <p className="text-xs text-muted-foreground">{query.trim() ? "Searching loaded items" : "Sorted within loaded items"}</p>}
               <Button variant="secondary" onClick={loadMore} disabled={loading}>
                 {loading ? "Loading…" : "Load more"}
               </Button>

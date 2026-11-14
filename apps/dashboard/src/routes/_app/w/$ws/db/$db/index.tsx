@@ -1,10 +1,10 @@
-import { Await, Link, createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
+import { Link, createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { BranchMap } from "@/components/app/branch-map"
 import { SnippetTabs } from "@/components/app/connect"
 import { DbFrame, useDb } from "@/components/app/db-frame"
 import { NewBranchDialog } from "@/components/app/branches"
 import { RequestsChart } from "@/components/app/requests-chart"
-import { ChartFailed, Deferred, Stat, StatGrid, WindowSelect } from "@/components/app/stats"
+import { AwaitLatest, ChartFailed, Deferred, Stat, StatGrid, WindowSelect } from "@/components/app/stats"
 import { Card, CardContent, CardHeader, CardTitle, Skeleton } from "@/components/ui/surface"
 import { toast } from "@/components/ui/toast"
 import { listSnapshots } from "@/fns/admin"
@@ -94,9 +94,9 @@ function OverviewPage() {
               <WindowSelect value={range} onChange={(w) => navigate({ search: (prev) => ({ ...prev, window: w === DEFAULT_WINDOW ? undefined : w }), replace: true })} />
             </CardHeader>
             <CardContent>
-              <Await promise={stats} fallback={<Skeleton className="h-60" />}>
+              <AwaitLatest promise={stats} fallback={<Skeleton className="h-60" />} dim>
                 {(r) => (r.ok ? <RequestsChart series={r.value.series} label={`Requests on ${branch}, ${WINDOW_LABEL[range].toLowerCase()}`} /> : <ChartFailed message={r.error} />)}
-              </Await>
+              </AwaitLatest>
             </CardContent>
           </Card>
           <Card className="min-w-0">

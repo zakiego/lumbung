@@ -5,7 +5,7 @@ import { ScrollArea } from "@/components/ui/layout"
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs"
 import { TruncatedTip } from "@/components/ui/tooltip"
 import { can } from "@/lib/roles"
-import { type ObjectSortKey, type SortDir, prefixTrail } from "./buckets"
+import { type ObjectGroup, type ObjectSortKey, type SortDir, prefixTrail } from "./buckets"
 import { CONTAINER, PageBody, PageHeader } from "./shell"
 import { useWs } from "./workspace"
 
@@ -30,7 +30,7 @@ export function BucketFrame({
   section: BucketSection
   prefix?: string
   /** The object list's sort, carried through the folder links. */
-  keep?: { sort?: ObjectSortKey; dir?: SortDir }
+  keep?: { sort?: ObjectSortKey; dir?: SortDir; group?: ObjectGroup }
   actions?: ReactNode
   children: ReactNode
 }) {
