@@ -48,6 +48,7 @@ function readable(text: string) {
 test("bucket table: long names, public badge, many rows", async () => {
   const b = (name: string, i: number): BucketOut => ({
     id: `bk_${i}`,
+    workspace_id: "ws1",
     name,
     public_read: i % 2 === 0,
     cors_origins: [],

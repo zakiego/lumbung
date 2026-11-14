@@ -268,6 +268,7 @@ test("an agent can create a token but never read it", async () => {
 
 const token = (t: Partial<TokenOut>): TokenOut => ({
   id: "t1",
+  workspace_id: "ws1",
   name: "ci",
   scope: "database",
   access: "read",
@@ -281,6 +282,11 @@ const token = (t: Partial<TokenOut>): TokenOut => ({
   last_used_at: null,
   service: false,
   ...t,
+})
+
+test("a workspace token reaches everything", () => {
+  render(<TokenTable tokens={[token({ id: "w1", name: "backend", scope: "workspace", access: "write", database_id: "" })]} names={{ databases: {}, branches: {} }} onRevoke={async () => {}} />)
+  expect(screen.getByText("Everything")).toBeTruthy()
 })
 
 test("the service token can't be revoked", () => {

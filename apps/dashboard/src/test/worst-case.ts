@@ -25,10 +25,10 @@ export const MANY_GRANTS: TokenOut["grants"] = [
 
 export function tokens(n: number): TokenOut[] {
   const base: TokenOut[] = [
-    { id: "svc", name: "dashboard", scope: "instance", access: "admin", database_id: "", branch_id: "", bucket_id: "", grants: [], access_key_id: "", created_at: at, expires_at: null, last_used_at: at, service: true },
-    { id: "t1", name: LONG_TOKEN, scope: "database", access: "write", database_id: "db1", branch_id: "b1", bucket_id: "", grants: [grant({ database_id: "db1", branch_id: "b1", access: "write" })], access_key_id: "", created_at: at, expires_at: "2027-02-12T00:00:00Z", last_used_at: null, service: false },
-    { id: "t2", name: "x", scope: "database", access: "read", database_id: "gone", branch_id: "", bucket_id: "", grants: [grant({ database_id: "gone" })], access_key_id: "", created_at: at, expires_at: null, last_used_at: null, service: false },
-    { id: "t3", name: LONG_TOKEN, scope: "grants", access: "admin", database_id: "", branch_id: "", bucket_id: "", grants: MANY_GRANTS, access_key_id: "LMBABC", created_at: at, expires_at: null, last_used_at: null, service: false },
+    { id: "svc", name: "dashboard", scope: "instance", workspace_id: "", access: "admin", database_id: "", branch_id: "", bucket_id: "", grants: [], access_key_id: "", created_at: at, expires_at: null, last_used_at: at, service: true },
+    { id: "t1", name: LONG_TOKEN, scope: "database", workspace_id: "ws1", access: "write", database_id: "db1", branch_id: "b1", bucket_id: "", grants: [grant({ database_id: "db1", branch_id: "b1", access: "write" })], access_key_id: "", created_at: at, expires_at: "2027-02-12T00:00:00Z", last_used_at: null, service: false },
+    { id: "t2", name: "x", scope: "database", workspace_id: "ws1", access: "read", database_id: "gone", branch_id: "", bucket_id: "", grants: [grant({ database_id: "gone" })], access_key_id: "", created_at: at, expires_at: null, last_used_at: null, service: false },
+    { id: "t3", name: LONG_TOKEN, scope: "grants", workspace_id: "ws1", access: "admin", database_id: "", branch_id: "", bucket_id: "", grants: MANY_GRANTS, access_key_id: "LMBABC", created_at: at, expires_at: null, last_used_at: null, service: false },
   ]
   return Array.from({ length: n }, (_, i) => ({ ...base[i % base.length]!, id: `t${i}` }))
 }
@@ -54,9 +54,9 @@ export const invites: Invite[] = [{ id: "i1", email: LONG_EMAIL, role: "member",
 
 export function audit(n: number): AuditOut[] {
   const base: AuditOut[] = [
-    { id: 1, actor: `dashboard:${LONG_EMAIL}`, token_id: "", action: "branch.promote", target: `db_01JCX9/br_01JCXA/${LONG_BRANCH}`, result: "ok", code: "", at, request_id: "req-1" },
-    { id: 2, actor: "", token_id: "tok_01JCX9ZK4M2", action: "snapshot.restore", target: "db_01JCX9/snap_01JCXB", result: "error", code: "branch_name_taken", at, request_id: "req-2" },
-    { id: 3, actor: "", token_id: "", action: "x", target: "", result: "ok", code: "", at, request_id: "req-3" },
+    { id: 1, workspace_id: "ws1", actor: `dashboard:${LONG_EMAIL}`, token_id: "", action: "branch.promote", target: `db_01JCX9/br_01JCXA/${LONG_BRANCH}`, result: "ok", code: "", at, request_id: "req-1" },
+    { id: 2, workspace_id: "ws1", actor: "", token_id: "tok_01JCX9ZK4M2", action: "snapshot.restore", target: "db_01JCX9/snap_01JCXB", result: "error", code: "branch_name_taken", at, request_id: "req-2" },
+    { id: 3, workspace_id: "ws1", actor: "", token_id: "", action: "x", target: "", result: "ok", code: "", at, request_id: "req-3" },
   ]
   return Array.from({ length: n }, (_, i) => ({ ...base[i % base.length]!, id: i }))
 }
@@ -75,9 +75,9 @@ export const LONG_DB = "customer-loyalty-and-rewards-production-eu-west-1-primar
 
 export function databases(n: number): DatabaseOut[] {
   const base: DatabaseOut[] = [
-    { id: "db1", name: LONG_DB, default_branch: "main", default_branch_id: "b1", deleted_at: null, purge_after: null, branch_count: 63, size_bytes: 5_368_709_120, created_at: at, updated_at: at, last_activity_at: at },
-    { id: "db2", name: "x", default_branch: "main", default_branch_id: "b2", deleted_at: null, purge_after: null, branch_count: 1, size_bytes: 0, created_at: at, updated_at: at, last_activity_at: null },
-    { id: "db3", name: "shop", default_branch: "main", default_branch_id: "b3", deleted_at: null, purge_after: null, branch_count: 2, size_bytes: 300_000, created_at: at, updated_at: at, last_activity_at: at },
+    { id: "db1", workspace_id: "ws1", name: LONG_DB, default_branch: "main", default_branch_id: "b1", deleted_at: null, purge_after: null, branch_count: 63, size_bytes: 5_368_709_120, created_at: at, updated_at: at, last_activity_at: at },
+    { id: "db2", workspace_id: "ws1", name: "x", default_branch: "main", default_branch_id: "b2", deleted_at: null, purge_after: null, branch_count: 1, size_bytes: 0, created_at: at, updated_at: at, last_activity_at: null },
+    { id: "db3", workspace_id: "ws1", name: "shop", default_branch: "main", default_branch_id: "b3", deleted_at: null, purge_after: null, branch_count: 2, size_bytes: 300_000, created_at: at, updated_at: at, last_activity_at: at },
   ]
   return Array.from({ length: n }, (_, i) => ({ ...base[i % base.length]!, id: `db${i + 1}`, name: i < base.length ? base[i]!.name : `db-${i}` }))
 }

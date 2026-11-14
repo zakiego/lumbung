@@ -127,11 +127,11 @@ const MAX_SHOWN = 3
 
 type Reach = { key: string; label: string; access: Access }
 
-// What a token reaches below the instance, one entry per grant. Empty for an instance token.
+// What a token reaches below a whole workspace, one entry per grant. Empty for a workspace or instance token, which reach everything.
 function reaches(t: TokenOut, names: TokenNames): Reach[] {
   const grants = t.grants?.length
     ? t.grants
-    : t.scope === "instance"
+    : t.scope === "instance" || t.scope === "workspace"
       ? []
       : [{ database_id: t.database_id, branch_id: t.branch_id, bucket_id: t.bucket_id, access: t.access }]
   return grants.map((g) => {
