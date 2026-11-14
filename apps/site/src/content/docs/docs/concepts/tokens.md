@@ -2,7 +2,7 @@
 title: Tokens and scopes
 description: How API tokens look, what each scope and access level allows, and how the dashboard's service token works.
 sidebar:
-  order: 4
+  order: 5
 ---
 
 Every request carries a token:
@@ -15,7 +15,7 @@ A token looks like `lmb_<id>_<secret>`. Lumbung stores only a SHA-256 hash of it
 
 ## Scope and access
 
-A token has a **scope**, the whole instance or one database (optionally one branch of it), and an **access** level: `read`, `write` or `admin`.
+A token has a **scope**, the whole instance, one database (optionally one branch of it) or one bucket, and an **access** level: `read`, `write` or `admin`.
 
 | Can it... | read | write | admin |
 |---|---|---|---|
@@ -34,6 +34,30 @@ A read token runs every statement on a read-only connection, so SQLite itself re
 A database token only sees its database: other databases answer `database_not_found`, as if they didn't exist. A token limited to one branch can query, download, snapshot and read the schema of that branch only. Every other branch, and any branch name that doesn't exist, answers `forbidden`, so it can't probe for names. It can't list branches, read the database's details, reset its branch (a reset copies the parent's data in), or reach the default branch through `/v1/databases/{db}/query` unless that branch is the default.
 
 When a branch is deleted, tokens limited to it are revoked. When a database is purged from the trash, its tokens are removed.
+
+### Bucket tokens
+
+A bucket token reaches one [bucket](/docs/concepts/buckets/) and nothing else: other buckets answer `bucket_not_found` (`NoSuchBucket` on the S3 API), and it sees no databases. A database token sees no buckets. Instance tokens reach every bucket at their access level.
+
+| On a bucket, can it... | read | write | admin |
+|---|---|---|---|
+| List, download, read metadata, presign a GET | yes | yes | yes |
+| Upload, delete, copy into the bucket, multipart uploads, presign a PUT | no | yes | yes |
+| Rename, set public read and CORS origins | no | no | yes |
+| Create and revoke tokens for the bucket | no | no | yes |
+
+Creating and deleting buckets needs an instance admin token. Copying from another bucket needs read on that bucket too, in the same token. When a bucket is deleted, its tokens are revoked.
+
+## Access keys
+
+S3 clients don't send a token; they sign each request with an access key id and a secret. Ask for an access key when you create a token, and both come back once, next to the token:
+
+```sh
+lumbung bucket create photos
+lumbung token create --name uploads --bucket photos --access write --access-key
+```
+
+The access key id is `LMB` followed by the token's id in capitals. The key has the token's scope, access, expiry and rate limit, and revoking the token ends the key and every presigned URL it signed. Lumbung needs the secret to check signatures, so unlike tokens it is stored, encrypted with a key kept in `secrets/access-key-encryption-key` in the data folder. A copy of `meta.db` alone doesn't reveal any secret.
 
 ## Expiry and limits
 

@@ -2,7 +2,7 @@
 title: Security model
 description: How Lumbung keeps one database from reaching another database's files, the engine's own records, or the host.
 sidebar:
-  order: 6
+  order: 7
 ---
 
 One database can never read or write another database's file, `meta.db`, or anything else on disk. Every statement a client sends runs under these rules, whichever way it arrives: REST, SDK, CLI or MCP.

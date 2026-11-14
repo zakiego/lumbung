@@ -124,7 +124,36 @@ console.log(diff.changes.length, ci.token.slice(0, 4))
 | `databases` | `list`, `trash`, `get`, `create`, `rename`, `delete`, `restore` |
 | `branches` | `list`, `get`, `create`, `update`, `delete`, `reset`, `promote`, `diff`, `schema`, `stats` |
 | `snapshots` | `list`, `create`, `restore`, `delete`, `schedule.get`, `schedule.set`, `schedule.delete` |
-| `tokens` | `list`, `create`, `revoke` |
+| `tokens` | `list`, `create` (with `bucket` and `accessKey` for bucket tokens and S3 access keys), `revoke` |
 | `audit` | `list` |
+| `buckets` | `list`, `get`, `create`, `update` (`name`, `publicRead`, `corsOrigins`), `delete` |
 
 Lists return `{ data, nextCursor }`; pass `{ cursor: nextCursor }` for the next page. `import(db, branch, data, { format, mode })` and `download(db, branch, format)` move whole databases. The request and response types are generated from the [REST API](/docs/reference/rest-api/)'s OpenAPI document and exported from the package.
+
+## Buckets and objects
+
+`client.bucket(name)` works with the objects in one [bucket](/docs/concepts/buckets/):
+
+```ts
+import { createClient } from "@lumbung/client"
+
+const client = createClient({ url: "http://127.0.0.1:4870", token: process.env.LUMBUNG_TOKEN! })
+await client.buckets.create("assets")
+const assets = client.bucket("assets")
+
+await assets.put("css/site.css", "body { margin: 0 }", { contentType: "text/css", cacheControl: "max-age=3600" })
+const css = await assets.get("css/site.css", { range: { start: 0, end: 3 } })
+console.log(await css.text(), css.totalSize) // "body" 18
+const page = await assets.list({ prefix: "css/", delimiter: "/" })
+console.log(page.objects.map((o) => o.key), page.prefixes)
+```
+
+| Method | Does |
+|---|---|
+| `put(key, body, options?)` | Uploads a string, `Uint8Array`, `ArrayBuffer`, `Blob` or `ReadableStream` (with `contentLength`). Options: `contentType`, `cacheControl`, `contentDisposition`, `contentEncoding`, `contentLanguage`, `metadata`. Returns the object's record. |
+| `get(key, { range? })` | Downloads. `range` is `{ start, end? }`, `{ suffix }` or a raw `Range` value. Returns `size`, `totalSize`, `etag`, `contentType`, `lastModified`, `metadata`, `text()`, `bytes()` and the raw `response` for streaming. |
+| `head(key)` | The object's record, or `null` when there's none. |
+| `delete(key)` | Deletes. A key that doesn't exist is fine. |
+| `list({ prefix?, delimiter?, limit?, cursor? })` | `{ objects, prefixes, nextCursor }`, in key order. |
+| `copy({ fromKey, key, fromBucket?, contentType?, metadata? })` | Copies into this bucket. With `contentType`, the copy gets new metadata instead of the source's. |
+| `presign(key, { method?, expiresIn? })` | A presigned S3 URL (`GET` by default, or `PUT`) signed with the token's access key. Needs a token made with `accessKey: true`. |
