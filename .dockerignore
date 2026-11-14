@@ -1,0 +1,33 @@
+# Build context for apps/dashboard/Dockerfile (the repo root). The engine
+# builds from apps/engine with its own .dockerignore. Other workspace
+# projects contribute only their package.json, because pnpm needs every
+# manifest to install from the shared lockfile. Patterns are anchored to the
+# root, so nested ones need **/.
+.git
+.github
+**/node_modules
+**/.output
+**/.nitro
+**/.tanstack
+**/.vite
+**/dist
+**/coverage
+**/data
+**/.docs-test
+**/*.log
+**/.env
+**/.env.*
+.DS_Store
+docs
+ops
+scripts
+**/*.test.ts
+**/*.test.tsx
+apps/engine/*
+!apps/engine/package.json
+apps/site/*
+!apps/site/package.json
+apps/edge/*
+!apps/edge/package.json
+examples/*/*
+!examples/*/package.json

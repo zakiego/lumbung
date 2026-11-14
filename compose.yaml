@@ -1,9 +1,11 @@
-# Lumbung on one machine: the engine (and, from milestone 8, the dashboard)
-# with one data volume, reachable only from this machine. Put a reverse proxy
-# with TLS in front to reach it from elsewhere (see the Self-hosting docs).
+# Lumbung on one machine: the engine and the dashboard, reachable only from
+# this machine. Put a reverse proxy with TLS in front to reach them from
+# elsewhere (see the Self-hosting docs).
 #
 #   docker compose up -d --build
-#   docker compose exec engine lumbung --help
+#   docker compose exec engine lumbungd service-token
+#
+# Then open http://localhost:4871/app and set up the owner with that token.
 name: lumbung
 
 services:
@@ -29,5 +31,29 @@ services:
       retries: 3
     stop_grace_period: 40s
 
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    image: lumbung-dashboard:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4871:4871"
+    environment:
+      LUMBUNG_ENGINE_URL: http://engine:4870
+      # The engine writes its service token here on first start.
+      LUMBUNG_SERVICE_TOKEN_FILE: /engine/secrets/service-token
+      # The address people open, without /app. Passkeys and sign-in cookies bind to it.
+      LUMBUNG_DASHBOARD_URL: ${LUMBUNG_DASHBOARD_URL:-http://localhost:4871}
+      # The engine address shown in connect snippets.
+      LUMBUNG_PUBLIC_ENGINE_URL: ${LUMBUNG_PUBLIC_ENGINE_URL:-http://localhost:4870}
+    volumes:
+      - dashboard:/data
+      - data:/engine:ro
+    depends_on:
+      engine:
+        condition: service_healthy
+
 volumes:
   data:
+  dashboard:
