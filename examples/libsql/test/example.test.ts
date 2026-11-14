@@ -221,4 +221,30 @@ describe("drizzle-orm/libsql", () => {
     expect(await count(lib, "books")).toBe(0)
     lib.close()
   })
+
+  test("an executeMultiple table rebuild needs BEGIN and COMMIT once foreign keys are off", async () => {
+    await api("POST", "/v1/databases", { name: "shelf" })
+    const shelf = connect(engine.url, engine.token, "shelf", "main")
+    await shelf.executeMultiple(`
+      CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+      CREATE TABLE books (id INTEGER PRIMARY KEY, author_id INTEGER NOT NULL REFERENCES authors(id) ON DELETE CASCADE);
+      INSERT INTO authors VALUES (1, 'Ana');
+      INSERT INTO books VALUES (1, 1);
+    `)
+    const rebuild = `
+      CREATE TABLE new_authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL, bio TEXT NOT NULL DEFAULT '');
+      INSERT INTO new_authors (id, name) SELECT id, name FROM authors;
+      DROP TABLE authors;
+      ALTER TABLE new_authors RENAME TO authors;
+    `
+    // Statement by statement, the DROP would cascade: refused before anything runs.
+    await expect(shelf.executeMultiple(`PRAGMA foreign_keys = OFF; ${rebuild}`)).rejects.toMatchObject({ code: "bad_request" })
+    await shelf.execute("PRAGMA foreign_keys = ON")
+    expect(await count(shelf, "books")).toBe(1)
+    // As one transaction it works and keeps the books.
+    await shelf.executeMultiple(`PRAGMA foreign_keys = OFF; BEGIN; ${rebuild} COMMIT; PRAGMA foreign_keys = ON;`)
+    expect(await count(shelf, "books")).toBe(1)
+    expect((await shelf.execute("SELECT bio FROM authors")).rows[0]!.bio).toBe("")
+    shelf.close()
+  })
 })
