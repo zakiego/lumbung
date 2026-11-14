@@ -59,8 +59,20 @@ func restAPI(specPath string) ([]byte, error) {
 			byTag[tag] = append(byTag[tag], opInfo{strings.ToUpper(method), path, op})
 		}
 	}
-	order := map[string]int{"Databases": 0, "Branches": 1, "Query": 2, "Snapshots": 3, "Import and download": 4, "Tokens": 5, "Audit": 6}
-	sort.Slice(tags, func(i, j int) bool { return order[tags[i]] < order[tags[j]] })
+	order := map[string]int{"Databases": 1, "Branches": 2, "Query": 3, "Snapshots": 4, "Import and download": 5, "Buckets": 6, "Objects": 7, "Tokens": 8, "Audit": 9}
+	// Tags not in the list go last, by name, so the page is the same on every run.
+	rank := func(t string) int {
+		if n, ok := order[t]; ok {
+			return n
+		}
+		return len(order) + 1
+	}
+	sort.Slice(tags, func(i, j int) bool {
+		if rank(tags[i]) != rank(tags[j]) {
+			return rank(tags[i]) < rank(tags[j])
+		}
+		return tags[i] < tags[j]
+	})
 
 	var b bytes.Buffer
 	b.WriteString(`---
@@ -124,7 +136,13 @@ sidebar:
 				}
 			}
 			if resps, ok := o.op["responses"].(map[string]any); ok {
-				for code, raw := range resps {
+				codes := make([]string, 0, len(resps))
+				for code := range resps {
+					codes = append(codes, code)
+				}
+				sort.Strings(codes)
+				for _, code := range codes {
+					raw := resps[code]
 					if !strings.HasPrefix(code, "2") {
 						continue
 					}
