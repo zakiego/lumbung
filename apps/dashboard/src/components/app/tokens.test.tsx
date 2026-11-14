@@ -129,6 +129,7 @@ const token = (t: Partial<TokenOut>): TokenOut => ({
   database_id: "db1",
   branch_id: "",
   bucket_id: "",
+  grants: [],
   access_key_id: "",
   created_at: "2026-11-01T00:00:00Z",
   expires_at: null,

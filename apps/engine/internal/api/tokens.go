@@ -15,16 +15,25 @@ import (
 	"github.com/zakiego/lumbung/apps/engine/internal/stats"
 )
 
+// GrantOut is one thing a token reaches.
+type GrantOut struct {
+	DatabaseID string `json:"database_id" doc:"The database this grant reaches. Empty for a bucket grant."`
+	BranchID   string `json:"branch_id" doc:"When set, the grant only reaches this branch."`
+	BucketID   string `json:"bucket_id" doc:"The bucket this grant reaches. Empty for a database grant."`
+	Access     string `json:"access" enum:"read,write,admin"`
+}
+
 // TokenOut is a token, without its secret.
 type TokenOut struct {
 	ID          string     `json:"id"`
 	Name        string     `json:"name"`
-	Scope       string     `json:"scope" enum:"instance,database,bucket"`
+	Scope       string     `json:"scope" enum:"instance,database,bucket,grants"`
 	DatabaseID  string     `json:"database_id" doc:"For a database token, the database it reaches."`
 	BranchID    string     `json:"branch_id" doc:"When set, the token only reaches this branch."`
 	BucketID    string     `json:"bucket_id" doc:"For a bucket token, the bucket it reaches."`
+	Grants      []GrantOut `json:"grants" doc:"Everything the token reaches below the instance: one entry for a database or bucket token, several for a grants token, none for an instance token."`
 	AccessKeyID string     `json:"access_key_id" doc:"The S3 access key id, when the token has an access key."`
-	Access      string     `json:"access" enum:"read,write,admin"`
+	Access      string     `json:"access" enum:"read,write,admin" doc:"The token's level. For a grants token, the highest level among its grants; each grant has its own."`
 	Service     bool       `json:"service" doc:"The dashboard's service token."`
 	CreatedAt   time.Time  `json:"created_at"`
 	ExpiresAt   *time.Time `json:"expires_at"`
@@ -33,7 +42,10 @@ type TokenOut struct {
 
 func tokenOut(t meta.Token) TokenOut {
 	out := TokenOut{ID: t.ID, Name: t.Name, Scope: t.Scope, DatabaseID: t.DatabaseID, BranchID: t.BranchID, BucketID: t.BucketID,
-		Access: t.Access, Service: t.Service, CreatedAt: t.CreatedAt, ExpiresAt: t.ExpiresAt, LastUsedAt: t.LastUsedAt}
+		Access: t.Access, Service: t.Service, CreatedAt: t.CreatedAt, ExpiresAt: t.ExpiresAt, LastUsedAt: t.LastUsedAt, Grants: []GrantOut{}}
+	for _, g := range auth.TokenGrants(t) {
+		out.Grants = append(out.Grants, GrantOut{DatabaseID: g.DatabaseID, BranchID: g.BranchID, BucketID: g.BucketID, Access: g.Access})
+	}
 	if len(t.AccessSecret) > 0 {
 		out.AccessKeyID = auth.AccessKeyID(t.ID)
 	}
@@ -47,17 +59,28 @@ type tokenList struct {
 	}
 }
 
+// GrantIn is one thing a new token reaches: a database (or one branch of
+// it) or a bucket.
+type GrantIn struct {
+	Database string `json:"database,omitempty" doc:"Database name or id. Not with bucket."`
+	Branch   string `json:"branch,omitempty" doc:"Branch name or id, to limit the grant to one branch of the database."`
+	Bucket   string `json:"bucket,omitempty" doc:"Bucket name or id. Not with database."`
+	Access   string `json:"access" enum:"read,write,admin"`
+}
+
 // createTokenIn takes no Idempotency-Key: replaying a create would have to
 // store the secret, which is only ever shown once.
 type createTokenIn struct {
 	Body struct {
-		Name          string `json:"name" minLength:"1" maxLength:"100"`
-		Database      string `json:"database,omitempty" doc:"Database name or id. Omit for an instance token."`
-		Branch        string `json:"branch,omitempty" doc:"Branch name or id, to limit a database token to one branch."`
-		Bucket        string `json:"bucket,omitempty" doc:"Bucket name or id, for a bucket token. Not with database."`
-		AccessKey     bool   `json:"access_key,omitempty" doc:"Also make an S3 access key for this token. Its secret is shown once, like the token."`
-		Access        string `json:"access" enum:"read,write,admin"`
-		ExpiresInDays int    `json:"expires_in_days,omitempty" minimum:"0" maximum:"3650" doc:"0: never expires. A token that expires can't create one that outlives it: the expiry is capped at the creator's."`
+		Name     string `json:"name" minLength:"1" maxLength:"100"`
+		Database string `json:"database,omitempty" doc:"Database name or id. Omit for an instance token."`
+		Branch   string `json:"branch,omitempty" doc:"Branch name or id, to limit a database token to one branch."`
+		Bucket   string `json:"bucket,omitempty" doc:"Bucket name or id, for a bucket token. Not with database."`
+		// At most 20: every request by the token checks the list, so it stays short.
+		Grants        []GrantIn `json:"grants,omitempty" maxItems:"20" doc:"Reach several databases and buckets with one token, each at its own level. Use it instead of database, branch, bucket and access."`
+		AccessKey     bool      `json:"access_key,omitempty" doc:"Also make an S3 access key for this token. Its secret is shown once, like the token."`
+		Access        string    `json:"access,omitempty" enum:"read,write,admin" doc:"The token's level. Required unless grants is set."`
+		ExpiresInDays int       `json:"expires_in_days,omitempty" minimum:"0" maximum:"3650" doc:"0: never expires. A token that expires can't create one that outlives it: the expiry is capped at the creator's."`
 	}
 }
 
@@ -122,7 +145,7 @@ func (s *Server) registerTokens(api huma.API) {
 	huma.Register(api, op("list-tokens", http.MethodGet, "/v1/tokens", "List tokens", "Tokens", ""),
 		func(ctx context.Context, in *PageIn) (*tokenList, error) {
 			p := principalFrom(ctx)
-			if !p.InstanceAdmin() && p.Access != auth.AccessAdmin {
+			if !p.HasAdmin() {
 				return nil, toProblem(ctx, apierr.New(apierr.Forbidden, "listing tokens needs an admin token"))
 			}
 			// Tokens are few; read them all, then filter and page.
@@ -132,7 +155,7 @@ func (s *Server) registerTokens(api huma.API) {
 			}
 			visible := []meta.Token{}
 			for _, t := range all {
-				if p.InstanceAdmin() || p.Covers(t.Scope, t.DatabaseID, t.BranchID, t.BucketID, t.Access) {
+				if p.InstanceAdmin() || p.CoversToken(t.Scope, auth.TokenGrants(t)) {
 					visible = append(visible, t)
 				}
 			}
@@ -152,47 +175,70 @@ func (s *Server) registerTokens(api huma.API) {
 	huma.Register(api, created(op("create-token", http.MethodPost, "/v1/tokens", "Create a token", "Tokens", "token.create")),
 		func(ctx context.Context, in *createTokenIn) (*createTokenOut, error) {
 			p := principalFrom(ctx)
-			scope, dbID, branchID, bucketID := auth.ScopeInstance, "", "", ""
-			if in.Body.Bucket != "" {
-				if in.Body.Database != "" || in.Body.Branch != "" {
-					return nil, toProblem(ctx, apierr.New(apierr.BadRequest, "a token reaches a database or a bucket, not both"))
+			body := in.Body
+			var grants []auth.Grant
+			switch {
+			case len(body.Grants) > 0:
+				if body.Database != "" || body.Branch != "" || body.Bucket != "" || body.Access != "" {
+					return nil, toProblem(ctx, apierr.New(apierr.BadRequest, "send grants, or database, branch, bucket and access, not both"))
 				}
-				scope = auth.ScopeBucket
-				b, err := s.eng.GetBucket(ctx, in.Body.Bucket)
-				if err != nil || !p.SeesBucket(b.ID) {
-					return nil, toProblem(ctx, apierr.Newf(apierr.BucketNotFound, "no bucket %q", in.Body.Bucket))
-				}
-				bucketID = b.ID
-			} else if in.Body.Database != "" {
-				scope = auth.ScopeDatabase
-				d, err := s.eng.GetDatabase(ctx, in.Body.Database)
-				if err != nil || !p.SeesDatabase(d.ID) {
-					return nil, toProblem(ctx, apierr.Newf(apierr.DatabaseNotFound, "no database %q", in.Body.Database))
-				}
-				dbID = d.ID
-				if in.Body.Branch != "" {
-					b, err := s.eng.GetBranch(ctx, d.ID, in.Body.Branch)
+				for _, g := range body.Grants {
+					grant, err := s.resolveGrant(ctx, p, g)
 					if err != nil {
 						return nil, toProblem(ctx, err)
 					}
-					branchID = b.ID
+					for _, seen := range grants {
+						if seen.DatabaseID != grant.DatabaseID || seen.BucketID != grant.BucketID {
+							continue
+						}
+						if seen.BranchID == grant.BranchID {
+							return nil, toProblem(ctx, apierr.New(apierr.BadRequest, "two grants name the same database, branch or bucket"))
+						}
+						// A grant for the whole database already reaches every
+						// branch at its level, so a branch grant next to it
+						// would only look like a limit.
+						if seen.BranchID == "" || grant.BranchID == "" {
+							return nil, toProblem(ctx, apierr.New(apierr.BadRequest, "a grant for a whole database already covers its branches; grant the branches one by one instead"))
+						}
+					}
+					grants = append(grants, grant)
 				}
-			} else if in.Body.Branch != "" {
+			case body.Access == "":
+				return nil, toProblem(ctx, apierr.New(apierr.BadRequest, "access is required"))
+			case body.Bucket != "" && (body.Database != "" || body.Branch != ""):
+				return nil, toProblem(ctx, apierr.New(apierr.BadRequest, "to reach a database and a bucket with one token, send them as grants"))
+			case body.Bucket != "" || body.Database != "":
+				grant, err := s.resolveGrant(ctx, p, GrantIn{Database: body.Database, Branch: body.Branch, Bucket: body.Bucket, Access: body.Access})
+				if err != nil {
+					return nil, toProblem(ctx, err)
+				}
+				grants = []auth.Grant{grant}
+			case body.Branch != "":
 				return nil, toProblem(ctx, apierr.New(apierr.BadRequest, "a branch needs a database"))
 			}
-			if !p.Covers(scope, dbID, branchID, bucketID, in.Body.Access) {
+			// One grant is a plain database or bucket token, however it was
+			// asked for, so each reach has one way to be stored.
+			t := meta.Token{Name: body.Name, Scope: auth.ScopeInstance, Access: body.Access}
+			switch {
+			case len(grants) == 1 && grants[0].BucketID != "":
+				t.Scope, t.BucketID, t.Access = auth.ScopeBucket, grants[0].BucketID, grants[0].Access
+			case len(grants) == 1:
+				t.Scope, t.DatabaseID, t.BranchID, t.Access = auth.ScopeDatabase, grants[0].DatabaseID, grants[0].BranchID, grants[0].Access
+			case len(grants) > 1:
+				t.Scope, t.Grants, t.Access = auth.ScopeGrants, grants, highestAccess(grants)
+			}
+			if !p.CoversToken(t.Scope, grants) {
 				return nil, toProblem(ctx, apierr.New(apierr.Forbidden, "a token can only create tokens within its own admin scope"))
 			}
 			id, secret := auth.New()
-			t := meta.Token{ID: id, Name: in.Body.Name, SecretHash: auth.Hash(secret), Scope: scope,
-				DatabaseID: dbID, BranchID: branchID, BucketID: bucketID, Access: in.Body.Access}
+			t.ID, t.SecretHash = id, auth.Hash(secret)
 			var accessSecret string
-			if in.Body.AccessKey {
+			if body.AccessKey {
 				accessSecret = auth.NewAccessSecret()
 				t.AccessSecret = s.eng.Sealer().Seal(id, accessSecret)
 			}
 			var requested *time.Time
-			if n := in.Body.ExpiresInDays; n > 0 {
+			if n := body.ExpiresInDays; n > 0 {
 				at := time.Now().Add(time.Duration(n) * 24 * time.Hour)
 				requested = &at
 			}
@@ -220,7 +266,7 @@ func (s *Server) registerTokens(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			if !p.InstanceAdmin() && !p.Covers(t.Scope, t.DatabaseID, t.BranchID, t.BucketID, t.Access) {
+			if !p.InstanceAdmin() && !p.CoversToken(t.Scope, auth.TokenGrants(t)) {
 				return nil, toProblem(ctx, apierr.New(apierr.TokenNotFound, "no live token with that id"))
 			}
 			if t.Service {
@@ -297,6 +343,54 @@ func (s *Server) registerTokens(api huma.API) {
 			}
 			return out, nil
 		})
+}
+
+// resolveGrant turns the names in a grant into ids. A database or bucket the
+// principal can't see is not found, so tokens don't learn which names exist.
+func (s *Server) resolveGrant(ctx context.Context, p auth.Principal, g GrantIn) (auth.Grant, error) {
+	switch {
+	case g.Bucket != "" && (g.Database != "" || g.Branch != ""):
+		return auth.Grant{}, apierr.New(apierr.BadRequest, "a grant reaches a database or a bucket, not both")
+	case g.Bucket != "":
+		b, err := s.eng.GetBucket(ctx, g.Bucket)
+		if err != nil || !p.SeesBucket(b.ID) {
+			return auth.Grant{}, apierr.Newf(apierr.BucketNotFound, "no bucket %q", g.Bucket)
+		}
+		return auth.Grant{BucketID: b.ID, Access: g.Access}, nil
+	case g.Database != "":
+		d, err := s.eng.GetDatabase(ctx, g.Database)
+		if err != nil || !p.SeesDatabase(d.ID) {
+			return auth.Grant{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q", g.Database)
+		}
+		out := auth.Grant{DatabaseID: d.ID, Access: g.Access}
+		if g.Branch != "" {
+			b, err := s.eng.GetBranch(ctx, d.ID, g.Branch)
+			if !p.WholeDatabase(d.ID) && (err != nil || !p.SeesBranch(d.ID, b.ID)) {
+				// The same answer for a missing branch and someone else's,
+				// so a branch token can't probe for branch names.
+				return auth.Grant{}, apierr.New(apierr.Forbidden, "this token can't do that on this branch")
+			}
+			if err != nil {
+				return auth.Grant{}, err
+			}
+			out.BranchID = b.ID
+		}
+		return out, nil
+	case g.Branch != "":
+		return auth.Grant{}, apierr.New(apierr.BadRequest, "a branch needs a database")
+	}
+	return auth.Grant{}, apierr.New(apierr.BadRequest, "a grant needs a database or a bucket")
+}
+
+// highestAccess is the level shown for a grants token as a whole.
+func highestAccess(grants []auth.Grant) string {
+	out := auth.AccessRead
+	for _, g := range grants {
+		if g.Access == auth.AccessAdmin || (g.Access == auth.AccessWrite && out == auth.AccessRead) {
+			out = g.Access
+		}
+	}
+	return out
 }
 
 func (s *Server) register() {

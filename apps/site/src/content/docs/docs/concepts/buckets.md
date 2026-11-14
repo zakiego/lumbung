@@ -55,7 +55,7 @@ There is no versioning: replacing or deleting an object is final. Lumbung keeps 
 
 ## Tokens and access keys
 
-Bucket access uses the same [tokens](/docs/concepts/tokens/): an instance token reaches every bucket at its access level, a bucket token reaches one bucket, and a database token reaches none. S3 clients sign requests instead of sending a token, so a token can carry an **access key**: an id and a secret made with the token and shown once.
+Bucket access uses the same [tokens](/docs/concepts/tokens/): an instance token reaches every bucket at its access level, a bucket token reaches one bucket, and a database token reaches none. A token with [several grants](/docs/concepts/tokens/#tokens-with-several-grants) reaches the buckets its grants name, next to its databases. S3 clients sign requests instead of sending a token, so a token can carry an **access key**: an id and a secret made with the token and shown once.
 
 ```sh
 lumbung token create --name uploads --bucket photos --access write --access-key

@@ -500,34 +500,61 @@ func (a *app) tokenCmd() *cobra.Command {
 			}
 			rows := [][]string{}
 			for _, t := range toks {
-				scope := t.Scope
-				if t.DatabaseID != "" {
-					scope = t.DatabaseID
-					if t.BranchID != "" {
-						scope += "/" + t.BranchID
+				scope, access := t.Scope, t.Access
+				if len(t.Grants) > 0 {
+					// Each thing the token reaches, with its own level when
+					// they differ.
+					reach, levels := []string{}, []string{}
+					for _, g := range t.Grants {
+						target := g.BucketID
+						if g.DatabaseID != "" {
+							target = g.DatabaseID
+							if g.BranchID != "" {
+								target += "/" + g.BranchID
+							}
+						}
+						reach, levels = append(reach, target), append(levels, g.Access)
+					}
+					scope = strings.Join(reach, ", ")
+					if len(t.Grants) > 1 {
+						access = strings.Join(levels, ", ")
 					}
 				}
-				if t.BucketID != "" {
-					scope = t.BucketID
-				}
-				rows = append(rows, []string{t.ID, t.Name, scope, t.Access, tsPtr(t.ExpiresAt), tsPtr(t.LastUsedAt)})
+				rows = append(rows, []string{t.ID, t.Name, scope, access, tsPtr(t.ExpiresAt), tsPtr(t.LastUsedAt)})
 			}
 			a.table([]string{"ID", "NAME", "SCOPE", "ACCESS", "EXPIRES", "LAST USED"}, rows)
 			return nil
 		},
 	})
 	var name, access, branch, bucket string
+	var grants []string
 	var expires int
 	var accessKey bool
 	create := &cobra.Command{
 		Use: "create", Short: "Create a token; the full token is printed once", Args: cobra.NoArgs,
-		Example: "  lumbung token create --name ci --db app --access write --expires-in-days 90\n  lumbung token create --name uploads --bucket photos --access write --access-key",
+		Example: "  lumbung token create --name ci --db app --access write --expires-in-days 90\n  lumbung token create --name uploads --bucket photos --access write --access-key\n  lumbung token create --name agent --grant db=notes:write --grant bucket=files:read",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, _, err := a.client()
 			if err != nil {
 				return err
 			}
-			body := map[string]any{"name": name, "access": access, "expires_in_days": expires}
+			body := map[string]any{"name": name, "expires_in_days": expires}
+			if len(grants) > 0 {
+				if a.flagDB != "" || branch != "" || bucket != "" || cmd.Flags().Changed("access") {
+					return errors.New("pass --grant, or --db, --branch, --bucket and --access, not both")
+				}
+				list := []map[string]string{}
+				for _, g := range grants {
+					parsed, err := parseGrant(g)
+					if err != nil {
+						return err
+					}
+					list = append(list, parsed)
+				}
+				body["grants"] = list
+			} else {
+				body["access"] = access
+			}
 			if a.flagDB != "" {
 				body["database"] = a.flagDB
 			}
@@ -562,6 +589,7 @@ func (a *app) tokenCmd() *cobra.Command {
 	create.Flags().StringVar(&a.flagDB, "db", "", "limit the token to this database (default: the whole instance)")
 	create.Flags().StringVar(&branch, "branch", "", "limit the token to this branch of --db")
 	create.Flags().StringVar(&bucket, "bucket", "", "limit the token to this bucket (instead of --db)")
+	create.Flags().StringArrayVar(&grants, "grant", nil, "reach several things with one token: db=NAME:ACCESS, db=NAME/BRANCH:ACCESS or bucket=NAME:ACCESS (repeat it)")
 	create.Flags().BoolVar(&accessKey, "access-key", false, "also make an S3 access key for the token")
 	create.Flags().IntVar(&expires, "expires-in-days", 0, "expire after this many days (0: never)")
 	_ = create.MarkFlagRequired("name")
@@ -716,4 +744,35 @@ func (a *app) exportCmd() *cobra.Command {
 	cmd.Flags().StringVar(&format, "format", "db", "db or sql")
 	cmd.Flags().StringVarP(&output, "output", "o", "", "write to this file instead of standard output")
 	return cmd
+}
+
+// parseGrant reads one --grant value: db=NAME:ACCESS, db=NAME/BRANCH:ACCESS
+// or bucket=NAME:ACCESS.
+func parseGrant(v string) (map[string]string, error) {
+	bad := fmt.Errorf("--grant %q: want db=NAME:ACCESS, db=NAME/BRANCH:ACCESS or bucket=NAME:ACCESS", v)
+	kind, rest, ok := strings.Cut(v, "=")
+	if !ok {
+		return nil, bad
+	}
+	target, access, ok := strings.Cut(rest, ":")
+	if !ok || target == "" || access == "" {
+		return nil, bad
+	}
+	out := map[string]string{"access": access}
+	switch kind {
+	case "db":
+		db, branch, limited := strings.Cut(target, "/")
+		if db == "" || (limited && branch == "") {
+			return nil, bad
+		}
+		out["database"] = db
+		if limited {
+			out["branch"] = branch
+		}
+	case "bucket":
+		out["bucket"] = target
+	default:
+		return nil, bad
+	}
+	return out, nil
 }

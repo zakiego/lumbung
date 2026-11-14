@@ -14,9 +14,9 @@ const at = "2026-11-14T08:00:00Z"
 
 export function tokens(n: number): TokenOut[] {
   const base: TokenOut[] = [
-    { id: "svc", name: "dashboard", scope: "instance", access: "admin", database_id: "", branch_id: "", bucket_id: "", access_key_id: "", created_at: at, expires_at: null, last_used_at: at, service: true },
-    { id: "t1", name: LONG_TOKEN, scope: "database", access: "write", database_id: "db1", branch_id: "b1", bucket_id: "", access_key_id: "", created_at: at, expires_at: "2027-02-12T00:00:00Z", last_used_at: null, service: false },
-    { id: "t2", name: "x", scope: "database", access: "read", database_id: "gone", branch_id: "", bucket_id: "", access_key_id: "", created_at: at, expires_at: null, last_used_at: null, service: false },
+    { id: "svc", name: "dashboard", scope: "instance", access: "admin", database_id: "", branch_id: "", bucket_id: "", grants: [], access_key_id: "", created_at: at, expires_at: null, last_used_at: at, service: true },
+    { id: "t1", name: LONG_TOKEN, scope: "database", access: "write", database_id: "db1", branch_id: "b1", bucket_id: "", grants: [], access_key_id: "", created_at: at, expires_at: "2027-02-12T00:00:00Z", last_used_at: null, service: false },
+    { id: "t2", name: "x", scope: "database", access: "read", database_id: "gone", branch_id: "", bucket_id: "", grants: [], access_key_id: "", created_at: at, expires_at: null, last_used_at: null, service: false },
   ]
   return Array.from({ length: n }, (_, i) => ({ ...base[i % base.length]!, id: `t${i}` }))
 }

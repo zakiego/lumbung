@@ -97,6 +97,38 @@ func TestBucketsAndObjects(t *testing.T) {
 	if !strings.Contains(o.stdout, tok.BucketID) {
 		t.Fatalf("token list doesn't show the bucket scope: %s", o.stdout)
 	}
+
+	// One token for a database and a bucket, each at its own level.
+	must(t, lumbung(t, cfg, "", "db", "create", "cli-agent-db"))
+	must(t, lumbung(t, cfg, "", "query", "CREATE TABLE t(x)", "--db", "cli-agent-db"))
+	o = must(t, lumbung(t, cfg, "", "token", "create", "--name", "agent", "--grant", "db=cli-agent-db:write", "--grant", "bucket=cli-photos:read", "--json"))
+	var agent struct {
+		Token  string `json:"token"`
+		Scope  string `json:"scope"`
+		Grants []struct {
+			DatabaseID string `json:"database_id"`
+			BucketID   string `json:"bucket_id"`
+			Access     string `json:"access"`
+		} `json:"grants"`
+	}
+	if err := json.Unmarshal([]byte(o.stdout), &agent); err != nil || agent.Scope != "grants" || len(agent.Grants) != 2 ||
+		agent.Grants[0].Access != "write" || agent.Grants[1].BucketID != tok.BucketID || agent.Grants[1].Access != "read" {
+		t.Fatalf("token create --grant: %s", o.stdout)
+	}
+	acfg := filepath.Join(t.TempDir(), "config.json")
+	must(t, lumbung(t, acfg, agent.Token+"\n", "login", "--url", baseURL))
+	must(t, lumbung(t, acfg, "", "query", "INSERT INTO t VALUES (1)", "--db", "cli-agent-db"))
+	must(t, lumbung(t, acfg, "", "object", "ls", "cli-photos"))
+	fails(t, lumbung(t, acfg, "", "object", "rm", "cli-photos/top.txt", "--yes"), "forbidden")
+	fails(t, lumbung(t, acfg, "", "object", "ls", "cli-other"), "bucket_not_found")
+	o = must(t, lumbung(t, cfg, "", "token", "list"))
+	if !strings.Contains(o.stdout, agent.Grants[0].DatabaseID+", "+tok.BucketID) || !strings.Contains(o.stdout, "write, read") {
+		t.Fatalf("token list doesn't show both grants: %s", o.stdout)
+	}
+	fails(t, lumbung(t, cfg, "", "token", "create", "--name", "x", "--grant", "db=cli-agent-db:write", "--bucket", "cli-photos"), "not both")
+	for _, bad := range []string{"cli-agent-db", "db=cli-agent-db", "db=:read", "db=cli-agent-db/:read", "table=t:read"} {
+		fails(t, lumbung(t, cfg, "", "token", "create", "--name", "x", "--grant", bad), "want db=NAME:ACCESS")
+	}
 	// Without an access key there's nothing to presign with.
 	fails(t, lumbung(t, cfg, "", "object", "presign", "cli-photos/top.txt"), "no_access_key")
 }

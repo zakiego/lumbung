@@ -252,6 +252,10 @@ func (s *Store) DeleteBucket(ctx context.Context, id string) ([]string, error) {
 	if _, err := tx.ExecContext(ctx, `UPDATE tokens SET revoked_at = ? WHERE bucket_id = ? AND revoked_at IS NULL`, ts, id); err != nil {
 		return nil, err
 	}
+	// A token that reaches this bucket among other things goes with it.
+	if _, err := tx.ExecContext(ctx, `UPDATE tokens SET revoked_at = ? WHERE revoked_at IS NULL AND id IN (SELECT token_id FROM token_grants WHERE bucket_id = ?)`, ts, id); err != nil {
+		return nil, err
+	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM buckets WHERE id = ?`, id)
 	if err != nil {
 		return nil, err
