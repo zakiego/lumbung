@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import satori from "satori"
 import sharp from "sharp"
-import { markPath } from "./site"
+import { dark, markPath } from "./site"
 
 const require = createRequire(import.meta.url)
 const font = (file: string) => readFile(require.resolve(file))
@@ -24,16 +24,14 @@ function loadFonts() {
   return fonts
 }
 
-// The landing page's dark tokens (src/styles/landing.css).
-const c = {
-  bg: "#08090a",
-  fg: "#f7f8f8",
-  muted: "#8a8f98",
-  faint: "#62666d",
-  surface: "#0f1011",
-  border: "#23252a",
-  mark: "#e8e2cf",
-  green: "#27a644",
+const c = dark
+
+// About two lines at 32px in a 760px column: cut at a word, never mid-word.
+export function trimLine(text: string, max = 90) {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max + 1)
+  const space = cut.lastIndexOf(" ")
+  return `${(space > 0 ? cut.slice(0, space) : text.slice(0, max)).replace(/[\s,;:.]+$/, "")}…`
 }
 
 type Card = { title: string; line?: string; section?: string; host: string }
@@ -55,8 +53,8 @@ function card({ title, line, section, host }: Card) {
         flexDirection: "column",
         justifyContent: "space-between",
         padding: 72,
-        background: c.bg,
-        color: c.fg,
+        background: c.background,
+        color: c.foreground,
         fontFamily: "Inter",
         position: "relative",
       }}
@@ -92,7 +90,7 @@ function card({ title, line, section, host }: Card) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 24, maxWidth: 980, position: "relative" }}>
         <div style={{ fontSize: 68, fontWeight: 500, lineHeight: 1.08, letterSpacing: "-0.022em", lineClamp: 3 }}>{title}</div>
-        {line ? <div style={{ fontSize: 32, color: c.muted, lineHeight: 1.35, lineClamp: 2, maxWidth: 760 }}>{line}</div> : null}
+        {line ? <div style={{ fontSize: 32, color: c.muted, lineHeight: 1.35, maxWidth: 760 }}>{trimLine(line)}</div> : null}
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 26, position: "relative" }}>
@@ -111,7 +109,7 @@ function card({ title, line, section, host }: Card) {
           }}
         >
           <span style={{ color: c.faint }}>$</span>
-          <span style={{ color: c.fg }}>lumbung branch create pr-42</span>
+          <span style={{ color: c.foreground }}>lumbung branch create pr-42</span>
         </div>
         <span style={{ color: c.muted }}>{host}</span>
       </div>

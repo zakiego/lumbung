@@ -15,7 +15,8 @@ const jsonLd = {
   url: canonical,
   applicationCategory: "DeveloperApplication",
   operatingSystem: "macOS, Linux",
-  codeRepository: site.github,
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+  sameAs: site.github,
 }
 ---
 
@@ -24,9 +25,12 @@ const jsonLd = {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    {/* Same choice as the docs (Starlight's key), else the system's. Rocket
-        Loader would defer this without data-cfasync, flashing the wrong theme. */}
-    <script is:inline data-cfasync="false">
+    <meta name="theme-color" content={themeColor.dark} media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content={themeColor.light} media="(prefers-color-scheme: light)" />
+    {/* Same choice as the docs (Starlight's key), else the system's, and the
+        browser chrome (theme-color) follows it. Rocket Loader would defer this
+        without data-cfasync, flashing the wrong theme. */}
+    <script is:inline data-cfasync="false" define:vars={{ colors: themeColor }}>
       ;(() => {
         const root = document.documentElement
         const light = matchMedia("(prefers-color-scheme: light)")
@@ -35,7 +39,9 @@ const jsonLd = {
           stored = localStorage.getItem("starlight-theme")
         } catch {}
         const apply = () => {
-          root.dataset.theme = stored === "light" || stored === "dark" ? stored : light.matches ? "light" : "dark"
+          const theme = stored === "light" || stored === "dark" ? stored : light.matches ? "light" : "dark"
+          root.dataset.theme = theme
+          for (const meta of document.querySelectorAll('meta[name="theme-color"]')) meta.content = colors[theme]
         }
         apply()
         light.addEventListener("change", apply)
@@ -47,8 +53,6 @@ const jsonLd = {
     <link rel="canonical" href={canonical} />
     <meta name="robots" content="index, follow" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content={themeColor.dark} media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content={themeColor.light} media="(prefers-color-scheme: light)" />
 
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -58,7 +62,7 @@ const jsonLd = {
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content={site.name} />
-    <meta property="og:locale" content="en" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:url" content={canonical} />
     <meta property="og:title" content={site.title} />
     <meta property="og:description" content={site.description} />

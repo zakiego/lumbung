@@ -20,7 +20,7 @@ export const session: Step[] = [
   },
   {
     cmd: 'lumbung query "SELECT count(*) FROM orders" --branch pr-42',
-    out: [{ text: "count(*)", tone: "dim" }, { text: "18420" }],
+    out: [{ text: "count(*)", tone: "dim" }, { text: "18420" }, { text: "1 row (2ms)", tone: "dim" }],
   },
   { cmd: "lumbung branch delete pr-42 --yes", out: [{ text: "Done: delete pr-42" }] },
   { cmd: "clear", out: [] },
@@ -54,7 +54,12 @@ export function Terminal() {
   const [frame, setFrame] = useState<Frame>(null)
   const [paused, setPaused] = useState(false)
   const [onScreen, setOnScreen] = useState(true)
+  const [mounted, setMounted] = useState(false)
   const root = useRef<HTMLElement>(null)
+
+  // Until this runs, CSS keeps the server's poster hidden for a moment (no
+  // flash of the finished session); if it never runs, the poster shows.
+  useEffect(() => setMounted(true), [])
 
   // Start at the first step, unless motion is reduced; follow the setting live.
   useEffect(() => {
@@ -98,9 +103,10 @@ export function Terminal() {
     <figure
       ref={root}
       data-terminal={frame ? "live" : "poster"}
+      data-mounted={mounted ? "" : undefined}
       className="scheme-dark relative rounded-2xl p-px [background:linear-gradient(to_right_bottom,rgba(255,255,255,0.14),rgba(255,255,255,0.04))] shadow-[0_12px_40px_rgba(0,0,0,0.16)] dark:shadow-[0_2px_32px_#08090a]"
     >
-      <div className="relative overflow-hidden rounded-[15px] bg-[#0b0c0d] text-foreground">
+      <div className="relative overflow-hidden rounded-[15px] bg-terminal text-foreground">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 text-white/[0.07] [background-image:radial-gradient(currentColor_1px,transparent_1px)] [background-size:20px_20px] [mask-image:radial-gradient(ellipse_at_top_right,black,transparent_70%)]"
@@ -123,10 +129,13 @@ export function Terminal() {
           ) : null}
         </div>
 
-        {/* Lines fade in as they arrive and out on clear (opacity with
-            visibility, so hidden lines keep their height). */}
-        <div className="relative px-4 py-4 font-mono text-[12px] leading-[1.7] sm:px-5 sm:text-[13px]">
-          <div data-screen aria-hidden="true">
+        {/* Lines fade in as they arrive and out on clear. From sm up, hidden
+            lines keep their height so the frame never resizes. On a phone the
+            screen has a fixed height: lines start at the top, and once they
+            fill it they stay pinned to the bottom and older ones scroll off
+            the top (the flex-1 spacer takes the free space until then). */}
+        <div className="relative px-4 py-4 font-mono text-[12px] leading-[1.7] max-sm:flex max-sm:h-56 max-sm:flex-col max-sm:justify-end max-sm:overflow-hidden max-sm:[mask-image:linear-gradient(to_bottom,transparent,black_1rem)] sm:px-5 sm:text-[13px]">
+          <div data-screen aria-hidden="true" className="shrink-0">
             {session.map((s, i) => {
               const current = frame !== null && frame.step === i ? frame : null
               const done = frame === null ? i <= QUERY : i < frame.step
@@ -136,8 +145,8 @@ export function Terminal() {
                 <div
                   key={s.cmd}
                   className={cn(
-                    "mb-2.5 transition-[opacity,visibility] duration-150 ease-(--ease-out-cubic) last:mb-0",
-                    hidden && "invisible opacity-0 duration-150",
+                    "mb-2.5 transition-[opacity,visibility] duration-150 ease-(--ease-out-cubic) last:mb-0 starting:opacity-0",
+                    hidden && "invisible opacity-0 max-sm:hidden",
                   )}
                 >
                   <div className="flex gap-2">
@@ -158,7 +167,7 @@ export function Terminal() {
                     <div
                       className={cn(
                         "pl-4 whitespace-pre-wrap [overflow-wrap:anywhere] text-secondary-text transition-[opacity,visibility] duration-150 ease-(--ease-out-cubic)",
-                        !showOut && "invisible opacity-0",
+                        !showOut && "invisible opacity-0 max-sm:hidden",
                       )}
                     >
                       {s.out.map((line) => (
@@ -172,6 +181,7 @@ export function Terminal() {
               )
             })}
           </div>
+          <div aria-hidden="true" className="max-sm:flex-1" />
           <div
             aria-hidden="true"
             className={cn(
@@ -183,16 +193,19 @@ export function Terminal() {
           </div>
         </div>
 
-        <div className="relative flex h-9 items-center gap-3 border-t border-white/[0.06] px-4 font-mono text-[11px] text-muted-foreground sm:px-5">
+        <div className="relative flex h-9 items-center gap-3 border-t border-white/[0.06] px-4 font-mono text-xs text-muted-foreground sm:px-5">
           <span className="flex items-center gap-2">
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-success motion-safe:animate-[pulse-dot_2.4s_ease-in-out_infinite]" />
+            <span
+              aria-hidden="true"
+              className={cn("size-1.5 rounded-full bg-success", !paused && "motion-safe:animate-[pulse-dot_2.4s_ease-in-out_infinite]")}
+            />
             lumbungd
           </span>
           <span className="ml-auto flex items-center gap-1.5" aria-hidden="true">
             <span className="rounded-full border border-white/10 px-2 py-0.5 text-secondary-text">main</span>
             <span
               data-open={branchOpen}
-              className="rounded-full border border-white/10 px-2 py-0.5 text-secondary-text [will-change:opacity,scale] transition-[opacity,scale] duration-200 ease-(--ease-out-cubic) data-[open=false]:scale-[0.94] data-[open=false]:opacity-0 data-[open=false]:duration-150 data-[open=true]:delay-120"
+              className="rounded-full border border-white/10 px-2 py-0.5 text-secondary-text transition-[opacity,scale] duration-200 ease-(--ease-out-cubic) data-[open=false]:scale-[0.94] data-[open=false]:opacity-0 data-[open=false]:duration-150 data-[open=true]:delay-120"
             >
               pr-42
             </span>

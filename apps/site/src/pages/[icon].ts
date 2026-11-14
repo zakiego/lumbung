@@ -4,7 +4,7 @@
 // the color scheme the way the SVG does.
 import type { APIRoute, GetStaticPaths } from "astro"
 import sharp from "sharp"
-import { markPath, themeColor } from "@/lib/site"
+import { dark, markPath } from "@/lib/site"
 
 // size: the icon's edge. inset: how much of it the mark fills. radius: corner
 // rounding; 0 where the platform rounds the icon itself.
@@ -22,8 +22,8 @@ function svg(size: number, inset: number, radius: number) {
   const offset = (size - mark) / 2
   return Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">` +
-      `<rect width="${size}" height="${size}" rx="${size * radius}" fill="${themeColor.dark}"/>` +
-      `<g transform="translate(${offset} ${offset}) scale(${mark / 32})"><path d="${markPath}" fill="#e8e2cf"/></g>` +
+      `<rect width="${size}" height="${size}" rx="${size * radius}" fill="${dark.background}"/>` +
+      `<g transform="translate(${offset} ${offset}) scale(${mark / 32})"><path d="${markPath}" fill="${dark.mark}"/></g>` +
       `</svg>`,
   )
 }

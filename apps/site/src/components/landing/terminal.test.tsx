@@ -1,6 +1,7 @@
 import { act, render, screen } from "@testing-library/react"
 import { createAgent } from "@ui-sdk/react/agent"
 import { afterEach, beforeEach, expect, test, vi } from "vitest"
+import { FakeIntersectionObserver } from "@/test/setup"
 import { next, session, Terminal, TYPE_MS, type Frame } from "./terminal"
 
 beforeEach(() => vi.useFakeTimers())
@@ -75,4 +76,54 @@ test("an agent can find and press the pause control", async () => {
   const result = await act(async () => agent.act({ steps: [{ ref: "Pause demo", action: "setPressed", args: [true] }] }))
   expect(result.ok).toBe(true)
   expect(screen.getByRole("button", { name: "Pause demo" }).getAttribute("aria-pressed")).toBe("true")
+})
+
+test("scrolled off screen, the loop holds still and picks up where it was", async () => {
+  const { container } = render(<Terminal />)
+  await tick(4)
+  const observer = FakeIntersectionObserver.instances.at(-1)!
+  await act(async () => observer.fire(false))
+  const before = typed(lines(container)[0])
+  await tick(20)
+  expect(typed(lines(container)[0])).toBe(before)
+
+  await act(async () => observer.fire(true))
+  await tick(1)
+  expect(typed(lines(container)[0])?.length).toBe((before?.length ?? 0) + 1)
+})
+
+test("in a hidden tab, the loop holds still", async () => {
+  const { container } = render(<Terminal />)
+  await tick(2)
+  const state = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+  await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+  const before = typed(lines(container)[0])
+  await tick(20)
+  expect(typed(lines(container)[0])).toBe(before)
+
+  state.mockReturnValue("visible")
+  await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+  await tick(1)
+  expect(typed(lines(container)[0])?.length).toBe((before?.length ?? 0) + 1)
+  state.mockRestore()
+})
+
+test("unmounting stops the timer and lets go of the observer and the tab listener", async () => {
+  const remove = vi.spyOn(document, "removeEventListener")
+  const { unmount } = render(<Terminal />)
+  await tick(2)
+  const observer = FakeIntersectionObserver.instances.at(-1)!
+  unmount()
+  expect(observer.disconnected).toBe(true)
+  expect(remove).toHaveBeenCalledWith("visibilitychange", expect.any(Function))
+  expect(vi.getTimerCount()).toBe(0)
+  remove.mockRestore()
+})
+
+test("pausing stops the status dot's pulse too", async () => {
+  const { container } = render(<Terminal />)
+  const dot = () => container.querySelector(".bg-success.rounded-full")!
+  expect(dot().className).toContain("animate-")
+  await act(async () => screen.getByRole("button", { name: "Pause demo" }).click())
+  expect(dot().className).not.toContain("animate-")
 })

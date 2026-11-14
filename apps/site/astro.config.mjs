@@ -11,22 +11,37 @@ import { defineConfig } from "astro/config"
 // by the landing layout, so the docs keep Starlight's own styles.
 
 // The public origin for canonical, Open Graph, sitemap and robots URLs. The
-// Pages build sets SITE_URL; a build without it gets the production default,
-// so a localhost URL never ships in those tags. Dev stays on localhost.
-const isBuild = process.argv.includes("build")
-const site = process.env.SITE_URL ?? (isBuild ? "https://lumbung.zakiego.com" : "http://localhost:4872")
+// Pages build sets SITE_URL. Without it, Astro's own command decides: `dev`
+// stays on localhost, anything else (build, preview, a programmatic build)
+// gets the production default, so a localhost URL never ships in those tags.
+/** @returns {import("astro").AstroIntegration} */
+function siteUrl() {
+  return {
+    name: "lumbung-site-url",
+    hooks: {
+      "astro:config:setup": ({ command, config, updateConfig }) => {
+        if (config.site) return
+        updateConfig({ site: command === "dev" ? "http://localhost:4872" : "https://lumbung.zakiego.com" })
+      },
+    },
+  }
+}
 
 export default defineConfig({
-  site,
+  site: process.env.SITE_URL || undefined,
   trailingSlash: "ignore",
   devToolbar: { enabled: false },
   vite: { plugins: [tailwindcss()] },
   integrations: [
+    siteUrl(),
     react(),
     starlight({
       title: "Lumbung",
       description: "Self-hosted SQLite databases with branches.",
       head: [
+        // Starlight's page backgrounds (--sl-color-black in each theme).
+        { tag: "meta", attrs: { name: "theme-color", content: "#17181c", media: "(prefers-color-scheme: dark)" } },
+        { tag: "meta", attrs: { name: "theme-color", content: "#ffffff", media: "(prefers-color-scheme: light)" } },
         { tag: "link", attrs: { rel: "icon", href: "/favicon.ico", sizes: "32x32" } },
         { tag: "link", attrs: { rel: "apple-touch-icon", href: "/apple-touch-icon.png" } },
         { tag: "link", attrs: { rel: "manifest", href: "/site.webmanifest" } },

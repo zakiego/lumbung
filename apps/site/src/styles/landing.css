@@ -28,6 +28,7 @@
   --color-secondary-hover: var(--secondary-hover);
   --color-ring: var(--ring);
   --color-success: var(--success);
+  --color-terminal: var(--terminal);
 
   --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
   --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
@@ -57,6 +58,7 @@
   --ring: #5e6ad2;
   --success: #27a644;
   --mark: #e8e2cf;
+  --terminal: #0b0c0d;
 }
 
 :root[data-theme="light"] {
@@ -157,11 +159,17 @@
   }
 }
 
-/* Until the demo hydrates and starts at its first step, keep the finished
-   session (the server's poster) from flashing. Without JS or with reduced
-   motion, the poster shows. */
+/* Until the demo mounts and starts at its first step, keep the finished
+   session (the server's poster) from flashing. The hold ends on its own after
+   2.5s, so if the island never hydrates the poster still shows. Without JS or
+   with reduced motion, the poster shows at once. */
 @media (prefers-reduced-motion: no-preference) {
-  html[data-js] [data-terminal="poster"] [data-screen] {
+  html[data-js] [data-terminal]:not([data-mounted]) [data-screen] {
+    animation: poster-hold 0s 2.5s both;
+  }
+}
+@keyframes poster-hold {
+  from {
     visibility: hidden;
   }
 }
