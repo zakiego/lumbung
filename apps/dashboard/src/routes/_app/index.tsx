@@ -1,6 +1,6 @@
 import type { AuditOut } from "@lumbung/client"
 import { Await, Link, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { CircleAlertIcon, DatabaseIcon, Trash2Icon } from "lucide-react"
+import { CircleAlertIcon, DatabaseIcon } from "lucide-react"
 import { RecentActivity } from "@/components/app/activity"
 import { DatabaseTable } from "@/components/app/database-table"
 import { CreateDatabaseDialog, useCreateDatabase } from "@/components/app/name-dialog"
@@ -8,7 +8,6 @@ import { RequestsChart } from "@/components/app/requests-chart"
 import { PageBody, PageHeader, PageTitle } from "@/components/app/shell"
 import { ChartFailed, Deferred, Stat, StatGrid, WindowSelect } from "@/components/app/stats"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
-import { buttonVariants } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, Empty, Skeleton, StatusText } from "@/components/ui/surface"
 import { listAudit } from "@/fns/admin"
 import { getWorkspaceStats, listDatabases } from "@/fns/databases"
@@ -80,15 +79,7 @@ function OverviewPage() {
 
   const create = useCreateDatabase()
 
-  const actions = (
-    <>
-      <Link to="/trash" className={buttonVariants({ variant: "ghost" })}>
-        <Trash2Icon aria-hidden="true" />
-        <span className="max-sm:sr-only">Trash</span>
-      </Link>
-      {canWrite && <CreateDatabaseDialog onCreate={create} />}
-    </>
-  )
+  const actions = canWrite ? <CreateDatabaseDialog onCreate={create} /> : undefined
 
   if (databases.length === 0) {
     return (
