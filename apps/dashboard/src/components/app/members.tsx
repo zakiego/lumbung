@@ -8,22 +8,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/u
 import { Badge, Empty, Table, TableCell, TableHead, TableRow } from "@/components/ui/surface"
 import { formatDate, timeLeft } from "@/lib/format"
 import { ROLE_LABEL, WORKSPACE_ROLES, type WorkspaceGrant, type WorkspaceRole, isWorkspaceRole } from "@/lib/roles"
+import { cn } from "@/lib/utils"
 import type { Workspace } from "@/server/access"
 import type { Invite, Member, MemberAccess } from "@/server/users"
 import { Confirm, FormDialog, ShownOnce } from "./form-dialog"
 
 type Named = Pick<Workspace, "id" | "name">
 
-type Shown = { id: string; label: string; role: WorkspaceRole }
+type Shown = { id: string; name: string; deleted: boolean; role: WorkspaceRole }
 
 // A role in a deleted workspace is shown, marked: restoring the workspace
 // gives it back. A role in one that is gone for good is left out.
 function shownGrants(grants: WorkspaceGrant[], workspaces: Named[], deleted: Named[]): Shown[] {
   const live = new Map(workspaces.map((w) => [w.id, w.name]))
   const gone = new Map(deleted.map((w) => [w.id, w.name]))
-  return grants.flatMap((g) => {
-    if (live.has(g.workspace)) return [{ id: g.workspace, label: live.get(g.workspace)!, role: g.role }]
-    if (gone.has(g.workspace)) return [{ id: g.workspace, label: `${gone.get(g.workspace)} (deleted)`, role: g.role }]
+  return grants.flatMap((g): Shown[] => {
+    if (live.has(g.workspace)) return [{ id: g.workspace, name: live.get(g.workspace)!, deleted: false, role: g.role }]
+    if (gone.has(g.workspace)) return [{ id: g.workspace, name: gone.get(g.workspace)!, deleted: true, role: g.role }]
     return []
   })
 }
@@ -31,7 +32,7 @@ function shownGrants(grants: WorkspaceGrant[], workspaces: Named[], deleted: Nam
 /** "Owner", or each workspace with the role in it. */
 export function accessSummary(a: { owner: boolean; grants: WorkspaceGrant[] }, workspaces: Named[], deleted: Named[] = []): string {
   if (a.owner) return ROLE_LABEL.owner
-  const parts = shownGrants(a.grants, workspaces, deleted).map((g) => `${g.label} · ${ROLE_LABEL[g.role]}`)
+  const parts = shownGrants(a.grants, workspaces, deleted).map((g) => `${g.name}${g.deleted ? " (deleted)" : ""} · ${ROLE_LABEL[g.role]}`)
   return parts.length ? parts.join(", ") : "No workspace"
 }
 
@@ -49,30 +50,47 @@ function AccessSummary({
 }) {
   const text = accessSummary(access, workspaces, deleted)
   const grants = access.owner ? [] : shownGrants(access.grants, workspaces, deleted)
+  const only = grants.length === 1 ? grants[0] : undefined
+  // One workspace: only its name gives way, so the role is never cut off.
+  if (only) {
+    return (
+      <span title={text} className={cn("flex min-w-0 text-muted-foreground", className)}>
+        <span className="min-w-0 truncate font-mono">{only.name}</span>
+        <span className="shrink-0 whitespace-pre">
+          {only.deleted && " (deleted)"} · {ROLE_LABEL[only.role]}
+        </span>
+      </span>
+    )
+  }
   return (
-    <span title={text} className={`block truncate text-muted-foreground ${className ?? ""}`}>
-        {grants.length === 0
-          ? text
-          : grants.map((g, i) => (
-              <span key={g.id}>
-                {i > 0 && ", "}
-                <span className="font-mono">{g.label}</span> · {ROLE_LABEL[g.role]}
-              </span>
-            ))}
+    <span title={text} className={cn("block truncate text-muted-foreground", className)}>
+      {grants.length === 0
+        ? text
+        : grants.map((g, i) => (
+            <span key={g.id}>
+              {i > 0 && ", "}
+              <span className="font-mono">{g.name}</span>
+              {g.deleted && " (deleted)"} · {ROLE_LABEL[g.role]}
+            </span>
+          ))}
     </span>
   )
 }
 
-// One person's access while it is being edited: an owner, or a role (or none) in each workspace.
-type Draft = { owner: boolean; roles: Record<string, WorkspaceRole | "none"> }
+// One person's access while it is being edited: an owner, or a role (or none)
+// in each workspace. `kept` holds their roles in deleted workspaces, which
+// the editor doesn't list and a save must not drop: a restore gives them back.
+type Draft = { owner: boolean; roles: Record<string, WorkspaceRole | "none">; kept: WorkspaceGrant[] }
 
-function draftOf(a: { owner: boolean; grants: WorkspaceGrant[] }): Draft {
-  return { owner: a.owner, roles: Object.fromEntries(a.grants.map((g) => [g.workspace, g.role])) }
+function draftOf(a: { owner: boolean; grants: WorkspaceGrant[] }, deleted: Named[] = []): Draft {
+  const gone = new Set(deleted.map((w) => w.id))
+  return { owner: a.owner, roles: Object.fromEntries(a.grants.map((g) => [g.workspace, g.role])), kept: a.grants.filter((g) => gone.has(g.workspace)) }
 }
 
 function accessOf(d: Draft, workspaces: Named[]): MemberAccess {
   if (d.owner) return { owner: true }
-  return { owner: false, grants: workspaces.flatMap((w) => (isWorkspaceRole(d.roles[w.id]) ? [{ workspace: w.id, role: d.roles[w.id] as WorkspaceRole }] : [])) }
+  const live = workspaces.flatMap((w) => (isWorkspaceRole(d.roles[w.id]) ? [{ workspace: w.id, role: d.roles[w.id] as WorkspaceRole }] : []))
+  return { owner: false, grants: [...live, ...d.kept] }
 }
 
 const KINDS = [
@@ -98,17 +116,17 @@ function AccessFields({ workspaces, value, onChange }: { workspaces: Named[]; va
         </Select>
       </Field>
       {!value.owner && (
-        <ScrollArea label="Workspaces" className="-my-1 max-h-64" viewportClassName="max-h-64">
+        <ScrollArea label="Workspaces" type="auto" className="-my-1 max-h-64" viewportClassName="max-h-64 pr-3">
           <ul className="flex flex-col">
             {workspaces.map((w) => (
-              <li key={w.id} className="flex min-w-0 items-center justify-between gap-3 py-1">
+              <li key={w.id} className="flex min-w-0 flex-col gap-1 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                 <span className="min-w-0 font-mono text-[13px] [overflow-wrap:anywhere]">{w.name}</span>
                 <Select
                   items={ROLE_ITEMS}
                   value={value.roles[w.id] ?? "none"}
                   onValueChange={(v) => (v === "none" || isWorkspaceRole(v)) && onChange({ ...value, roles: { ...value.roles, [w.id]: v } })}
                 >
-                  <SelectTrigger aria-label={`Role in ${w.name}`} className="w-36 shrink-0" />
+                  <SelectTrigger aria-label={`Role in ${w.name}`} className="w-full shrink-0 sm:w-36" />
                   <SelectContent>
                     {ROLE_ITEMS.map((r) => (
                       <SelectItem key={r.value} value={r.value}>
@@ -156,7 +174,7 @@ export function MemberTable({ members, me, workspaces, deleted, onAccess, onRemo
 }
 
 function MemberRow({ member: m, self, workspaces, deleted, onAccess, onRemove }: { member: Member; self: boolean } & Lists & MemberActions) {
-  const [draft, setDraft] = useState(() => draftOf(m))
+  const [draft, setDraft] = useState(() => draftOf(m, deleted))
   const who = m.name || m.email
   return (
     <TableRow>
@@ -192,7 +210,7 @@ function MemberRow({ member: m, self, workspaces, deleted, onAccess, onRemove }:
               submit="Save"
               pendingSubmit="Saving…"
               pinned
-              onOpen={() => setDraft(draftOf(m))}
+              onOpen={() => setDraft(draftOf(m, deleted))}
               onSubmit={async () => {
                 await onAccess(m, accessOf(draft, workspaces))
               }}
@@ -298,7 +316,9 @@ export function InviteDialog({
   onInvite: (email: string, access: MemberAccess) => Promise<string>
   onDone?: () => void
 }) {
-  const fresh = (): Draft => ({ owner: false, roles: current ? { [current]: "member" } : {} })
+  const fresh = (): Draft => ({ owner: false, roles: current ? { [current]: "member" } : {}, kept: [] })
+  // The workspace that starts with a role comes first, where it is seen.
+  const ordered = current ? [...workspaces].sort((a, b) => Number(b.id === current) - Number(a.id === current)) : workspaces
   const [email, setEmail] = useState("")
   const [draft, setDraft] = useState<Draft>(fresh)
   return (
@@ -324,7 +344,7 @@ export function InviteDialog({
         <FieldLabel>Email</FieldLabel>
         <Input type="email" value={email} onValueChange={setEmail} required maxLength={200} placeholder="sam@example.com" autoComplete="off" />
       </Field>
-      <AccessFields workspaces={workspaces} value={draft} onChange={setDraft} />
+      <AccessFields workspaces={ordered} value={draft} onChange={setDraft} />
     </FormDialog>
   )
 }

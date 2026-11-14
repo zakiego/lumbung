@@ -77,10 +77,25 @@ describe("accessSummary", () => {
   })
 })
 
-function table(members: Member[], onAccess = vi.fn(async (_m: Member, _a: MemberAccess) => {})) {
-  render(<MemberTable members={members} me="me" workspaces={workspaces} onAccess={onAccess} onRemove={async () => {}} />)
+function table(members: Member[], onAccess = vi.fn(async (_m: Member, _a: MemberAccess) => {}), deleted?: { id: string; name: string }[]) {
+  render(<MemberTable members={members} me="me" workspaces={workspaces} deleted={deleted} onAccess={onAccess} onRemove={async () => {}} />)
   return onAccess
 }
+
+// A workspace in the trash, and someone with a role in it next to one in a live workspace.
+const OLD = { id: "ws_dddddddddddddddddddd", name: "old-experiment" }
+const fay: Member = {
+  id: "m5",
+  name: "Fay",
+  email: "fay@example.com",
+  owner: false,
+  grants: [
+    { workspace: DEFAULT.id, role: "readonly" },
+    { workspace: OLD.id, role: "admin" },
+  ],
+  createdAt: at,
+}
+const gus: Member = { id: "m6", name: "Gus", email: "gus@example.com", owner: false, grants: [{ workspace: OLD.id, role: "member" }], createdAt: at }
 
 const agent = createAgent()
 
@@ -114,12 +129,58 @@ describe("the member table", () => {
       { text: "No workspace", title: "No workspace", mono: [] },
     ])
     for (const s of summaries) {
-      expect(s.className).toContain("truncate")
       // Plain text: nothing to do with it, so it isn't a stop for the keyboard.
       expect(s.hasAttribute("tabindex")).toBe(false)
       expect(s.hasAttribute("aria-describedby")).toBe(false)
     }
+    // Owner, several workspaces and no workspace are one line that is cut off as a whole.
+    for (const s of [summaries[0]!, summaries[2]!, summaries[3]!]) {
+      expect(s.className).toContain("block")
+      expect(s.className).toContain("truncate")
+    }
     expect(screen.getByRole("columnheader", { name: "Access" })).toBeTruthy()
+  })
+
+  test("with one workspace only its name is cut off, never the role", () => {
+    table([ann, bo])
+    const summary = document.querySelectorAll("tbody tr")[1]!.querySelectorAll("td")[1]!.firstElementChild as HTMLElement
+    expect(summary.getAttribute("title")).toBe("default · Read-only")
+    expect(summary.className).toContain("flex")
+    expect(summary.className).toContain("min-w-0")
+    expect(summary.className).not.toContain("truncate")
+    const [name, role] = [...summary.children] as HTMLElement[]
+    expect(summary.children).toHaveLength(2)
+    expect(name!.textContent).toBe("default")
+    for (const cls of ["truncate", "min-w-0", "font-mono"]) expect(name!.className, cls).toContain(cls)
+    expect(role!.textContent).toBe(" · Read-only")
+    expect(role!.className).toContain("shrink-0")
+    expect(role!.className).not.toContain("truncate")
+    expect(role!.className).not.toContain("font-mono")
+  })
+
+  test("a role in a deleted workspace is shown and marked, with the mark outside the mono name", () => {
+    table([ann, gus, fay], undefined, [OLD])
+    const [, one, several] = [...document.querySelectorAll("tbody tr")].map((r) => r.querySelectorAll("td")[1]!.firstElementChild as HTMLElement)
+    expect(summaryOf(one!)).toEqual({ text: "old-experiment (deleted) · Member", title: "old-experiment (deleted) · Member", mono: ["old-experiment"] })
+    const [name, role] = [...one!.children] as HTMLElement[]
+    expect(name!.textContent).toBe("old-experiment")
+    expect(role!.textContent).toBe(" (deleted) · Member")
+    expect(role!.className).toContain("shrink-0")
+
+    expect(summaryOf(several!)).toEqual({
+      text: "default · Read-only, old-experiment (deleted) · Admin",
+      title: "default · Read-only, old-experiment (deleted) · Admin",
+      mono: ["default", "old-experiment"],
+    })
+    expect(several!.className).toContain("truncate")
+    // The same text sits under each email for narrow screens.
+    expect(document.querySelectorAll(`tbody [title="old-experiment (deleted) · Member"]`)).toHaveLength(2)
+  })
+
+  test("without the list of deleted workspaces, a role in one isn't shown", () => {
+    table([ann, gus, fay])
+    const texts = [...document.querySelectorAll("tbody tr")].map((r) => r.querySelectorAll("td")[1]!.textContent)
+    expect(texts).toEqual(["Owner", "No workspace", "default · Read-only"])
   })
 
   test("on a narrow screen the Access column goes away and the same summary sits under the email", () => {
@@ -168,10 +229,22 @@ describe("the member table", () => {
     const dialog = screen.getByRole("dialog", { name: "Access for Bo" })
     expect(within(dialog).getByText("Saving signs them out.")).toBeTruthy()
     expect(screen.getByRole("combobox", { name: "Access" }).textContent).toContain("Chosen workspaces")
-    const list = within(dialog).getByLabelText("Workspaces")
+    const list = within(dialog).getByRole("region", { name: "Workspaces" })
+    expect(list).toBe(within(dialog).getByLabelText("Workspaces"))
     expect(list.getAttribute("data-slot")).toBe("scroll-area-viewport")
-    expect(within(list).getAllByRole("listitem").map((li) => li.firstElementChild?.textContent)).toEqual(["default", "agents", "staging"])
+    // Its scrollbar is always drawn when there is more, not only on hover.
+    expect(list.closest("[data-slot='scroll-area']")?.getAttribute("data-type") ?? "auto").toBe("auto")
+    const items = within(list).getAllByRole("listitem")
+    expect(items.map((li) => li.firstElementChild?.textContent)).toEqual(["default", "agents", "staging"])
     expect(within(list).getAllByRole("combobox")).toHaveLength(3)
+    // On a narrow screen each row stacks, name above a full-width select.
+    for (const li of items) {
+      for (const cls of ["flex-col", "sm:flex-row", "sm:items-center", "sm:justify-between"]) expect(li.className, cls).toContain(cls)
+      const select = within(li).getByRole("combobox")
+      expect(select.className).toContain("w-full")
+      expect(select.className).toContain("sm:w-36")
+      expect(li.firstElementChild!.className).toContain("[overflow-wrap:anywhere]")
+    }
     expect(screen.getByRole("combobox", { name: "Role in default" }).textContent).toContain("Read-only")
     expect(screen.getByRole("combobox", { name: "Role in agents" }).textContent).toContain("No access")
     expect(screen.getByRole("combobox", { name: "Role in staging" }).textContent).toContain("No access")
@@ -215,6 +288,82 @@ describe("the member table", () => {
     await pick(user, "Role in agents", "Read-only")
     await user.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(onAccess).toHaveBeenCalledWith(bo, { owner: false, grants: [{ workspace: AGENTS.id, role: "readonly" }] }))
+  })
+
+  test("a role in a deleted workspace isn't listed in the editor, and a save keeps it", async () => {
+    const user = userEvent.setup()
+    const onAccess = table([ann, fay], undefined, [OLD])
+    await user.click(screen.getByRole("button", { name: "Change access for Fay" }))
+    const list = screen.getByRole("region", { name: "Workspaces" })
+    expect(within(list).getAllByRole("listitem").map((li) => li.firstElementChild?.textContent)).toEqual(["default", "agents", "staging"])
+    expect(screen.queryByRole("combobox", { name: "Role in old-experiment" })).toBeNull()
+    expect(screen.getByRole("combobox", { name: "Role in default" }).textContent).toContain("Read-only")
+
+    await pick(user, "Role in default", "Admin")
+    await pick(user, "Role in staging", "Member")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onAccess).toHaveBeenCalledOnce())
+    expect(onAccess.mock.calls[0]).toEqual([
+      fay,
+      {
+        owner: false,
+        grants: [
+          { workspace: DEFAULT.id, role: "admin" },
+          { workspace: STAGING.id, role: "member" },
+          { workspace: OLD.id, role: "admin" },
+        ],
+      },
+    ])
+  })
+
+  test("taking every live workspace away still keeps the role in the deleted one", async () => {
+    const user = userEvent.setup()
+    const onAccess = table([ann, fay], undefined, [OLD])
+    await user.click(screen.getByRole("button", { name: "Change access for Fay" }))
+    await pick(user, "Role in default", "No access")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onAccess).toHaveBeenCalledOnce())
+    expect(onAccess.mock.calls[0]![1]).toEqual({ owner: false, grants: [{ workspace: OLD.id, role: "admin" }] })
+  })
+
+  test("someone whose only role is in a deleted workspace can be given a live one next to it", async () => {
+    const user = userEvent.setup()
+    const onAccess = table([ann, gus], undefined, [OLD])
+    await user.click(screen.getByRole("button", { name: "Change access for Gus" }))
+    for (const w of workspaces) expect(screen.getByRole("combobox", { name: `Role in ${w.name}` }).textContent).toContain("No access")
+    await pick(user, "Role in agents", "Read-only")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onAccess).toHaveBeenCalledOnce())
+    expect(onAccess.mock.calls[0]![1]).toEqual({
+      owner: false,
+      grants: [
+        { workspace: AGENTS.id, role: "readonly" },
+        { workspace: OLD.id, role: "member" },
+      ],
+    })
+  })
+
+  test("making them an owner sends owner alone, with no kept roles", async () => {
+    const user = userEvent.setup()
+    const onAccess = table([ann, fay], undefined, [OLD])
+    await user.click(screen.getByRole("button", { name: "Change access for Fay" }))
+    await pick(user, "Access", "Owner, every workspace")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onAccess).toHaveBeenCalledOnce())
+    expect(onAccess.mock.calls[0]).toEqual([fay, { owner: true }])
+  })
+
+  test("the kept roles follow the person, not the last one edited", async () => {
+    const user = userEvent.setup()
+    const onAccess = table([ann, fay, bo], undefined, [OLD])
+    await user.click(screen.getByRole("button", { name: "Change access for Fay" }))
+    await user.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await user.click(screen.getByRole("button", { name: "Change access for Bo" }))
+    await pick(user, "Role in default", "Member")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onAccess).toHaveBeenCalledOnce())
+    expect(onAccess.mock.calls[0]).toEqual([bo, { owner: false, grants: [{ workspace: DEFAULT.id, role: "member" }] }])
   })
 
   test("a role in a workspace that is gone isn't sent back", async () => {
@@ -359,11 +508,32 @@ describe("the invite dialog", () => {
     return { onInvite, onDone }
   }
 
+  const listed = () => within(screen.getByRole("region", { name: "Workspaces" })).getAllByRole("listitem").map((li) => li.firstElementChild?.textContent)
+
+  test("lists the workspace on screen first, where its role is seen, and the rest in their order", async () => {
+    const user = userEvent.setup()
+    const first = render(<InviteDialog workspaces={workspaces} current={STAGING.id} onInvite={async () => "x"} />)
+    await user.click(screen.getByRole("button", { name: "Invite" }))
+    expect(listed()).toEqual(["staging", "default", "agents"])
+    expect(screen.getByRole("combobox", { name: "Role in staging" }).textContent).toContain("Member")
+    first.unmount()
+
+    const already = render(<InviteDialog workspaces={workspaces} current={DEFAULT.id} onInvite={async () => "x"} />)
+    await user.click(screen.getByRole("button", { name: "Invite" }))
+    expect(listed()).toEqual(["default", "agents", "staging"])
+    already.unmount()
+
+    render(<InviteDialog workspaces={workspaces} onInvite={async () => "x"} />)
+    await user.click(screen.getByRole("button", { name: "Invite" }))
+    expect(listed()).toEqual(["default", "agents", "staging"])
+  })
+
   test("starts with the workspace on screen as Member, and shows the link once", async () => {
     const user = userEvent.setup()
     const { onInvite, onDone } = invite(AGENTS.id)
     await user.click(screen.getByRole("button", { name: "Invite" }))
     expect(screen.getByRole("dialog", { name: "Invite someone" })).toBeTruthy()
+    expect(listed()).toEqual(["agents", "default", "staging"])
     expect(screen.getByRole("combobox", { name: "Access" }).textContent).toContain("Chosen workspaces")
     expect(screen.getByRole("combobox", { name: "Role in agents" }).textContent).toContain("Member")
     expect(screen.getByRole("combobox", { name: "Role in default" }).textContent).toContain("No access")

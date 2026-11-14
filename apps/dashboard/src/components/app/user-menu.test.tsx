@@ -36,6 +36,12 @@ test.each<[Role, string]>([
   for (const other of ["Owner", "Admin", "Member", "Read-only"]) if (other !== label) expect(within(trigger).queryByText(other)).toBeNull()
 })
 
+test("the trigger shows it is being pressed, like the workspace switcher above it", () => {
+  render(<UserMenu viewer={viewer} />)
+  const trigger = screen.getByRole("button", { name: /Ada/ })
+  for (const cls of ["active:bg-sidebar-accent", "active:duration-0", "select-none", "data-open:bg-sidebar-accent"]) expect(trigger.className, cls).toContain(cls)
+})
+
 test("someone with no workspace yet shows no role", () => {
   render(<UserMenu viewer={{ ...viewer, owner: false, role: "readonly" }} placed={false} />)
   const trigger = screen.getByRole("button", { name: /Ada/ })

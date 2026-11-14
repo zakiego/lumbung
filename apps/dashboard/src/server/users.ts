@@ -7,9 +7,10 @@
 // with a role in each, kept in workspace_member.
 //
 // The column is also what a dashboard from before workspaces reads as an
-// instance-wide role. So for someone invited or changed since, it holds
-// NOT_OWNER, the least that dashboard knows: a rollback gives nobody more
-// than they had in any workspace.
+// instance-wide role. For someone invited or changed since, it holds
+// NOT_OWNER, the least that dashboard knows. That is still read access to
+// the whole instance, which can be more than their workspaces: a rollback of
+// the dashboard needs a look at who is in it (the Upgrades page says so).
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import { type WorkspaceGrant, isWorkspaceRole } from "@/lib/roles"
 import { grantsOf, setGrants } from "./access"

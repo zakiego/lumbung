@@ -86,6 +86,73 @@ test("Escape closes it and focus goes back to the trigger", async () => {
   expect(document.activeElement).toBe(trigger)
 })
 
+test("opened by its own trigger, it is empty every time", async () => {
+  const user = userEvent.setup()
+  const onCreate = vi.fn(async (_name: string) => {})
+  render(<CreateDatabaseDialog onCreate={onCreate} />)
+  const trigger = screen.getByRole("button", { name: "New database" })
+  await user.click(trigger)
+  await user.type(screen.getByLabelText("Name"), "half-typed")
+  await user.keyboard("{Escape}")
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+  await user.click(trigger)
+  expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("")
+  await user.type(screen.getByLabelText("Name"), "shop")
+  await user.click(screen.getByRole("button", { name: "Create" }))
+  await waitFor(() => expect(onCreate).toHaveBeenCalledWith("shop"))
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+  // After a success too.
+  await user.click(trigger)
+  expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("")
+  expect(onCreate).toHaveBeenCalledOnce()
+})
+
+test("the field is cleared on the way in, not on the way out: what was typed is still there while it closes", async () => {
+  const user = userEvent.setup()
+  // An owner that hears the request to close and hasn't closed it yet, like a dialog that is still fading.
+  const onOpenChange = vi.fn()
+  const view = (open: boolean) => <NameDialog open={open} onOpenChange={onOpenChange} title="Create workspace" label="Name" submit="Create" pendingSubmit="Creating…" onSubmit={async () => {}} />
+  const { rerender } = render(view(true))
+  const field = () => screen.getByLabelText("Name") as HTMLInputElement
+  await user.type(field(), "half-typed")
+  await user.keyboard("{Escape}")
+  expect(onOpenChange).toHaveBeenLastCalledWith(false)
+  expect(field().value).toBe("half-typed")
+
+  rerender(view(false))
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  rerender(view(true))
+  expect(field().value).toBe("")
+})
+
+test("opened from outside, a refusal doesn't survive to the next open", async () => {
+  const user = userEvent.setup()
+  const view = (open: boolean) => (
+    <NameDialog
+      open={open}
+      onOpenChange={() => {}}
+      title="Create workspace"
+      label="Name"
+      submit="Create"
+      pendingSubmit="Creating…"
+      onSubmit={async () => {
+        throw new Error("A workspace named taken already exists.")
+      }}
+    />
+  )
+  const { rerender } = render(view(true))
+  await user.type(screen.getByLabelText("Name"), "taken")
+  await user.click(screen.getByRole("button", { name: "Create" }))
+  expect(await screen.findByText("A workspace named taken already exists.")).toBeTruthy()
+  rerender(view(false))
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  rerender(view(true))
+  expect(screen.queryByText("A workspace named taken already exists.")).toBeNull()
+  expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("")
+})
+
 // Something else opens it, like a menu item: there is no trigger of its own.
 function Outside({ onSubmit }: { onSubmit: (name: string) => Promise<unknown> }) {
   const [open, setOpen] = useState(false)

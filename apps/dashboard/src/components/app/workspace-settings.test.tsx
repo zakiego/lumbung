@@ -74,7 +74,7 @@ test("UsageList: terabytes and petabytes read in their own units", () => {
     />,
   )
   expect(screen.getByText("1.50 TB of 2.00 TB")).toBeTruthy()
-  expect(screen.getByText("1 PB of 7.45 PB")).toBeTruthy()
+  expect(screen.getByText("1.00 PB of 7.45 PB")).toBeTruthy()
 })
 
 describe("LimitsForm", () => {

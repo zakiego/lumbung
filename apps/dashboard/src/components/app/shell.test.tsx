@@ -157,12 +157,33 @@ test("a long list of workspaces scrolls inside the menu, and a long name wraps",
   await shell("member", { workspace: many[0], workspaces: many })
   await user.click(sidebar().getByRole("button", { name: "Workspace team-0. Switch workspace" }))
   const menu = await screen.findByRole("menu")
-  expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(60)
-  expect(menu.className).toContain("max-h-(--available-height)")
-  expect(menu.className).toContain("overflow-y-auto")
+  const items = within(menu).getAllByRole("menuitemradio")
+  expect(items).toHaveLength(60)
+  // The menu is as tall as there is room for, and the list of workspaces is the part that scrolls.
+  for (const cls of ["max-h-(--available-height)", "flex", "flex-col"]) expect(menu.className, cls).toContain(cls)
+  expect(menu.className).not.toContain("overflow-y-auto")
+  const scrolls = items[0]!.closest<HTMLElement>(".overflow-y-auto")!
+  expect(scrolls).not.toBe(menu)
+  expect(menu.contains(scrolls)).toBe(true)
+  expect(scrolls.className).toContain("min-h-0")
+  for (const item of items) expect(scrolls.contains(item)).toBe(true)
+  expect(within(scrolls).getByText("Workspaces")).toBeTruthy()
   const long = within(menu).getByText(worst.LONG_WORKSPACE)
   expect(long.className).toContain("[overflow-wrap:anywhere]")
   expect(long.className).not.toContain("truncate")
+})
+
+test("New workspace stays in reach under a long list: it is outside the part that scrolls", async () => {
+  const user = userEvent.setup()
+  const many = Array.from({ length: 60 }, (_, i) => info(`team-${i}`, `ws_${String(i).padStart(20, "0")}`, "owner", i === 0))
+  await shell("owner", { workspace: many[0], workspaces: many })
+  await user.click(sidebar().getByRole("button", { name: "Workspace team-0. Switch workspace" }))
+  const menu = await screen.findByRole("menu")
+  const scrolls = within(menu).getAllByRole("menuitemradio")[0]!.closest<HTMLElement>(".overflow-y-auto")!
+  const create = within(menu).getByRole("menuitem", { name: "New workspace" })
+  expect(scrolls.contains(create)).toBe(false)
+  expect(scrolls.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(create.closest(".overflow-y-auto")).toBeNull()
 })
 
 test("picking another workspace opens it, picking the current one goes nowhere", async () => {
@@ -302,21 +323,21 @@ describe("someone with one workspace and no way to make another", () => {
     return { text, row: text.parentElement! }
   }
 
-  test.each<Role>(["admin", "member", "readonly"])("%s: the name is shown in a plain row, with no menu to open", async (role) => {
+  test.each<Role>(["admin", "member", "readonly"])("%s: the name is a link to the workspace's overview, with no menu to open", async (role) => {
     const user = userEvent.setup()
     const only = info("agents", "ws_bbbbbbbbbbbbbbbbbbbb", role)
-    await shell(role, { workspace: only, workspaces: [only] })
+    const { router } = await shell(role, { workspace: only, workspaces: [only] })
     expect(sidebar().queryByRole("button", { name: /Switch workspace/ })).toBeNull()
     expect(sidebar().queryByRole("button", { name: /agents/ })).toBeNull()
     const { text, row: el } = row("agents")
     expect(text.className).toContain("font-mono")
-    expect(el.tagName).toBe("DIV")
-    expect(el.getAttribute("title")).toBe("agents")
+    // A link named by the workspace's name, and nothing that opens a popup.
+    expect(el).toBe(sidebar().getByRole("link", { name: "agents" }))
+    expect(el.getAttribute("href")).toBe("/w/agents")
     expect(el.hasAttribute("aria-haspopup")).toBe(false)
-    // Nothing to do with it, so it isn't a stop for the keyboard.
-    expect(el.hasAttribute("tabindex")).toBe(false)
-    expect(el.hasAttribute("role")).toBe(false)
+    expect(el.hasAttribute("aria-label")).toBe(false)
     await user.click(el)
+    await waitFor(() => expect(router.state.location.pathname).toBe("/w/agents"))
     expect(screen.queryByRole("menu")).toBeNull()
     expect(screen.queryByRole("menuitemradio")).toBeNull()
     expect(screen.queryByRole("menuitem", { name: "New workspace" })).toBeNull()
@@ -324,14 +345,19 @@ describe("someone with one workspace and no way to make another", () => {
     expect(rail().getByRole("link", { name: "Overview" }).getAttribute("href")).toBe("/w/agents")
   })
 
-  test("a 63 character name is cut off in the row and read in full from its title", async () => {
+  test("a 63 character name is cut off in the row and read in full from its tip, by keyboard too", async () => {
     const long = info(worst.LONG_WORKSPACE, "ws_cccccccccccccccccccc", "member")
     await shell("member", { workspace: long, workspaces: [long] })
     const { text, row: el } = row(worst.LONG_WORKSPACE)
     expect(text.className).toContain("truncate")
-    expect(el.getAttribute("title")).toBe(worst.LONG_WORKSPACE)
-    expect(el.hasAttribute("aria-describedby")).toBe(false)
-    expect([...document.querySelectorAll("[role='tooltip']")].map((t) => t.textContent)).not.toContain(worst.LONG_WORKSPACE)
+    expect(el).toBe(sidebar().getByRole("link", { name: worst.LONG_WORKSPACE }))
+    expect(el.getAttribute("href")).toBe(`/w/${worst.LONG_WORKSPACE}`)
+    // A link is a stop for the keyboard as it is, and the tip describes it.
+    expect(el.hasAttribute("title")).toBe(false)
+    expect(el.hasAttribute("tabindex")).toBe(false)
+    const tip = document.getElementById(el.getAttribute("aria-describedby")!)!
+    expect(tip.getAttribute("role")).toBe("tooltip")
+    expect(tip.textContent).toBe(worst.LONG_WORKSPACE)
   })
 
   test("an owner with one workspace keeps the menu, to make another", async () => {
@@ -349,15 +375,16 @@ describe("someone with one workspace and no way to make another", () => {
     expect(sidebar().getByRole("button", { name: "Workspace agents. Switch workspace" })).toBeTruthy()
   })
 
-  test("the plain row raises no ui-sdk warning, and an agent sees nothing to press in its place", async () => {
+  test("the link raises no ui-sdk warning, and an agent sees a named tip and no menu in its place", async () => {
     const before = lastUiSdkWarning()
     const only = info("agents", "ws_bbbbbbbbbbbbbbbbbbbb", "member")
     await shell("member", { workspace: only, workspaces: [only] })
     await settle()
     expect(lastUiSdkWarning()).toBe(before)
-    const labels = agent.snapshot().filter((e) => !e.offPage).map((e) => e.label)
-    expect(labels).not.toContain("agents")
-    expect(labels.filter((l) => l?.includes("Switch workspace"))).toEqual([])
+    const entries = agent.snapshot().filter((e) => !e.offPage)
+    expect(entries.filter((e) => e.label === "agents").map((e) => e.component)).toEqual(["tooltip"])
+    expect(entries.filter((e) => e.label?.includes("Switch workspace"))).toEqual([])
+    expect(entries.filter((e) => e.component === "menu").map((e) => e.label)).toEqual([expect.stringContaining("Dev")])
   })
 })
 
@@ -372,19 +399,47 @@ describe("the page header", () => {
 
   test("inside a workspace, the workspace's name comes before the title", async () => {
     await shell("admin", { workspace: agents, children: page("Tokens"), place: { route: "/w/$ws/tokens", at: "/w/agents/tokens" } })
-    const crumb = header().getByText("agents")
-    expect(crumb.getAttribute("title")).toBe("agents")
+    const crumb = header().getByRole("link", { name: "agents" })
+    expect(crumb.getAttribute("href")).toBe("/w/agents")
     expect(crumb.className).toContain("font-mono")
     expect(crumb.className).toContain("truncate")
+    // The full name is in its tip, not a title.
+    expect(crumb.hasAttribute("title")).toBe(false)
+    expect(document.getElementById(crumb.getAttribute("aria-describedby")!)?.textContent).toBe("agents")
+    const slash = header().getByText("/")
+    expect(slash.getAttribute("aria-hidden")).toBe("true")
     const title = header().getByRole("heading", { level: 1, name: "Tokens" })
-    expect(crumb.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(crumb.compareDocumentPosition(slash) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(slash.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(header().getByText("an action")).toBeTruthy()
+  })
+
+  test("when there isn't room for both, the crumb gives way before the title", async () => {
+    await shell("admin", { workspace: agents, children: page("Tokens"), place: { route: "/w/$ws/tokens", at: "/w/agents/tokens" } })
+    const crumb = header().getByRole("link", { name: "agents" }).parentElement!
+    const title = header().getByRole("heading", { level: 1, name: "Tokens" }).parentElement!
+    // The crumb starts at no width and takes only what the title leaves: it can shrink to nothing, the slash can't.
+    for (const cls of ["min-w-0", "basis-0", "max-w-fit", "overflow-hidden"]) expect(crumb.className, cls).toContain(cls)
+    expect(crumb.className).not.toContain("shrink-0")
+    expect(header().getByRole("link", { name: "agents" }).className).toContain("min-w-0")
+    expect(header().getByText("/").className).toContain("shrink-0")
+    // The title takes its own width first.
+    expect(title.className).toContain("flex-auto")
+    expect(title.className).not.toContain("basis-0")
+  })
+
+  test("the crumb goes to the workspace's overview", async () => {
+    const user = userEvent.setup()
+    const { router } = await shell("admin", { workspace: agents, children: page("Tokens"), place: { route: "/w/$ws/tokens", at: "/w/agents/tokens" } })
+    expect(router.state.location.pathname).toBe("/w/agents/tokens")
+    await user.click(header().getByRole("link", { name: "agents" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/w/agents"))
   })
 
   test("on a desktop the crumb only shows while the sidebar is collapsed, and the switcher keeps its title either way", async () => {
     const user = userEvent.setup()
     await shell("admin", { workspace: agents, children: page("Tokens"), place: { route: "/w/$ws/tokens", at: "/w/agents/tokens" } })
-    const crumb = () => header().getByText("agents").parentElement!
+    const crumb = () => header().getByRole("link", { name: "agents" }).parentElement!
     const trigger = () => sidebar().getByRole("button", { name: "Workspace agents. Switch workspace" })
     const toggle = header().getByRole("button", { name: "Toggle sidebar" })
     expect(toggle.getAttribute("aria-expanded")).toBe("true")
@@ -403,16 +458,28 @@ describe("the page header", () => {
     expect(trigger().getAttribute("title")).toBe("agents")
   })
 
-  test("a long workspace name in the crumb is read in full from its title", async () => {
+  test("a long workspace name in the crumb is cut off and read in full from its tip", async () => {
     const long = info(worst.LONG_WORKSPACE, "ws_cccccccccccccccccccc", "member")
     await shell("member", { workspace: long, workspaces: [long, agents], children: page("Overview"), place: { route: "/w/$ws", at: `/w/${worst.LONG_WORKSPACE}` } })
-    expect(header().getByText(worst.LONG_WORKSPACE).getAttribute("title")).toBe(worst.LONG_WORKSPACE)
+    const crumb = header().getByRole("link", { name: worst.LONG_WORKSPACE })
+    expect(crumb.className).toContain("truncate")
+    const tip = document.getElementById(crumb.getAttribute("aria-describedby")!)!
+    expect(tip.getAttribute("role")).toBe("tooltip")
+    expect(tip.textContent).toBe(worst.LONG_WORKSPACE)
+  })
+
+  test("the crumb raises no ui-sdk warning", async () => {
+    const before = lastUiSdkWarning()
+    await shell("admin", { workspace: agents, children: page("Tokens"), place: { route: "/w/$ws/tokens", at: "/w/agents/tokens" } })
+    await settle()
+    expect(lastUiSdkWarning()).toBe(before)
   })
 
   test("a page outside a workspace has no crumb, though the sidebar still shows the last workspace", async () => {
     await shell("owner", { workspace: info("agents", "ws_bbbbbbbbbbbbbbbbbbbb", "owner"), children: page("Members"), place: { route: "/members", at: "/members" } })
     expect(header().getByRole("heading", { level: 1, name: "Members" })).toBeTruthy()
     expect(header().queryByText("agents")).toBeNull()
+    expect(header().queryByRole("link")).toBeNull()
     expect(header().queryByText("/")).toBeNull()
     expect(sidebar().getByRole("button", { name: "Workspace agents. Switch workspace" })).toBeTruthy()
   })
@@ -421,6 +488,7 @@ describe("the page header", () => {
     await shell("member", { workspace: null, workspaces: [], children: page("Lumbung"), place: { route: "/w/$ws", at: "/w/nope" } })
     expect(header().getByRole("heading", { level: 1, name: "Lumbung" })).toBeTruthy()
     expect(header().queryByText("nope")).toBeNull()
+    expect(header().queryByRole("link")).toBeNull()
     expect(header().queryByText("/")).toBeNull()
   })
 })
@@ -465,6 +533,42 @@ describe("LoneShell", () => {
     expect(screen.getByRole("heading", { level: 1, name: "That workspace doesn't exist" })).toBeTruthy()
     expect(screen.queryByText("secret")).toBeNull()
     expect(rail().queryAllByRole("link")).toEqual([])
+  })
+
+  test("search still offers the workspaces the person may use, when it is given them", async () => {
+    const user = userEvent.setup()
+    const mine = [info("default", "ws_aaaaaaaaaaaaaaaaaaaa", "member", true), info("agents", "ws_bbbbbbbbbbbbbbbbbbbb", "readonly")]
+    const { router } = await renderWithRouter(
+      <LoneShell account={account} title="That workspace doesn't exist" workspaces={mine}>
+        <p>gone</p>
+      </LoneShell>,
+      null,
+      { route: "/w/$ws", at: "/w/nope" },
+    )
+    // The sidebar is still the one for nobody's workspace.
+    expect(sidebar().queryByRole("button", { name: /Switch workspace/ })).toBeNull()
+    expect(sidebar().getByText("Lumbung")).toBeTruthy()
+    expect(rail().queryAllByRole("link")).toEqual([])
+
+    await user.click(sidebar().getByRole("button", { name: /Search/ }))
+    await screen.findByRole("combobox", { name: "Search" })
+    expect(screen.getByRole("option", { name: "default" })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: "Overview" })).toBeNull()
+    await user.click(screen.getByRole("option", { name: "agents" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/w/agents"))
+  })
+
+  test("without them, search offers no workspace", async () => {
+    const user = userEvent.setup()
+    await renderWithRouter(
+      <LoneShell account={account} title="Lumbung">
+        <p>No workspace yet</p>
+      </LoneShell>,
+      null,
+    )
+    await user.click(sidebar().getByRole("button", { name: /Search/ }))
+    await screen.findByRole("combobox", { name: "Search" })
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Account", "Light theme", "Dark theme", "System theme"])
   })
 
   test("an owner keeps the instance's pages and is shown as Owner", async () => {

@@ -48,9 +48,9 @@ function WorkspaceLayout() {
 
 // Both states keep the shell, so the person can still reach their account and sign out.
 function NoWorkspace() {
-  const { account } = useRouteContext({ from: "/_app" })
+  const { account, workspaces } = useRouteContext({ from: "/_app" })
   return (
-    <LoneShell account={account} title="Workspace">
+    <LoneShell account={account} title="Workspace" workspaces={workspaces ?? []}>
       <Empty icon={<BoxIcon />} title="That workspace doesn't exist">
         <Link to="/" className={buttonVariants({ variant: "secondary" })}>
           Go to your workspace
