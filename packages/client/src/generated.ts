@@ -163,7 +163,8 @@ export interface CreateSnapshotInBody {
 }
 
 export interface CreateTokenInBody {
-  access: "read" | "write" | "admin";
+  /** The token's level. Required unless grants is set. */
+  access?: "read" | "write" | "admin";
   /** Also make an S3 access key for this token. Its secret is shown once, like the token. */
   access_key?: boolean;
   /** Branch name or id, to limit a database token to one branch. */
@@ -174,10 +175,13 @@ export interface CreateTokenInBody {
   database?: string;
   /** 0: never expires. A token that expires can't create one that outlives it: the expiry is capped at the creator's. */
   expires_in_days?: number;
+  /** Reach several databases and buckets with one token, each at its own level. Use it instead of database, branch, bucket and access. */
+  grants?: GrantIn[];
   name: string;
 }
 
 export interface CreateTokenOutBody {
+  /** The token's level. For a grants token, the highest level among its grants; each grant has its own. */
   access: "read" | "write" | "admin";
   /** The S3 access key id, when the token has an access key. */
   access_key_id: string;
@@ -189,10 +193,12 @@ export interface CreateTokenOutBody {
   /** For a database token, the database it reaches. */
   database_id: string;
   expires_at: string | null;
+  /** Everything the token reaches below the instance: one entry for a database or bucket token, several for a grants token, none for an instance token. */
+  grants: GrantOut[];
   id: string;
   last_used_at: string | null;
   name: string;
-  scope: "instance" | "database" | "bucket";
+  scope: "instance" | "database" | "bucket" | "grants";
   /** The S3 secret access key, when access_key was set. Shown once. */
   secret_access_key?: string;
   /** The dashboard's service token. */
@@ -232,6 +238,26 @@ export interface Diff {
   branch: string;
   branch_ddl: string[];
   changes: Change[];
+}
+
+export interface GrantIn {
+  access: "read" | "write" | "admin";
+  /** Branch name or id, to limit the grant to one branch of the database. */
+  branch?: string;
+  /** Bucket name or id. Not with database. */
+  bucket?: string;
+  /** Database name or id. Not with bucket. */
+  database?: string;
+}
+
+export interface GrantOut {
+  access: "read" | "write" | "admin";
+  /** When set, the grant only reaches this branch. */
+  branch_id: string;
+  /** The bucket this grant reaches. Empty for a database grant. */
+  bucket_id: string;
+  /** The database this grant reaches. Empty for a bucket grant. */
+  database_id: string;
 }
 
 export interface Index {
@@ -424,6 +450,7 @@ export interface TokenListBody {
 }
 
 export interface TokenOut {
+  /** The token's level. For a grants token, the highest level among its grants; each grant has its own. */
   access: "read" | "write" | "admin";
   /** The S3 access key id, when the token has an access key. */
   access_key_id: string;
@@ -435,10 +462,12 @@ export interface TokenOut {
   /** For a database token, the database it reaches. */
   database_id: string;
   expires_at: string | null;
+  /** Everything the token reaches below the instance: one entry for a database or bucket token, several for a grants token, none for an instance token. */
+  grants: GrantOut[];
   id: string;
   last_used_at: string | null;
   name: string;
-  scope: "instance" | "database" | "bucket";
+  scope: "instance" | "database" | "bucket" | "grants";
   /** The dashboard's service token. */
   service: boolean;
 }

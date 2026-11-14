@@ -22,7 +22,8 @@ export const Route = createFileRoute("/_app/tokens")({
       buckets: Object.fromEntries(buckets.map((b) => [b.id, b.name])),
     }
     // Branch-limited tokens name a branch by id; look up the names of those databases' branches.
-    const withBranch = [...new Set(tokens.filter((t) => t.branch_id && names.databases[t.database_id]).map((t) => names.databases[t.database_id]!))]
+    const limited = tokens.flatMap((t) => (t.grants?.length ? t.grants : [t])).filter((g) => g.branch_id && names.databases[g.database_id])
+    const withBranch = [...new Set(limited.map((g) => names.databases[g.database_id]!))]
     const lists = await Promise.all(withBranch.map((db) => getDatabase({ data: { db } }).catch(() => null)))
     for (const l of lists) for (const b of l?.branches ?? []) names.branches[b.id] = b.name
     return { tokens, names, databases: databases.map((d) => d.name), buckets: buckets.map((b) => b.name) }
@@ -54,6 +55,8 @@ function Frame({ children, actions }: { children: React.ReactNode; actions?: Rea
 
 function TokensPage() {
   const { tokens, names, databases, buckets } = Route.useLoaderData()
+  const { engineUrl } = Route.useRouteContext()
+  const mcpUrl = engineUrl ? `${engineUrl.replace(/\/+$/, "")}/mcp` : undefined
   const router = useRouter()
   const loadBranches = useCallback(async (db: string) => (await getDatabase({ data: { db } })).branches.map((b) => b.name), [])
 
@@ -63,6 +66,7 @@ function TokensPage() {
         <CreateTokenDialog
           databases={databases}
           buckets={buckets}
+          mcpUrl={mcpUrl}
           loadBranches={loadBranches}
           onCreate={async (t) => {
             const created = await createToken({ data: t })

@@ -204,4 +204,55 @@ DROP TABLE tokens;
 ALTER TABLE tokens_new RENAME TO tokens;
 CREATE INDEX tokens_bucket ON tokens(bucket_id) WHERE bucket_id IS NOT NULL;
 `,
+	// 5: tokens that reach several databases and buckets (ADR 0007). Such a
+	// token has the scope 'grants' and one token_grants row per thing it
+	// reaches, each with its own access level. The tokens table names its
+	// scopes in a CHECK constraint, so it is rebuilt again.
+	//
+	// token_grants is created after the rebuild on purpose. It references
+	// tokens with ON DELETE CASCADE, and with foreign keys on, DROP TABLE
+	// tokens deletes its rows first. A later migration that rebuilds tokens
+	// the same way must copy token_grants aside and back, or every grants
+	// token loses its grants.
+	`
+CREATE TABLE tokens_new (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  secret_hash   BLOB NOT NULL,
+  scope         TEXT NOT NULL CHECK (scope IN ('instance', 'database', 'bucket', 'grants')),
+  database_id   TEXT REFERENCES databases(id),
+  branch_id     TEXT,
+  bucket_id     TEXT,
+  access        TEXT NOT NULL CHECK (access IN ('read', 'write', 'admin')),
+  service       INTEGER NOT NULL DEFAULT 0,
+  access_secret BLOB,
+  created_at    TEXT NOT NULL,
+  expires_at    TEXT,
+  last_used_at  TEXT,
+  revoked_at    TEXT,
+  CHECK ((scope = 'database') = (database_id IS NOT NULL)),
+  CHECK ((scope = 'bucket') = (bucket_id IS NOT NULL)),
+  CHECK (branch_id IS NULL OR database_id IS NOT NULL)
+) STRICT;
+INSERT INTO tokens_new (id, name, secret_hash, scope, database_id, branch_id, bucket_id, access, service, access_secret, created_at, expires_at, last_used_at, revoked_at)
+  SELECT id, name, secret_hash, scope, database_id, branch_id, bucket_id, access, service, access_secret, created_at, expires_at, last_used_at, revoked_at FROM tokens;
+DROP TABLE tokens;
+ALTER TABLE tokens_new RENAME TO tokens;
+CREATE INDEX tokens_bucket ON tokens(bucket_id) WHERE bucket_id IS NOT NULL;
+
+CREATE TABLE token_grants (
+  token_id    TEXT NOT NULL REFERENCES tokens(id) ON DELETE CASCADE,
+  position    INTEGER NOT NULL,
+  database_id TEXT REFERENCES databases(id),
+  branch_id   TEXT,
+  bucket_id   TEXT,
+  access      TEXT NOT NULL CHECK (access IN ('read', 'write', 'admin')),
+  PRIMARY KEY (token_id, position),
+  CHECK ((database_id IS NULL) != (bucket_id IS NULL)),
+  CHECK (branch_id IS NULL OR database_id IS NOT NULL)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX token_grants_database ON token_grants(database_id) WHERE database_id IS NOT NULL;
+CREATE INDEX token_grants_branch ON token_grants(branch_id) WHERE branch_id IS NOT NULL;
+CREATE INDEX token_grants_bucket ON token_grants(bucket_id) WHERE bucket_id IS NOT NULL;
+`,
 }

@@ -134,7 +134,7 @@ func (s *Server) registerDatabases(api huma.API) {
 			if err == nil && !p.SeesDatabase(d.ID) {
 				err = apierr.Newf(apierr.DatabaseNotFound, "no database %q", in.DB)
 			}
-			if err == nil && p.BranchID != "" {
+			if err == nil && !p.WholeDatabase(d.ID) {
 				// The database's details cover every branch, which a token
 				// limited to one branch doesn't reach.
 				err = apierr.New(apierr.Forbidden, "this token is limited to one branch")

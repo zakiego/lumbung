@@ -116,7 +116,16 @@ const diff = await admin.branches.diff("shop", "pr-42", "main")
 const snap = await admin.snapshots.create("shop", "main", { label: "before deploy" })
 await admin.snapshots.restore("shop", snap.id, "restored")
 const ci = await admin.tokens.create({ name: "ci", database: "shop", access: "write" })
-console.log(diff.changes.length, ci.token.slice(0, 4))
+// One token for a database and a bucket, each at its own level.
+await admin.buckets.create("shop-files")
+const agent = await admin.tokens.create({
+  name: "agent",
+  grants: [
+    { database: "shop", access: "write" },
+    { bucket: "shop-files", access: "read" },
+  ],
+})
+console.log(diff.changes.length, ci.token.slice(0, 4), agent.grants.length)
 ```
 
 | Group | Methods |
@@ -124,7 +133,7 @@ console.log(diff.changes.length, ci.token.slice(0, 4))
 | `databases` | `list`, `trash`, `get`, `create`, `rename`, `delete`, `restore` |
 | `branches` | `list`, `get`, `create`, `update`, `delete`, `reset`, `promote`, `diff`, `schema`, `stats` |
 | `snapshots` | `list`, `create`, `restore`, `delete`, `schedule.get`, `schedule.set`, `schedule.delete` |
-| `tokens` | `list`, `create` (with `bucket` and `accessKey` for bucket tokens and S3 access keys), `revoke` |
+| `tokens` | `list`, `create` (with `bucket` and `accessKey` for bucket tokens and S3 access keys, or `grants` for one token that reaches several databases and buckets), `revoke` |
 | `audit` | `list` |
 | `buckets` | `list`, `get`, `create`, `update` (`name`, `publicRead`, `corsOrigins`), `delete` |
 

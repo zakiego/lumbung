@@ -29,11 +29,18 @@ const (
 	ScopeInstance = "instance"
 	ScopeDatabase = "database"
 	ScopeBucket   = "bucket"
+	// ScopeGrants is a token that reaches several databases and buckets,
+	// each at its own level (ADR 0007).
+	ScopeGrants = meta.ScopeGrants
 
 	AccessRead  = "read"
 	AccessWrite = "write"
 	AccessAdmin = "admin"
 )
+
+// Grant is one thing a principal reaches: a database (or one branch of it)
+// or a bucket, at one access level.
+type Grant = meta.Grant
 
 func randomString(n int, chars string) string {
 	out := make([]byte, n)
@@ -97,6 +104,10 @@ func Matches(token string, hash []byte) bool {
 }
 
 // Principal is who a request acts as.
+//
+// Nothing outside this file decides access from the fields: every check goes
+// through a method below, so one place holds the rule that a principal only
+// reaches what one of its grants names.
 type Principal struct {
 	TokenID    string
 	Name       string
@@ -104,10 +115,14 @@ type Principal struct {
 	DatabaseID string
 	BranchID   string
 	BucketID   string
-	Access     string
-	Service    bool
-	ExpiresAt  *time.Time // nil: never
-	Actor      string     // dashboard user, only honored for the service token
+	// Access is the level of an instance, database or bucket principal. It
+	// is empty for the scope grants, where each grant has its own.
+	Access string
+	// Grants is what a principal with the scope grants reaches.
+	Grants    []Grant
+	Service   bool
+	ExpiresAt *time.Time // nil: never
+	Actor     string     // dashboard user, only honored for the service token
 }
 
 // FromToken builds a principal from a live token record. It fails for a
@@ -119,10 +134,17 @@ func FromToken(t meta.Token, now time.Time) (Principal, error) {
 	if t.ExpiresAt != nil && !now.Before(*t.ExpiresAt) {
 		return Principal{}, errors.New("auth: token expired")
 	}
-	return Principal{
+	p := Principal{
 		TokenID: t.ID, Name: t.Name, Scope: t.Scope, DatabaseID: t.DatabaseID,
 		BranchID: t.BranchID, BucketID: t.BucketID, Access: t.Access, Service: t.Service, ExpiresAt: t.ExpiresAt,
-	}, nil
+	}
+	if t.Scope == ScopeGrants {
+		// The stored level is the highest among the grants, for display. It
+		// must never stand in for a grant's own level.
+		p.Access = ""
+		p.Grants = append([]Grant(nil), t.Grants...)
+	}
+	return p, nil
 }
 
 func rank(access string) int {
@@ -137,46 +159,144 @@ func rank(access string) int {
 	return 0
 }
 
+// grants lists what a principal below the instance reaches. A database or
+// bucket principal has exactly one grant.
+func (p Principal) grants() []Grant {
+	switch p.Scope {
+	case ScopeDatabase:
+		return []Grant{{DatabaseID: p.DatabaseID, BranchID: p.BranchID, Access: p.Access}}
+	case ScopeBucket:
+		return []Grant{{BucketID: p.BucketID, Access: p.Access}}
+	case ScopeGrants:
+		return p.Grants
+	}
+	return nil
+}
+
 // InstanceAdmin reports whether the principal may do anything.
 func (p Principal) InstanceAdmin() bool {
 	return p.Scope == ScopeInstance && p.Access == AccessAdmin
 }
 
+// HasAdmin reports whether the principal is an admin of anything, which is
+// what managing tokens takes.
+func (p Principal) HasAdmin() bool {
+	if p.Scope == ScopeInstance {
+		return p.Access == AccessAdmin
+	}
+	for _, g := range p.grants() {
+		if g.Access == AccessAdmin {
+			return true
+		}
+	}
+	return false
+}
+
 // AtLeast reports whether the principal has at least the given access to a
 // database, and to a branch of it when branchID isn't empty. An empty
-// branchID asks about the database as a whole, which a branch-limited token
-// never has.
+// branchID asks about the database as a whole, which a grant limited to one
+// branch never gives.
 func (p Principal) AtLeast(access, dbID, branchID string) bool {
-	if rank(p.Access) < rank(access) {
-		return false
-	}
 	if p.Scope == ScopeInstance {
-		return true
+		return rank(p.Access) >= rank(access)
 	}
-	if p.Scope != ScopeDatabase || dbID == "" || p.DatabaseID != dbID {
+	if dbID == "" {
 		return false
 	}
-	if p.BranchID == "" {
-		return true
+	for _, g := range p.grants() {
+		if g.DatabaseID != dbID || rank(g.Access) < rank(access) {
+			continue
+		}
+		if g.BranchID == "" || (branchID != "" && g.BranchID == branchID) {
+			return true
+		}
 	}
-	return branchID != "" && p.BranchID == branchID
+	return false
 }
 
 // SeesDatabase reports whether the principal may know a database exists.
 func (p Principal) SeesDatabase(dbID string) bool {
-	return p.Scope == ScopeInstance || (p.Scope == ScopeDatabase && dbID != "" && p.DatabaseID == dbID)
+	if p.Scope == ScopeInstance {
+		return true
+	}
+	if dbID == "" {
+		return false
+	}
+	for _, g := range p.grants() {
+		if g.DatabaseID == dbID {
+			return true
+		}
+	}
+	return false
+}
+
+// WholeDatabase reports whether the principal reaches a database as a
+// whole, not only some of its branches.
+func (p Principal) WholeDatabase(dbID string) bool {
+	if p.Scope == ScopeInstance {
+		return true
+	}
+	if dbID == "" {
+		return false
+	}
+	for _, g := range p.grants() {
+		if g.DatabaseID == dbID && g.BranchID == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// SeesBranch reports whether the principal may know a branch of a database
+// exists.
+func (p Principal) SeesBranch(dbID, branchID string) bool {
+	if p.Scope == ScopeInstance {
+		return true
+	}
+	if dbID == "" || branchID == "" {
+		return false
+	}
+	for _, g := range p.grants() {
+		if g.DatabaseID == dbID && (g.BranchID == "" || g.BranchID == branchID) {
+			return true
+		}
+	}
+	return false
 }
 
 // SeesBucket reports whether the principal may know a bucket exists.
-// Instance tokens see every bucket; database tokens see none.
+// Instance tokens see every bucket; a token sees a bucket below that only
+// when one of its grants names it.
 func (p Principal) SeesBucket(bucketID string) bool {
-	return p.Scope == ScopeInstance || (p.Scope == ScopeBucket && bucketID != "" && p.BucketID == bucketID)
+	if p.Scope == ScopeInstance {
+		return true
+	}
+	if bucketID == "" {
+		return false
+	}
+	for _, g := range p.grants() {
+		if g.BucketID == bucketID {
+			return true
+		}
+	}
+	return false
 }
 
 // BucketAtLeast reports whether the principal has at least the given access
 // to a bucket.
 func (p Principal) BucketAtLeast(access, bucketID string) bool {
-	return rank(p.Access) >= rank(access) && p.SeesBucket(bucketID)
+	if p.Scope == ScopeInstance {
+		return rank(p.Access) >= rank(access)
+	}
+	if bucketID == "" {
+		return false
+	}
+	for _, g := range p.grants() {
+		if g.BucketID == bucketID && rank(g.Access) >= rank(access) {
+			return true
+		}
+	}
+	return false
 }
 
 // ChildExpiry caps a requested expiry (nil: never) at the principal's own,
@@ -192,24 +312,75 @@ func (p Principal) ChildExpiry(requested *time.Time) *time.Time {
 	return requested
 }
 
-// Covers reports whether p's grant includes everything a grant of the given
-// scope has, so p may mint or manage such a token without escalating. Only
-// admins cover anything; a database admin covers tokens of its database (and
-// its branch, when limited), a bucket admin tokens of its bucket.
-func (p Principal) Covers(scope, dbID, branchID, bucketID, access string) bool {
-	if rank(p.Access) < rank(AccessAdmin) || rank(p.Access) < rank(access) {
+// coversGrant reports whether p is an admin of what g names, so handing g
+// out isn't an escalation. An admin of a database covers its branches; an
+// admin of one branch covers only that branch.
+func (p Principal) coversGrant(g Grant) bool {
+	if p.Scope == ScopeInstance {
+		return p.Access == AccessAdmin
+	}
+	if (g.DatabaseID == "") == (g.BucketID == "") || rank(g.Access) == 0 {
 		return false
 	}
-	switch p.Scope {
-	case ScopeInstance:
-		return true
-	case ScopeDatabase:
-		if scope != ScopeDatabase || dbID == "" || dbID != p.DatabaseID {
-			return false
+	for _, own := range p.grants() {
+		if own.Access != AccessAdmin {
+			continue
 		}
-		return p.BranchID == "" || p.BranchID == branchID
-	case ScopeBucket:
-		return scope == ScopeBucket && bucketID != "" && bucketID == p.BucketID
+		if g.BucketID != "" && own.BucketID == g.BucketID {
+			return true
+		}
+		if g.DatabaseID != "" && own.DatabaseID == g.DatabaseID && (own.BranchID == "" || own.BranchID == g.BranchID) {
+			return true
+		}
 	}
 	return false
+}
+
+// CoversToken reports whether p's grants include everything a token of the
+// given scope and grants has, so p may mint or manage such a token without
+// escalating. Only an instance admin covers an instance token. Below that,
+// p must be an admin of every single grant: being an admin of one database
+// a token reaches isn't enough to manage a token that reaches more.
+func (p Principal) CoversToken(scope string, grants []Grant) bool {
+	if scope == ScopeInstance {
+		return p.InstanceAdmin()
+	}
+	if len(grants) == 0 {
+		return false
+	}
+	for _, g := range grants {
+		if !p.coversGrant(g) {
+			return false
+		}
+	}
+	return true
+}
+
+// Covers is CoversToken for a token with one scope: an instance token, a
+// database token (optionally limited to a branch) or a bucket token.
+func (p Principal) Covers(scope, dbID, branchID, bucketID, access string) bool {
+	switch scope {
+	case ScopeInstance:
+		return p.InstanceAdmin()
+	case ScopeDatabase:
+		return p.CoversToken(scope, []Grant{{DatabaseID: dbID, BranchID: branchID, Access: access}})
+	case ScopeBucket:
+		return p.CoversToken(scope, []Grant{{BucketID: bucketID, Access: access}})
+	}
+	return false
+}
+
+// TokenGrants is what a stored token reaches below the instance, in the
+// shape CoversToken takes: one grant for a database or bucket token, the
+// stored list for a grants token.
+func TokenGrants(t meta.Token) []Grant {
+	switch t.Scope {
+	case ScopeDatabase:
+		return []Grant{{DatabaseID: t.DatabaseID, BranchID: t.BranchID, Access: t.Access}}
+	case ScopeBucket:
+		return []Grant{{BucketID: t.BucketID, Access: t.Access}}
+	case ScopeGrants:
+		return t.Grants
+	}
+	return nil
 }

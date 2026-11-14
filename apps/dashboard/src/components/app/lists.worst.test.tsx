@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { expect, test } from "vitest"
 import * as worst from "@/test/worst-case"
 import { AuditTable, actorOf } from "./audit"
@@ -14,12 +15,29 @@ function readable(text: string) {
   expect(el.closest("[title]")?.getAttribute("title")).toBe(text)
 }
 
-test("tokens: long names, a deleted database, empty and 500 rows", () => {
+test("tokens: long names, a deleted database, empty and 500 rows", async () => {
   const { unmount } = render(<TokenTable tokens={worst.tokens(3)} names={worst.tokenNames} onRevoke={noop} />)
   readable(worst.LONG_TOKEN)
   readable(`${worst.tokenNames.databases.db1} / ${worst.LONG_BRANCH}`)
   expect(screen.getByText("gone")).toBeTruthy()
   unmount()
+  // 20 grants: three lines, the rest behind a count that names them on hover.
+  const grants = render(<TokenTable tokens={worst.tokens(4).slice(3)} names={worst.tokenNames} onRevoke={noop} />)
+  const cells = grants.container.querySelectorAll("tbody td")
+  expect([...cells[1]!.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+    `${worst.tokenNames.databases.db1} / ${worst.LONG_BRANCH}`,
+    `Bucket ${worst.LONG_BUCKET}`,
+    "gone",
+    "17 more",
+  ])
+  expect([...cells[2]!.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["Read and write", "Admin", "Read"])
+  // All 20 open in a popover, in full, so they can be read by touch and keyboard too.
+  await userEvent.setup().click(screen.getByRole("button", { name: "17 more" }))
+  const all = await screen.findByRole("dialog", { name: "17 more" })
+  expect(all.querySelectorAll("li")).toHaveLength(20)
+  expect(all.textContent).toContain(`${worst.tokenNames.databases.db1} / ${worst.LONG_BRANCH}Read and write`)
+  expect(all.textContent).toContain("Bucket gone-bucketRead and write")
+  grants.unmount()
   render(<TokenTable tokens={[]} names={worst.tokenNames} onRevoke={noop} />)
   expect(screen.getByText("No tokens yet")).toBeTruthy()
   const many = render(<TokenTable tokens={worst.tokens(500)} names={worst.tokenNames} onRevoke={noop} />)

@@ -12,16 +12,34 @@ export const LONG_LABEL =
 
 const at = "2026-11-14T08:00:00Z"
 
+const grant = (g: Partial<TokenOut["grants"][number]>): TokenOut["grants"][number] => ({ database_id: "", branch_id: "", bucket_id: "", access: "read", ...g })
+
+// 20 grants is the server limit: long names, a branch, a deleted database and bucket, and every level.
+export const MANY_GRANTS: TokenOut["grants"] = [
+  grant({ database_id: "db1", branch_id: "b1", access: "write" }),
+  grant({ bucket_id: "bk1", access: "admin" }),
+  grant({ database_id: "gone" }),
+  grant({ bucket_id: "gone-bucket", access: "write" }),
+  ...Array.from({ length: 16 }, (_, i) => grant({ database_id: `db-extra-${i}` })),
+]
+
 export function tokens(n: number): TokenOut[] {
   const base: TokenOut[] = [
-    { id: "svc", name: "dashboard", scope: "instance", access: "admin", database_id: "", branch_id: "", bucket_id: "", access_key_id: "", created_at: at, expires_at: null, last_used_at: at, service: true },
-    { id: "t1", name: LONG_TOKEN, scope: "database", access: "write", database_id: "db1", branch_id: "b1", bucket_id: "", access_key_id: "", created_at: at, expires_at: "2027-02-12T00:00:00Z", last_used_at: null, service: false },
-    { id: "t2", name: "x", scope: "database", access: "read", database_id: "gone", branch_id: "", bucket_id: "", access_key_id: "", created_at: at, expires_at: null, last_used_at: null, service: false },
+    { id: "svc", name: "dashboard", scope: "instance", access: "admin", database_id: "", branch_id: "", bucket_id: "", grants: [], access_key_id: "", created_at: at, expires_at: null, last_used_at: at, service: true },
+    { id: "t1", name: LONG_TOKEN, scope: "database", access: "write", database_id: "db1", branch_id: "b1", bucket_id: "", grants: [grant({ database_id: "db1", branch_id: "b1", access: "write" })], access_key_id: "", created_at: at, expires_at: "2027-02-12T00:00:00Z", last_used_at: null, service: false },
+    { id: "t2", name: "x", scope: "database", access: "read", database_id: "gone", branch_id: "", bucket_id: "", grants: [grant({ database_id: "gone" })], access_key_id: "", created_at: at, expires_at: null, last_used_at: null, service: false },
+    { id: "t3", name: LONG_TOKEN, scope: "grants", access: "admin", database_id: "", branch_id: "", bucket_id: "", grants: MANY_GRANTS, access_key_id: "LMBABC", created_at: at, expires_at: null, last_used_at: null, service: false },
   ]
   return Array.from({ length: n }, (_, i) => ({ ...base[i % base.length]!, id: `t${i}` }))
 }
 
-export const tokenNames = { databases: { db1: "customer-loyalty-and-rewards-production-eu-west-1-primary-store" }, branches: { b1: LONG_BRANCH } }
+export const LONG_BUCKET = "customer-uploads-and-generated-invoices-production-eu-west-1-01"
+
+export const tokenNames = {
+  databases: { db1: "customer-loyalty-and-rewards-production-eu-west-1-primary-store" },
+  branches: { b1: LONG_BRANCH },
+  buckets: { bk1: LONG_BUCKET },
+}
 
 export function members(n: number): Member[] {
   const base: Member[] = [

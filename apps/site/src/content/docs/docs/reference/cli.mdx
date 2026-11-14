@@ -512,12 +512,14 @@ lumbung token create [flags]
       --bucket string         limit the token to this bucket (instead of --db)
       --db string             limit the token to this database (default: the whole instance)
       --expires-in-days int   expire after this many days (0: never)
+      --grant stringArray     reach several things with one token: db=NAME:ACCESS, db=NAME/BRANCH:ACCESS or bucket=NAME:ACCESS (repeat it)
       --name string           what the token is for
 ```
 
 ```sh
 lumbung token create --name ci --db app --access write --expires-in-days 90
 lumbung token create --name uploads --bucket photos --access write --access-key
+lumbung token create --name agent --grant db=notes:write --grant bucket=files:read
 ```
 
 ### lumbung token list
