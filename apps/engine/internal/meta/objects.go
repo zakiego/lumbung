@@ -19,6 +19,7 @@ import (
 // Bucket is one bucket record.
 type Bucket struct {
 	ID          string
+	WorkspaceID string
 	Name        string
 	PublicRead  bool
 	CORSOrigins []string
@@ -64,12 +65,12 @@ type Part struct {
 	CreatedAt time.Time
 }
 
-const bucketCols = `id, name, public_read, cors_origins, size_bytes, object_count, created_at, updated_at`
+const bucketCols = `id, workspace_id, name, public_read, cors_origins, size_bytes, object_count, created_at, updated_at`
 
 func scanBucket(r scanner) (Bucket, error) {
 	var b Bucket
 	var cors, created, updated string
-	if err := r.Scan(&b.ID, &b.Name, &b.PublicRead, &cors, &b.SizeBytes, &b.ObjectCount, &created, &updated); err != nil {
+	if err := r.Scan(&b.ID, &b.WorkspaceID, &b.Name, &b.PublicRead, &cors, &b.SizeBytes, &b.ObjectCount, &created, &updated); err != nil {
 		return Bucket{}, err
 	}
 	if err := json.Unmarshal([]byte(cors), &b.CORSOrigins); err != nil {
@@ -105,9 +106,10 @@ func jsonMap(s string) (map[string]string, error) {
 	return m, nil
 }
 
-// CreateBucket records a new bucket. It fails with limit_reached when max
-// buckets already exist, counted in the same transaction.
-func (s *Store) CreateBucket(ctx context.Context, id, name string, max int) (Bucket, error) {
+// CreateBucket records a new bucket in a workspace. It fails with
+// limit_reached when the instance already has max buckets or the workspace
+// its own cap, counted in the same transaction.
+func (s *Store) CreateBucket(ctx context.Context, wsID, id, name string, max int) (Bucket, error) {
 	if !ids.ValidBucketName(name) {
 		return Bucket{}, apierr.Newf(apierr.InvalidName, "invalid bucket name %q", name)
 	}
@@ -121,10 +123,22 @@ func (s *Store) CreateBucket(ctx context.Context, id, name string, max int) (Buc
 		return Bucket{}, err
 	}
 	if n >= max {
-		return Bucket{}, apierr.Newf(apierr.LimitReached, "the instance has the most buckets allowed (%d)", max)
+		return Bucket{}, apierr.New(apierr.LimitReached, "the instance can't hold more buckets")
+	}
+	var own, limit int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT (SELECT count(*) FROM buckets WHERE workspace_id = w.id), w.max_buckets FROM workspaces w WHERE w.id = ? AND w.deleted_at IS NULL`,
+		wsID).Scan(&own, &limit); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Bucket{}, noWorkspace(wsID)
+		}
+		return Bucket{}, err
+	}
+	if limit > 0 && own >= limit {
+		return Bucket{}, apierr.Newf(apierr.LimitReached, "the workspace has the most buckets allowed (%d)", limit)
 	}
 	ts := now()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO buckets (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, id, name, ts, ts); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO buckets (id, workspace_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, id, wsID, name, ts, ts); err != nil {
 		if isUnique(err) {
 			return Bucket{}, apierr.Newf(apierr.NameTaken, "a bucket named %q already exists", name)
 		}
@@ -133,27 +147,63 @@ func (s *Store) CreateBucket(ctx context.Context, id, name string, max int) (Buc
 	if err := tx.Commit(); err != nil {
 		return Bucket{}, err
 	}
-	return s.GetBucket(ctx, id)
+	return s.BucketByID(ctx, id)
 }
 
-// GetBucket finds a bucket by name or id.
-func (s *Store) GetBucket(ctx context.Context, ref string) (Bucket, error) {
+// GetBucket finds a bucket of a workspace by name or id. A bucket of
+// another workspace is not found, by id as much as by name.
+func (s *Store) GetBucket(ctx context.Context, wsID, ref string) (Bucket, error) {
 	col := "name"
 	if ids.IsID(ref, ids.Bucket) {
 		col = "id"
 	} else if !ids.ValidBucketName(ref) {
 		return Bucket{}, apierr.Newf(apierr.BucketNotFound, "no bucket %q", ref)
 	}
-	b, err := scanBucket(s.db.QueryRowContext(ctx, `SELECT `+bucketCols+` FROM buckets WHERE `+col+` = ?`, ref))
+	b, err := scanBucket(s.db.QueryRowContext(ctx, `SELECT `+bucketCols+` FROM buckets WHERE workspace_id = ? AND `+col+` = ?
+		AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id = buckets.workspace_id AND w.deleted_at IS NULL)`, wsID, ref))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Bucket{}, apierr.Newf(apierr.BucketNotFound, "no bucket %q", ref)
 	}
 	return b, err
 }
 
-// ListBuckets returns every bucket by name.
-func (s *Store) ListBuckets(ctx context.Context) ([]Bucket, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+bucketCols+` FROM buckets ORDER BY name`)
+// BucketByID finds a bucket by id alone, in any workspace. It is for
+// re-reading a bucket the caller already resolved, and for the engine's
+// own jobs. A request never resolves a bucket this way.
+func (s *Store) BucketByID(ctx context.Context, id string) (Bucket, error) {
+	b, err := scanBucket(s.db.QueryRowContext(ctx, `SELECT `+bucketCols+` FROM buckets WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Bucket{}, apierr.Newf(apierr.BucketNotFound, "no bucket %q", id)
+	}
+	return b, err
+}
+
+// BucketIn reports, as bucket_not_found, a bucket that isn't in the given
+// workspace any more, or whose workspace is in the trash. A write to a
+// bucket's objects or uploads checks it right before it commits.
+func (s *Store) BucketIn(ctx context.Context, wsID, bucketID string) error {
+	var one int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM buckets b JOIN workspaces w ON w.id = b.workspace_id
+		WHERE b.id = ? AND b.workspace_id = ? AND w.deleted_at IS NULL`, bucketID, wsID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return apierr.Newf(apierr.BucketNotFound, "no bucket %q", bucketID)
+	}
+	return err
+}
+
+// ListBuckets returns a workspace's buckets by name.
+func (s *Store) ListBuckets(ctx context.Context, wsID string) ([]Bucket, error) {
+	return s.listBuckets(ctx, `WHERE workspace_id = ? ORDER BY name`, wsID)
+}
+
+// ListAllBuckets returns the buckets of every workspace, for the engine's
+// own jobs and backups.
+func (s *Store) ListAllBuckets(ctx context.Context) ([]Bucket, error) {
+	return s.listBuckets(ctx, `ORDER BY name`)
+}
+
+func (s *Store) listBuckets(ctx context.Context, where string, args ...any) ([]Bucket, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+bucketCols+` FROM buckets `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +268,7 @@ func (s *Store) UpdateBucket(ctx context.Context, id string, u BucketUpdate) (Bu
 	if err := tx.Commit(); err != nil {
 		return Bucket{}, err
 	}
-	return s.GetBucket(ctx, id)
+	return s.BucketByID(ctx, id)
 }
 
 // DeleteBucket removes an empty bucket, aborts its uploads and revokes its
@@ -287,16 +337,32 @@ func queryStrings(ctx context.Context, db querier, q string, args ...any) ([]str
 	return out, rows.Err()
 }
 
-// ObjectUsage is how many bytes buckets hold: objects plus parts of uploads
-// in progress, for one bucket and for the instance.
-func (s *Store) ObjectUsage(ctx context.Context, bucketID string) (bucket, total int64, err error) {
-	err = s.db.QueryRowContext(ctx, `
+// ObjectUsage is how many bytes buckets hold, objects plus parts of uploads
+// in progress: for one bucket, for the workspace it is in, and for the
+// instance. It also returns that workspace's id and its own cap on object
+// bytes (0: none), read in the same statement so they match the usage.
+type ObjectUsage struct {
+	Bucket, Workspace, Total int64
+	WorkspaceID              string
+	WorkspaceLimit           int64
+}
+
+// ObjectUsage measures object storage around one bucket.
+func (s *Store) ObjectUsage(ctx context.Context, bucketID string) (ObjectUsage, error) {
+	var u ObjectUsage
+	err := s.db.QueryRowContext(ctx, `
 SELECT
   coalesce((SELECT size_bytes FROM buckets WHERE id = ?1), 0) +
   coalesce((SELECT sum(p.size) FROM upload_parts p JOIN uploads u ON u.id = p.upload_id WHERE u.bucket_id = ?1), 0),
+  coalesce((SELECT sum(b.size_bytes) FROM buckets b WHERE b.workspace_id = (SELECT workspace_id FROM buckets WHERE id = ?1)), 0) +
+  coalesce((SELECT sum(p.size) FROM upload_parts p JOIN uploads u ON u.id = p.upload_id JOIN buckets b ON b.id = u.bucket_id
+            WHERE b.workspace_id = (SELECT workspace_id FROM buckets WHERE id = ?1)), 0),
   coalesce((SELECT sum(size_bytes) FROM buckets), 0) +
-  coalesce((SELECT sum(size) FROM upload_parts), 0)`, bucketID).Scan(&bucket, &total)
-	return bucket, total, err
+  coalesce((SELECT sum(size) FROM upload_parts), 0),
+  coalesce((SELECT workspace_id FROM buckets WHERE id = ?1), ''),
+  coalesce((SELECT w.max_object_bytes FROM workspaces w JOIN buckets b ON b.workspace_id = w.id WHERE b.id = ?1), 0)`,
+		bucketID).Scan(&u.Bucket, &u.Workspace, &u.Total, &u.WorkspaceID, &u.WorkspaceLimit)
+	return u, err
 }
 
 const objectCols = `bucket_id, key, blob_id, size, etag, content_type, headers, metadata, parts, modified_at`

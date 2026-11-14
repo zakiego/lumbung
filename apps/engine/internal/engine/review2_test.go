@@ -39,11 +39,11 @@ func TestDumpForeignKeysAndLargeRows(t *testing.T) {
 		mustQuery(t, e, "src", Write, sql)
 	}
 	var dump bytes.Buffer
-	if err := e.ExportSQL(bg, Target{Database: "src"}, &dump); err != nil {
+	if err := e.ExportSQL(bg, Target{Workspace: ws(e), Database: "src"}, &dump); err != nil {
 		t.Fatal(err)
 	}
 	mustCreate(t, e, "dst")
-	if err := e.Import(bg, Target{Database: "dst"}, ImportSQL, ImportIntoEmpty, bytes.NewReader(dump.Bytes())); err != nil {
+	if err := e.Import(bg, Target{Workspace: ws(e), Database: "dst"}, ImportSQL, ImportIntoEmpty, bytes.NewReader(dump.Bytes())); err != nil {
 		t.Fatalf("import: %v", err)
 	}
 	for _, q := range []string{"SELECT * FROM a_child", "SELECT * FROM tree ORDER BY id", "SELECT hex(b) FROM big"} {
@@ -53,7 +53,7 @@ func TestDumpForeignKeysAndLargeRows(t *testing.T) {
 	}
 	// A dump that leaves a dangling reference is refused.
 	mustCreate(t, e, "bad")
-	err := e.Import(bg, Target{Database: "bad"}, ImportSQL, ImportIntoEmpty, strings.NewReader(
+	err := e.Import(bg, Target{Workspace: ws(e), Database: "bad"}, ImportSQL, ImportIntoEmpty, strings.NewReader(
 		"CREATE TABLE p(id INTEGER PRIMARY KEY); CREATE TABLE c(pid INTEGER REFERENCES p(id)); INSERT INTO c VALUES (9);"))
 	wantCode(t, err, apierr.InvalidImport, "dangling foreign key")
 }
@@ -62,9 +62,9 @@ func TestContentlessFTSRefusesSQLDump(t *testing.T) {
 	e := newEngine(t, nil)
 	mustCreate(t, e, "a")
 	mustQuery(t, e, "a", Write, "CREATE VIRTUAL TABLE f USING fts5(body, content='')")
-	err := e.ExportSQL(bg, Target{Database: "a"}, io.Discard)
+	err := e.ExportSQL(bg, Target{Workspace: ws(e), Database: "a"}, io.Discard)
 	wantCode(t, err, apierr.BadRequest, "contentless fts5 dump")
-	if err := e.ExportDB(bg, Target{Database: "a"}, io.Discard); err != nil {
+	if err := e.ExportDB(bg, Target{Workspace: ws(e), Database: "a"}, io.Discard); err != nil {
 		t.Fatalf("a .db download still works: %v", err)
 	}
 }
@@ -79,7 +79,7 @@ func TestLargeDumpImport(t *testing.T) {
 		fmt.Fprintf(&b, "INSERT INTO t VALUES (%d, 'row %d with some padding to make it longer');\n", i, i)
 	}
 	start := time.Now()
-	if err := e.Import(bg, Target{Database: "a"}, ImportSQL, ImportIntoEmpty, strings.NewReader(b.String())); err != nil {
+	if err := e.Import(bg, Target{Workspace: ws(e), Database: "a"}, ImportSQL, ImportIntoEmpty, strings.NewReader(b.String())); err != nil {
 		t.Fatal(err)
 	}
 	if d := time.Since(start); d > 60*time.Second {
@@ -98,7 +98,7 @@ func TestImportIntoEmptyRechecksAtSwap(t *testing.T) {
 	pr, pw := io.Pipe()
 	done := make(chan error, 1)
 	go func() {
-		done <- e.Import(bg, Target{Database: "a"}, ImportSQL, ImportIntoEmpty, pr)
+		done <- e.Import(bg, Target{Workspace: ws(e), Database: "a"}, ImportSQL, ImportIntoEmpty, pr)
 	}()
 	_, _ = pw.Write([]byte("CREATE TABLE fresh(x);\n"))
 	mustQuery(t, e, "a", Write, "CREATE TABLE written_meanwhile(x)")
@@ -116,10 +116,10 @@ func TestPurgeSkipsRestored(t *testing.T) {
 	e := newEngine(t, nil)
 	d := mustCreate(t, e, "a")
 	mustQuery(t, e, "a", Write, "CREATE TABLE t(x)")
-	if _, err := e.DeleteDatabase(bg, "a"); err != nil {
+	if _, err := e.DeleteDatabase(bg, ws(e), "a"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.RestoreDatabase(bg, d.ID, ""); err != nil {
+	if _, err := e.RestoreDatabase(bg, ws(e), d.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	e.purgeOne(bg, d.ID)
@@ -131,7 +131,7 @@ func TestPurgeSkipsRestored(t *testing.T) {
 func TestDeleteRechecksAfterWaiting(t *testing.T) {
 	e := newEngine(t, nil)
 	d := mustCreate(t, e, "a")
-	b, err := e.CreateBranch(bg, "a", "next", BranchSource{}, NewBranchOptions{})
+	b, err := e.CreateBranch(bg, ws(e), "a", "next", BranchSource{}, NewBranchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestDeleteRechecksAfterWaiting(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	go func() { done <- e.DeleteBranch(bg, "a", "next") }()
+	go func() { done <- e.DeleteBranch(bg, ws(e), "a", "next") }()
 	time.Sleep(50 * time.Millisecond)
 	// Promote behind the gate's back, as a race would.
 	if err := e.meta.SetDefaultBranch(bg, d.ID, b.ID); err != nil {
@@ -148,7 +148,7 @@ func TestDeleteRechecksAfterWaiting(t *testing.T) {
 	}
 	g.unshare()
 	wantCode(t, <-done, apierr.BranchProtected, "delete of a branch promoted meanwhile")
-	if _, err := e.GetBranch(bg, "a", "next"); err != nil {
+	if _, err := e.GetBranch(bg, ws(e), "a", "next"); err != nil {
 		t.Fatal("promoted branch was deleted")
 	}
 }
@@ -161,7 +161,7 @@ func TestCopiesRespectInstanceQuota(t *testing.T) {
 	mustQuery(t, e, "a", Write, "INSERT INTO t VALUES (randomblob(150000))")
 	var err error
 	for i := 0; i < 10 && err == nil; i++ {
-		_, err = e.CreateBranch(bg, "a", fmt.Sprintf("b%d", i), BranchSource{}, NewBranchOptions{})
+		_, err = e.CreateBranch(bg, ws(e), "a", fmt.Sprintf("b%d", i), BranchSource{}, NewBranchOptions{})
 	}
 	wantCode(t, err, apierr.InstanceQuotaExceeded, "branching past the quota")
 	if total := e.TotalBytes(); total > 600<<10 {
@@ -213,13 +213,13 @@ func TestPurgeRemovesTokensAndStats(t *testing.T) {
 	e := newEngine(t, nil)
 	d := mustCreate(t, e, "a")
 	if _, err := e.meta.CreateToken(bg, meta.Token{ID: "tok_aaaaaaaaaaaaaaaaaaaa", Name: "t", SecretHash: []byte{1},
-		Scope: "database", DatabaseID: d.ID, Access: "read"}); err != nil {
+		Scope: "database", WorkspaceID: d.WorkspaceID, DatabaseID: d.ID, Access: "read"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.meta.AddStats(bg, []meta.StatsBucket{{BranchID: d.DefaultBranchID, Minute: time.Now(), Queries: 1, Durations: []int64{1}}}, time.Now().Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.DeleteDatabase(bg, "a"); err != nil {
+	if _, err := e.DeleteDatabase(bg, ws(e), "a"); err != nil {
 		t.Fatal(err)
 	}
 	e.purgeTrash(bg, time.Now().Add(e.cfg.TrashRetention+time.Hour))
@@ -229,6 +229,6 @@ func TestPurgeRemovesTokensAndStats(t *testing.T) {
 	if rows, _ := e.meta.ListStats(bg, d.DefaultBranchID, time.Now().Add(-time.Hour)); len(rows) != 0 {
 		t.Fatal("stats of a purged database kept")
 	}
-	_, err := e.RestoreDatabase(bg, d.ID, "")
+	_, err := e.RestoreDatabase(bg, ws(e), d.ID, "")
 	wantCode(t, err, apierr.DatabaseNotFound, "restore after purge")
 }

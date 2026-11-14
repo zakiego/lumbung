@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { bucketSnippets, dbSnippets, libsqlUrl } from "./snippets"
+import { bucketSnippets, dbSnippets, libsqlUrl, s3Endpoint } from "./snippets"
 
 const url = "https://db.example.com"
 
@@ -34,6 +34,15 @@ test("bucket snippets point at this bucket and the S3 endpoint, with path-style 
   expect(code.rclone).toContain("force_path_style = true")
   expect(code.cli).toContain("lumbung object ls photos")
   expect(code.curl).toContain("/v1/buckets/photos/object?key=hello.txt")
+})
+
+test("the S3 endpoint is the short one for the default workspace and without one, and names any other by id", () => {
+  expect(s3Endpoint(url)).toBe("https://db.example.com/v1/s3")
+  expect(s3Endpoint(url, { id: "ws_aaaaaaaaaaaaaaaaaaaa", default: true })).toBe("https://db.example.com/v1/s3")
+  expect(s3Endpoint(url, { id: "ws_bbbbbbbbbbbbbbbbbbbb", default: false })).toBe("https://db.example.com/v1/workspaces/ws_bbbbbbbbbbbbbbbbbbbb/s3")
+  // A whole workspace carries a name too: the endpoint still uses the id.
+  const named = { id: "ws_bbbbbbbbbbbbbbbbbbbb", name: "agents", default: false }
+  expect(s3Endpoint(url, named)).not.toContain("agents")
 })
 
 test("no snippet carries a token, only the variable that holds it", () => {

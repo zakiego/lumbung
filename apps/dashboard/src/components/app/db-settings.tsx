@@ -24,7 +24,7 @@ export function SettingsSection({ title, description, children, tone }: { title:
   )
 }
 
-export function RenameForm({ name, onRename }: { name: string; onRename: (next: string) => Promise<unknown> }) {
+export function RenameForm({ name, label = "Database name", onRename }: { name: string; label?: string; onRename: (next: string) => Promise<unknown> }) {
   const [value, setValue] = useState(name)
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
@@ -46,7 +46,7 @@ export function RenameForm({ name, onRename }: { name: string; onRename: (next: 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
       <Field invalid={error ? true : undefined}>
-        <FieldLabel className="sr-only">Database name</FieldLabel>
+        <FieldLabel className="sr-only">{label}</FieldLabel>
         <Input
           value={value}
           onValueChange={(v) => {
@@ -75,8 +75,8 @@ export function formatOf(file: File): "db" | "sql" {
   return /\.sql$/i.test(file.name) ? "sql" : "db"
 }
 
-export async function uploadImport(o: { db: string; branch: string; file: File; mode: Mode }) {
-  const q = new URLSearchParams({ db: o.db, branch: o.branch, format: formatOf(o.file), mode: o.mode })
+export async function uploadImport(o: { ws: string; db: string; branch: string; file: File; mode: Mode }) {
+  const q = new URLSearchParams({ ws: o.ws, db: o.db, branch: o.branch, format: formatOf(o.file), mode: o.mode })
   const res = await fetch(`${APP_BASE}/api/import?${q}`, {
     method: "POST",
     body: o.file,
@@ -175,9 +175,9 @@ export function ImportForm({ branch, onImport }: { branch: string; onImport: (fi
   )
 }
 
-export function ExportForm({ db, branch }: { db: string; branch: string }) {
+export function ExportForm({ ws, db, branch }: { ws: string; db: string; branch: string }) {
   const [format, setFormat] = useState<"db" | "sql">("db")
-  const href = `${APP_BASE}/api/export?${new URLSearchParams({ db, branch, format })}`
+  const href = `${APP_BASE}/api/export?${new URLSearchParams({ ws, db, branch, format })}`
   return (
     <div className="flex flex-col gap-4">
       <Field>

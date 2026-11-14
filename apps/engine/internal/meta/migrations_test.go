@@ -50,17 +50,20 @@ func TestTokensSurviveMigration4(t *testing.T) {
 	if err != nil || db.DatabaseID != "db_aaaaaaaaaaaaaaaaaaaa" || db.BranchID != "br_aaaaaaaaaaaaaaaaaaaa" || db.RevokedAt == nil || db.ExpiresAt == nil || db.BucketID != "" {
 		t.Fatalf("database token %+v %v", db, err)
 	}
-	// The new CHECKs hold: a bucket token needs a bucket, a database token no bucket.
+	// The new CHECKs hold: a bucket token needs a bucket, a database token no
+	// bucket. Since migration 6 a token below the instance names its
+	// workspace, so these do, and fail only for the reason they test.
+	const wsOf = `(SELECT id FROM workspaces WHERE is_default = 1)`
 	for i, q := range []string{
-		`INSERT INTO tokens (id, name, secret_hash, scope, access, created_at) VALUES ('tok_x1', 'x', x'00', 'bucket', 'read', 'now')`,
-		`INSERT INTO tokens (id, name, secret_hash, scope, database_id, bucket_id, access, created_at) VALUES ('tok_x2', 'x', x'00', 'database', 'db_aaaaaaaaaaaaaaaaaaaa', 'bk_a', 'read', 'now')`,
+		`INSERT INTO tokens (id, name, secret_hash, scope, workspace_id, access, created_at) VALUES ('tok_x1', 'x', x'00', 'bucket', ` + wsOf + `, 'read', 'now')`,
+		`INSERT INTO tokens (id, name, secret_hash, scope, workspace_id, database_id, bucket_id, access, created_at) VALUES ('tok_x2', 'x', x'00', 'database', ` + wsOf + `, 'db_aaaaaaaaaaaaaaaaaaaa', 'bk_a', 'read', 'now')`,
 		`INSERT INTO tokens (id, name, secret_hash, scope, bucket_id, access, created_at) VALUES ('tok_x3', 'x', x'00', 'instance', 'bk_a', 'read', 'now')`,
 	} {
 		if _, err := s.db.ExecContext(ctx, q); err == nil {
 			t.Errorf("insert %d passed the checks", i)
 		}
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO tokens (id, name, secret_hash, scope, bucket_id, access, created_at) VALUES ('tok_ok', 'x', x'00', 'bucket', 'bk_a', 'read', ?)`, fmt.Sprint(now())); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO tokens (id, name, secret_hash, scope, workspace_id, bucket_id, access, created_at) VALUES ('tok_ok', 'x', x'00', 'bucket', `+wsOf+`, 'bk_a', 'read', ?)`, fmt.Sprint(now())); err != nil {
 		t.Fatalf("bucket token: %v", err)
 	}
 }
@@ -113,12 +116,16 @@ func TestTokensSurviveMigration5(t *testing.T) {
 	}
 
 	// A grants token round-trips with its grants in order.
+	w, err := s.DefaultWorkspace(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []Grant{{DatabaseID: "db_a", BranchID: "br_a", Access: "write"}, {BucketID: "bk_a", Access: "read"}}
-	got, err := s.CreateToken(ctx, Token{ID: "tok_g", Name: "agent", SecretHash: []byte{4}, Scope: ScopeGrants, Access: "write", Grants: want})
+	got, err := s.CreateToken(ctx, Token{ID: "tok_g", Name: "agent", SecretHash: []byte{4}, WorkspaceID: w.ID, Scope: ScopeGrants, Access: "write", Grants: want}, 0)
 	if err != nil || len(got.Grants) != 2 || got.Grants[0] != want[0] || got.Grants[1] != want[1] || got.DatabaseID != "" || got.BucketID != "" {
 		t.Fatalf("grants token %+v %v", got, err)
 	}
-	list, err := s.ListTokens(ctx, "", "", 100)
+	list, err := s.ListTokens(ctx, w.ID, "", "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,10 +135,10 @@ func TestTokensSurviveMigration5(t *testing.T) {
 		}
 	}
 	// Grants belong to the scope grants, and it needs at least one.
-	if _, err := s.CreateToken(ctx, Token{ID: "tok_x1", Name: "x", SecretHash: []byte{5}, Scope: ScopeGrants, Access: "read"}); err == nil {
+	if _, err := s.CreateToken(ctx, Token{ID: "tok_x1", Name: "x", SecretHash: []byte{5}, WorkspaceID: w.ID, Scope: ScopeGrants, Access: "read"}, 0); err == nil {
 		t.Error("a grants token without grants was stored")
 	}
-	if _, err := s.CreateToken(ctx, Token{ID: "tok_x2", Name: "x", SecretHash: []byte{6}, Scope: "instance", Access: "read", Grants: want}); err == nil {
+	if _, err := s.CreateToken(ctx, Token{ID: "tok_x2", Name: "x", SecretHash: []byte{6}, Scope: "instance", Access: "read", Grants: want}, 0); err == nil {
 		t.Error("an instance token with grants was stored")
 	}
 	// The CHECKs hold: a grant names a database or a bucket, never both or
@@ -142,7 +149,7 @@ func TestTokensSurviveMigration5(t *testing.T) {
 		`INSERT INTO token_grants (token_id, position, branch_id, bucket_id, access) VALUES ('tok_g', 7, 'br_a', 'bk_a', 'read')`,
 		`INSERT INTO token_grants (token_id, position, bucket_id, access) VALUES ('tok_g', 8, 'bk_a', 'owner')`,
 		`INSERT INTO token_grants (token_id, position, bucket_id, access) VALUES ('tok_none', 0, 'bk_a', 'read')`,
-		`INSERT INTO tokens (id, name, secret_hash, scope, database_id, access, created_at) VALUES ('tok_x3', 'x', x'00', 'grants', 'db_a', 'read', 'now')`,
+		`INSERT INTO tokens (id, name, secret_hash, scope, workspace_id, database_id, access, created_at) VALUES ('tok_x3', 'x', x'00', 'grants', (SELECT id FROM workspaces WHERE is_default = 1), 'db_a', 'read', 'now')`,
 	} {
 		if _, err := s.db.ExecContext(ctx, q); err == nil {
 			t.Errorf("insert %d passed the checks", i)

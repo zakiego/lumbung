@@ -109,18 +109,38 @@ func requireInstanceAdmin(p auth.Principal) error {
 	return nil
 }
 
+// requireWorkspaceAdmin gates what changes a workspace's contents as a
+// whole: creating, renaming, deleting and restoring databases and buckets,
+// the trash and the audit log. A database, bucket or grants token never
+// passes, at any level.
+func requireWorkspaceAdmin(p auth.Principal) error {
+	if !p.WorkspaceAtLeast(auth.AccessAdmin) {
+		return apierr.New(apierr.Forbidden, "this needs an admin token for the whole workspace")
+	}
+	return nil
+}
+
+// instanceOp marks an operation as an instance action, so its audit entry
+// belongs to no workspace's log.
+func instanceOp(o huma.Operation) huma.Operation {
+	o.Metadata["instance"] = true
+	return o
+}
+
 // database resolves a database the principal can see and checks its access
 // to the database as a whole. A database it can't see is not found, so
 // tokens don't learn which names exist.
 func (s *Server) database(ctx context.Context, p auth.Principal, ref, access string) (meta.Database, error) {
-	d, err := s.eng.GetDatabase(ctx, ref)
+	// The lookup is scoped to the workspace the principal acts in, so a
+	// database of another workspace is not found here, by name or by id.
+	d, err := s.eng.GetDatabase(ctx, p.WorkspaceID, ref)
 	if err != nil {
 		return meta.Database{}, err
 	}
-	if !p.SeesDatabase(d.ID) {
+	if !p.SeesDatabase(d) {
 		return meta.Database{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q", ref)
 	}
-	if !p.AtLeast(access, d.ID, "") {
+	if !p.AtLeast(access, d, "") {
 		return meta.Database{}, apierr.New(apierr.Forbidden, "this token can't do that on this database")
 	}
 	return d, nil
@@ -129,18 +149,18 @@ func (s *Server) database(ctx context.Context, p auth.Principal, ref, access str
 // branch resolves a branch and checks the principal's access to it.
 // An empty ref means the default branch.
 func (s *Server) branch(ctx context.Context, p auth.Principal, dbRef, ref, access string) (meta.Database, meta.Branch, error) {
-	d, err := s.eng.GetDatabase(ctx, dbRef)
+	d, err := s.eng.GetDatabase(ctx, p.WorkspaceID, dbRef)
 	if err != nil {
 		return meta.Database{}, meta.Branch{}, err
 	}
-	if !p.SeesDatabase(d.ID) {
+	if !p.SeesDatabase(d) {
 		return meta.Database{}, meta.Branch{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q", dbRef)
 	}
 	if ref == "" {
 		ref = d.DefaultBranchID
 	}
-	b, err := s.eng.GetBranch(ctx, d.ID, ref)
-	if !p.WholeDatabase(d.ID) && (err != nil || !p.SeesBranch(d.ID, b.ID)) {
+	b, err := s.eng.GetBranch(ctx, d.WorkspaceID, d.ID, ref)
+	if !p.WholeDatabase(d) && (err != nil || !p.SeesBranch(d, b.ID)) {
 		// Answer the same for a missing branch and someone else's, so a
 		// branch token can't probe for branch names.
 		return meta.Database{}, meta.Branch{}, apierr.New(apierr.Forbidden, "this token can't do that on this branch")
@@ -148,7 +168,7 @@ func (s *Server) branch(ctx context.Context, p auth.Principal, dbRef, ref, acces
 	if err != nil {
 		return meta.Database{}, meta.Branch{}, err
 	}
-	if !p.AtLeast(access, d.ID, b.ID) {
+	if !p.AtLeast(access, d, b.ID) {
 		return meta.Database{}, meta.Branch{}, apierr.New(apierr.Forbidden, "this token can't do that on this branch")
 	}
 	return d, b, nil

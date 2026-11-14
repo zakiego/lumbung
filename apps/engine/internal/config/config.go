@@ -64,6 +64,13 @@ type Config struct {
 	PresignMaxExpiry      time.Duration
 	PublicRateLimit       int
 	ObjectGCDelay         time.Duration
+
+	MaxWorkspaces             int
+	MaxTokensPerWorkspace     int
+	WorkspaceMaxDatabases     int
+	WorkspaceMaxBuckets       int
+	WorkspaceMaxDatabaseBytes int64
+	WorkspaceMaxObjectBytes   int64
 }
 
 // Kind is how a setting's value is written.
@@ -122,6 +129,18 @@ func integer(f func(*Config) *int) func(*Config, string) error {
 	}
 }
 
+// count is integer for a setting where 0 means "no limit".
+func count(f func(*Config) *int) func(*Config, string) error {
+	return func(c *Config, v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("want 0 or a positive integer, got %q", v)
+		}
+		*f(c) = n
+		return nil
+	}
+}
+
 // Settings lists every setting in documentation order.
 var Settings = []Setting{
 	{"LUMBUNG_DATA_DIR", KindString, "./data", "Folder for meta.db, branch files, snapshots, trash, object files and generated secrets. Use a local disk.", str(func(c *Config) *string { return &c.DataDir })},
@@ -139,7 +158,7 @@ var Settings = []Setting{
 	{"LUMBUNG_MAX_BRANCH_BYTES", KindBytes, "1GiB", "Largest a branch file may grow. Writes past it fail with `branch_size_limit`.", bytesOf(func(c *Config) *int64 { return &c.MaxBranchBytes })},
 	{"LUMBUNG_MAX_INSTANCE_BYTES", KindBytes, "10GiB", "Total size of all branch files. Writes that would pass it fail with `instance_quota_exceeded`.", bytesOf(func(c *Config) *int64 { return &c.MaxInstanceBytes })},
 	{"LUMBUNG_MIN_FREE_DISK", KindBytes, "2GiB", "Creating a database, branch, snapshot or import is refused with HTTP 507 when the disk has less free space than this.", bytesOf(func(c *Config) *int64 { return &c.MinFreeDiskBytes })},
-	{"LUMBUNG_MAX_DATABASES", KindInt, "100", "Most databases on the instance, counting ones in the trash.", integer(func(c *Config) *int { return &c.MaxDatabases })},
+	{"LUMBUNG_MAX_DATABASES", KindInt, "100", "Most databases on the instance, in every workspace together, counting ones in the trash.", integer(func(c *Config) *int { return &c.MaxDatabases })},
 	{"LUMBUNG_MAX_BRANCHES", KindInt, "50", "Most branches in one database.", integer(func(c *Config) *int { return &c.MaxBranches })},
 
 	{"LUMBUNG_TRASH_RETENTION", KindDuration, "168h", "How long a deleted database stays in the trash, restorable, before its files are removed.", dur(func(c *Config) *time.Duration { return &c.TrashRetention })},
@@ -154,7 +173,7 @@ var Settings = []Setting{
 	{"LUMBUNG_TRUSTED_PROXIES", KindString, "127.0.0.1/32,::1/128", "Comma-separated networks whose connections may set the client IP header.", str(func(c *Config) *string { return &c.TrustedProxies })},
 	{"LUMBUNG_SLOW_QUERY", KindDuration, "1s", "Queries slower than this go to the branch's slow-query log (the newest 50 are kept).", dur(func(c *Config) *time.Duration { return &c.SlowQuery })},
 	{"LUMBUNG_STATS_RETENTION", KindDuration, "48h", "How long per-minute branch stats are kept.", dur(func(c *Config) *time.Duration { return &c.StatsRetention })},
-	{"LUMBUNG_AUDIT_MAX_ROWS", KindInt, "100000", "Most audit log entries kept; the oldest are dropped first.", integer(func(c *Config) *int { return &c.AuditMaxRows })},
+	{"LUMBUNG_AUDIT_MAX_ROWS", KindInt, "100000", "Most audit log entries kept for each workspace, and for the instance's own actions; the oldest are dropped first.", integer(func(c *Config) *int { return &c.AuditMaxRows })},
 
 	{"LUMBUNG_READERS_PER_BRANCH", KindInt, "4", "Read-only connections kept per open branch, next to its one writer.", integer(func(c *Config) *int { return &c.ReadersPerBranch })},
 	{"LUMBUNG_MAX_OPEN_BRANCHES", KindInt, "64", "Most branches with open connections at once. The least recently used idle branch is closed to make room.", integer(func(c *Config) *int { return &c.MaxOpenBranches })},
@@ -166,7 +185,7 @@ var Settings = []Setting{
 	{"LUMBUNG_LIBSQL_MAX_STREAMS", KindInt, "128", "Most open libSQL protocol streams on the instance. Past it new streams fail with `too_many_streams`.", integer(func(c *Config) *int { return &c.LibSQLMaxStreams })},
 	{"LUMBUNG_LIBSQL_MAX_STREAMS_PER_TOKEN", KindInt, "16", "Most open libSQL protocol streams per token.", integer(func(c *Config) *int { return &c.LibSQLStreamsPerToken })},
 
-	{"LUMBUNG_MAX_BUCKETS", KindInt, "100", "Most buckets on the instance.", integer(func(c *Config) *int { return &c.MaxBuckets })},
+	{"LUMBUNG_MAX_BUCKETS", KindInt, "100", "Most buckets on the instance, in every workspace together.", integer(func(c *Config) *int { return &c.MaxBuckets })},
 	{"LUMBUNG_MAX_OBJECT_BYTES", KindBytes, "5GiB", "Largest object, sent in one piece or assembled from a multipart upload. Larger ones fail with `object_too_large`.", bytesOf(func(c *Config) *int64 { return &c.MaxObjectBytes })},
 	{"LUMBUNG_MAX_BUCKET_BYTES", KindBytes, "10GiB", "Most bytes one bucket may hold, counting its multipart uploads in progress. Writes past it fail with `bucket_size_limit`.", bytesOf(func(c *Config) *int64 { return &c.MaxBucketBytes })},
 	{"LUMBUNG_MAX_OBJECT_STORAGE_BYTES", KindBytes, "20GiB", "Most bytes all buckets together may hold, counting multipart uploads in progress. Writes past it fail with `object_storage_quota_exceeded`. Separate from `LUMBUNG_MAX_INSTANCE_BYTES`, which covers branch files.", bytesOf(func(c *Config) *int64 { return &c.MaxObjectStorageBytes })},
@@ -174,6 +193,13 @@ var Settings = []Setting{
 	{"LUMBUNG_PRESIGN_MAX_EXPIRY", KindDuration, "168h", "Longest a presigned URL may stay valid. The S3 protocol allows at most 7 days.", dur(func(c *Config) *time.Duration { return &c.PresignMaxExpiry })},
 	{"LUMBUNG_PUBLIC_RATE_LIMIT", KindInt, "100", "Requests per second each client address may make without a token, to read objects in public buckets.", integer(func(c *Config) *int { return &c.PublicRateLimit })},
 	{"LUMBUNG_OBJECT_GC_DELAY", KindDuration, "1h", "How long the file of a replaced or deleted object is kept before it is removed, so a backup that already copied meta.db can still copy it.", dur(func(c *Config) *time.Duration { return &c.ObjectGCDelay })},
+
+	{"LUMBUNG_MAX_WORKSPACES", KindInt, "100", "Most workspaces on the instance, counting ones in the trash.", integer(func(c *Config) *int { return &c.MaxWorkspaces })},
+	{"LUMBUNG_MAX_TOKENS_PER_WORKSPACE", KindInt, "1000", "Most live tokens one workspace may hold. Past it creating a token fails with `limit_reached`.", integer(func(c *Config) *int { return &c.MaxTokensPerWorkspace })},
+	{"LUMBUNG_WORKSPACE_MAX_DATABASES", KindInt, "20", "Most databases a new workspace may hold, counting its trash, when the request doesn't say. 0: no limit of its own. Each workspace's limit can be changed later; the default workspace starts with none.", count(func(c *Config) *int { return &c.WorkspaceMaxDatabases })},
+	{"LUMBUNG_WORKSPACE_MAX_BUCKETS", KindInt, "20", "Most buckets a new workspace may hold, when the request doesn't say. 0: no limit of its own.", count(func(c *Config) *int { return &c.WorkspaceMaxBuckets })},
+	{"LUMBUNG_WORKSPACE_MAX_DATABASE_BYTES", KindBytes, "2GiB", "Most bytes the branch files of a new workspace's databases may take together, when the request doesn't say. 0: no limit of its own. Writes past a workspace's limit fail with `workspace_quota_exceeded`.", bytesOf(func(c *Config) *int64 { return &c.WorkspaceMaxDatabaseBytes })},
+	{"LUMBUNG_WORKSPACE_MAX_OBJECT_BYTES", KindBytes, "5GiB", "Most bytes a new workspace's buckets may hold together, counting multipart uploads in progress, when the request doesn't say. 0: no limit of its own.", bytesOf(func(c *Config) *int64 { return &c.WorkspaceMaxObjectBytes })},
 }
 
 // Load resolves the configuration: each setting's environment value when

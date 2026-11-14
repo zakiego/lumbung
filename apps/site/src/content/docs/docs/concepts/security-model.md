@@ -47,6 +47,17 @@ The rules sit in layers, so no single check has to be perfect:
 
 A fuzz test feeds random statements through the query path and fails if any file outside the attacking branch is created or changed. It runs in CI on every push, next to one named test for each row of the table above.
 
+## Between workspaces
+
+A [workspace](/docs/concepts/workspaces/) token reaches nothing outside its workspace, on any door. Two things enforce it, and either one is enough:
+
+1. **Every lookup takes the workspace.** A database or bucket is found by its name or id inside the workspace the request acts in. One of another workspace is not found, by id as much as by name, and the answer is the one a missing database or bucket gets.
+2. **Every access check starts from the record's workspace.** Before a token's scope or level is looked at, the workspace of the database, bucket or token in question is compared with the one the request acts in. This holds for instance tokens too, which act in one workspace per request.
+
+A deleted workspace resolves nothing: its tokens, access keys, presigned URLs and public links answer like ones that never existed. Moving a database or bucket to another workspace revokes every token that reached it.
+
+Lists only read the request's workspace. Creating something never fails because of a name another workspace uses. A copy between buckets resolves its source in the same workspace, and a multipart upload id or a libSQL stream of another workspace doesn't exist. Each of these is a named test that runs through REST, the S3 API, the libSQL endpoint and MCP. A fuzz test also sends random methods, paths, bodies and headers with one workspace's tokens and fails if a response holds another workspace's data or anything in another workspace changes.
+
 ## What this doesn't cover
 
 - Anyone with write access to a branch can change or delete all of its data. Scope tokens to the databases and branches they need.

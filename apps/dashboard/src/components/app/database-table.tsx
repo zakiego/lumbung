@@ -5,9 +5,11 @@ import { Skeleton, Table, TableCell, TableHead, TableRow } from "@/components/ui
 import { TruncatedTip } from "@/components/ui/tooltip"
 import { formatBytes, number, timeAgo } from "@/lib/format"
 import type { DbUsage } from "@/lib/stats"
+import { useWs } from "./workspace"
 
 // usage: undefined while loading, null when stats couldn't load at all.
 export function DatabaseTable({ databases, usage }: { databases: DatabaseOut[]; usage: Record<string, DbUsage> | null | undefined }) {
+  const ws = useWs()
   return (
     <Table>
       <thead>
@@ -24,7 +26,7 @@ export function DatabaseTable({ databases, usage }: { databases: DatabaseOut[]; 
           <TableRow key={d.id} className="relative">
             <TableCell className="w-2/5 max-w-0">
               <TruncatedTip text={d.name}>
-                <Link to="/db/$db" params={{ db: d.name }} className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0">
+                <Link to="/w/$ws/db/$db" params={{ ws, db: d.name }} className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0">
                   <DatabaseIcon aria-hidden="true" className="size-4 shrink-0 text-faint" />
                   <span data-truncate className="truncate">
                     {d.name}

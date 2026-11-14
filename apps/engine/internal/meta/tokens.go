@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
 )
 
 // Grant is one thing a token reaches: a database (or one branch of it) or a
@@ -22,10 +24,13 @@ type Token struct {
 	ID         string
 	Name       string
 	SecretHash []byte
-	Scope      string // instance, database, bucket or grants
-	DatabaseID string
-	BranchID   string
-	BucketID   string
+	Scope      string // instance, workspace, database, bucket or grants
+	// WorkspaceID is the workspace the token belongs to. Empty for an
+	// instance token, and only for one.
+	WorkspaceID string
+	DatabaseID  string
+	BranchID    string
+	BucketID    string
 	// Access is the level of an instance, database or bucket token. For a
 	// grants token it is the highest level among its grants, kept for
 	// display only: what the token may do is decided by Grants.
@@ -46,13 +51,13 @@ type Token struct {
 // ErrNoToken means no token has that id.
 var ErrNoToken = errors.New("meta: no such token")
 
-const tokenCols = `id, name, secret_hash, scope, coalesce(database_id, ''), coalesce(branch_id, ''), coalesce(bucket_id, ''), access, service, access_secret, created_at, expires_at, last_used_at, revoked_at`
+const tokenCols = `id, name, secret_hash, scope, coalesce(workspace_id, ''), coalesce(database_id, ''), coalesce(branch_id, ''), coalesce(bucket_id, ''), access, service, access_secret, created_at, expires_at, last_used_at, revoked_at`
 
 func scanToken(r scanner) (Token, error) {
 	var t Token
 	var created string
 	var expires, used, revoked sql.NullString
-	if err := r.Scan(&t.ID, &t.Name, &t.SecretHash, &t.Scope, &t.DatabaseID, &t.BranchID, &t.BucketID, &t.Access, &t.Service, &t.AccessSecret, &created, &expires, &used, &revoked); err != nil {
+	if err := r.Scan(&t.ID, &t.Name, &t.SecretHash, &t.Scope, &t.WorkspaceID, &t.DatabaseID, &t.BranchID, &t.BucketID, &t.Access, &t.Service, &t.AccessSecret, &created, &expires, &used, &revoked); err != nil {
 		return Token{}, err
 	}
 	t.CreatedAt = *parseTime(sql.NullString{String: created, Valid: true})
@@ -66,21 +71,86 @@ func scanToken(r scanner) (Token, error) {
 // buckets, listed in its Grants.
 const ScopeGrants = "grants"
 
+// RevokedTokenFactor bounds the token rows one workspace may hold, live and
+// revoked together, as a multiple of its cap on live tokens.
+const RevokedTokenFactor = 10
+
+// PurgeRevokedTokens deletes tokens revoked before the given time, with
+// their grants. The audit log keeps their ids. The service token is kept:
+// SetServiceToken brings an earlier one back by id.
+func (s *Store) PurgeRevokedTokens(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE revoked_at IS NOT NULL AND revoked_at < ? AND service = 0`, before.UTC().Format(TimeLayout))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ScopeInstance is the scope of a token that belongs to no workspace.
+const ScopeInstance = "instance"
+
 // CreateToken stores a token record, with its grants when it has the scope
-// grants.
-func (s *Store) CreateToken(ctx context.Context, t Token) (Token, error) {
+// grants. Everything a token below the instance names must be in the
+// token's own workspace, and the workspace may hold at most maxLive live
+// tokens (0: no cap); both are checked in the inserting transaction.
+func (s *Store) CreateToken(ctx context.Context, t Token, maxLive int) (Token, error) {
 	if (t.Scope == ScopeGrants) != (len(t.Grants) > 0) {
 		return Token{}, errors.New("meta: only a grants token has grants, and it needs at least one")
+	}
+	if (t.Scope == ScopeInstance) != (t.WorkspaceID == "") {
+		return Token{}, errors.New("meta: a token belongs to a workspace unless it is an instance token")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Token{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if t.WorkspaceID != "" {
+		var live, all int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT (SELECT count(*) FROM tokens WHERE workspace_id = w.id AND revoked_at IS NULL),
+			        (SELECT count(*) FROM tokens WHERE workspace_id = w.id)
+			 FROM workspaces w WHERE w.id = ? AND w.deleted_at IS NULL`,
+			t.WorkspaceID).Scan(&live, &all); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return Token{}, noWorkspace(t.WorkspaceID)
+			}
+			return Token{}, err
+		}
+		if maxLive > 0 && live >= maxLive {
+			return Token{}, apierr.Newf(apierr.LimitReached, "the workspace has the most tokens allowed (%d); revoke some first", maxLive)
+		}
+		// Revoked tokens stay as rows until PurgeRevokedTokens clears them.
+		// Minting and revoking in a loop would otherwise grow meta.db without
+		// ever touching the cap on live tokens.
+		if maxLive > 0 && all >= RevokedTokenFactor*maxLive {
+			return Token{}, apierr.New(apierr.LimitReached, "the workspace revoked too many tokens recently; they are cleared after the trash retention")
+		}
+		// The last line of defense for the workspace boundary on tokens: a
+		// grant across it is refused here even if a handler resolved it.
+		targets := append([]Grant{{DatabaseID: t.DatabaseID, BucketID: t.BucketID}}, t.Grants...)
+		for _, g := range targets {
+			var n int
+			switch {
+			case g.DatabaseID != "":
+				err = tx.QueryRowContext(ctx, `SELECT count(*) FROM databases WHERE id = ? AND workspace_id = ?`, g.DatabaseID, t.WorkspaceID).Scan(&n)
+			case g.BucketID != "":
+				err = tx.QueryRowContext(ctx, `SELECT count(*) FROM buckets WHERE id = ? AND workspace_id = ?`, g.BucketID, t.WorkspaceID).Scan(&n)
+			default:
+				continue
+			}
+			if err != nil {
+				return Token{}, err
+			}
+			if n != 1 {
+				return Token{}, errors.New("meta: a token can only reach what is in its own workspace")
+			}
+		}
+	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO tokens (id, name, secret_hash, scope, database_id, branch_id, bucket_id, access, service, access_secret, created_at, expires_at)
-		 VALUES (?, ?, ?, ?, nullif(?, ''), nullif(?, ''), nullif(?, ''), ?, ?, ?, ?, ?)`,
-		t.ID, t.Name, t.SecretHash, t.Scope, t.DatabaseID, t.BranchID, t.BucketID, t.Access, t.Service, nilIfEmpty(t.AccessSecret), now(), fmtTime(t.ExpiresAt))
+		`INSERT INTO tokens (id, name, secret_hash, scope, workspace_id, database_id, branch_id, bucket_id, access, service, access_secret, created_at, expires_at)
+		 VALUES (?, ?, ?, ?, nullif(?, ''), nullif(?, ''), nullif(?, ''), nullif(?, ''), ?, ?, ?, ?, ?)`,
+		t.ID, t.Name, t.SecretHash, t.Scope, t.WorkspaceID, t.DatabaseID, t.BranchID, t.BucketID, t.Access, t.Service, nilIfEmpty(t.AccessSecret), now(), fmtTime(t.ExpiresAt))
 	if err != nil {
 		return Token{}, err
 	}
@@ -135,11 +205,12 @@ func (s *Store) tokenGrants(ctx context.Context, where string, args ...any) (map
 	return out, rows.Err()
 }
 
-// ListTokens returns tokens that aren't revoked, newest first, after the
-// cursor id (exclusive) when given.
-func (s *Store) ListTokens(ctx context.Context, afterCreated, afterID string, limit int) ([]Token, error) {
-	q := `SELECT ` + tokenCols + ` FROM tokens WHERE revoked_at IS NULL`
-	args := []any{}
+// ListTokens returns a workspace's tokens that aren't revoked, newest
+// first, after the cursor id (exclusive) when given. An empty workspace
+// lists the instance tokens, which belong to none.
+func (s *Store) ListTokens(ctx context.Context, wsID, afterCreated, afterID string, limit int) ([]Token, error) {
+	q := `SELECT ` + tokenCols + ` FROM tokens WHERE revoked_at IS NULL AND coalesce(workspace_id, '') = ?`
+	args := []any{wsID}
 	if afterID != "" {
 		q += ` AND (created_at, id) < (?, ?)`
 		args = append(args, afterCreated, afterID)
@@ -164,7 +235,7 @@ func (s *Store) ListTokens(ctx context.Context, afterCreated, afterID string, li
 	if err := rows.Err(); err != nil || !withGrants {
 		return out, err
 	}
-	grants, err := s.tokenGrants(ctx, `WHERE token_id IN (SELECT id FROM tokens WHERE revoked_at IS NULL)`)
+	grants, err := s.tokenGrants(ctx, `WHERE token_id IN (SELECT id FROM tokens WHERE revoked_at IS NULL AND coalesce(workspace_id, '') = ?)`, wsID)
 	if err != nil {
 		return nil, err
 	}

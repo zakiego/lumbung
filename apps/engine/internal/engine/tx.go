@@ -65,7 +65,7 @@ func (e *Engine) begin(ctx context.Context, t Target, access Access, hooks sessi
 	if access != Read && access != Write {
 		return nil, apierr.New(apierr.BadRequest, "unknown access")
 	}
-	tg, err := e.resolve(ctx, t.Database, t.Branch)
+	tg, err := e.resolve(ctx, t.Workspace, t.Database, t.Branch)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func (e *Engine) begin(ctx context.Context, t Target, access Access, hooks sessi
 			tx.release()
 		}
 	}()
-	if tg, err = e.resolve(ctx, tg.db.ID, tg.branch.ID); err != nil {
+	if tg, err = e.resolve(ctx, tg.db.WorkspaceID, tg.db.ID, tg.branch.ID); err != nil {
 		return nil, err
 	}
 	tx.tg = tg
@@ -102,7 +102,11 @@ func (e *Engine) begin(ctx context.Context, t Target, access Access, hooks sessi
 	// the pooled connection by an earlier request shows through.
 	conn.SetLastInsertRowID(0)
 	if access == Write {
-		if tx.grant, err = e.applySizeLimit(conn); err != nil {
+		limits, lerr := e.meta.LimitsOf(ctx, tg.db.WorkspaceID)
+		if lerr != nil {
+			return nil, lerr
+		}
+		if tx.grant, err = e.applySizeLimit(conn, tg.db.WorkspaceID, limits.MaxDatabaseBytes); err != nil {
 			return nil, err
 		}
 		tx.granted = true
@@ -115,11 +119,11 @@ func (e *Engine) begin(ctx context.Context, t Target, access Access, hooks sessi
 	}
 	if hooks.beforeBegin != nil {
 		if err := hooks.beforeBegin(conn); err != nil {
-			return nil, e.sqlErr(err, tx.grant.quotaLimited)
+			return nil, e.sqlErr(err, tx.grant)
 		}
 	}
 	if err := conn.ExecTrusted(begin); err != nil {
-		return nil, e.sqlErr(err, tx.grant.quotaLimited)
+		return nil, e.sqlErr(err, tx.grant)
 	}
 	ok = true
 	return tx, nil
@@ -131,12 +135,12 @@ func (tx *Tx) commit() error {
 	if tx.hooks.beforeCommit != nil {
 		if err := tx.hooks.beforeCommit(tx.conn); err != nil {
 			_ = tx.conn.ExecTrusted("ROLLBACK")
-			return tx.e.sqlErr(err, tx.grant.quotaLimited)
+			return tx.e.sqlErr(err, tx.grant)
 		}
 	}
 	if err := tx.conn.ExecTrusted("COMMIT"); err != nil {
 		_ = tx.conn.ExecTrusted("ROLLBACK")
-		return tx.e.sqlErr(err, tx.grant.quotaLimited)
+		return tx.e.sqlErr(err, tx.grant)
 	}
 	return nil
 }
@@ -150,7 +154,7 @@ func (tx *Tx) release() {
 	}
 	if tx.granted {
 		e.truncateWAL(tx.conn, tx.tg.path)
-		e.finishWrite(tx.tg.branch.ID, tx.tg.path, tx.grant)
+		e.finishWrite(tx.tg.db.WorkspaceID, tx.tg.branch.ID, tx.tg.path, tx.grant)
 	}
 	if tx.conn != nil {
 		if tx.access == Write {
@@ -278,7 +282,7 @@ func (tx *Tx) Exec(ctx context.Context, stmt Statement, b *Budget) (*Result, err
 	if err == nil {
 		return res, nil
 	}
-	mapped := tx.e.sqlErr(err, tx.grant.quotaLimited)
+	mapped := tx.e.sqlErr(err, tx.grant)
 	tooLarge := apierr.As(mapped).Code == apierr.ResultTooLarge && tx.conn.TotalChanges() > changesBefore
 	if tooLarge || tx.conn.GetAutocommit() || tx.ctx.Err() != nil {
 		tx.finishLocked()
@@ -298,7 +302,7 @@ func (tx *Tx) Describe(sql string) (*Description, error) {
 	}
 	d, err := describe(tx.conn, sql)
 	if err != nil {
-		return nil, tx.e.sqlErr(err, false)
+		return nil, tx.e.sqlErr(err, sizeGrant{})
 	}
 	return d, nil
 }

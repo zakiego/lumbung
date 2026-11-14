@@ -17,19 +17,23 @@ func TestGrantsTokensGoWithWhatTheyReach(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	w, err := s.DefaultWorkspace(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, d := range [][3]string{{"purged", "db_purged00000000000000", "br_purged00000000000000"}, {"missing", "db_missing0000000000000", "br_missing0000000000000"}, {"kept", "db_kept0000000000000000", "br_kept0000000000000000"}} {
-		if _, _, err := s.CreateDatabase(ctx, d[0], d[1], d[2], 100); err != nil {
+		if _, _, err := s.CreateDatabase(ctx, w.ID, d[0], d[1], d[2], 100); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.CreateBucket(ctx, "bk_files000000000000000", "files", 100); err != nil {
+	if _, err := s.CreateBucket(ctx, w.ID, "bk_files000000000000000", "files", 100); err != nil {
 		t.Fatal(err)
 	}
 	token := func(id, dbID string, revoked bool) {
 		t.Helper()
-		_, err := s.CreateToken(ctx, Token{ID: id, Name: id, SecretHash: []byte(id), Scope: ScopeGrants, Access: "write", Grants: []Grant{
+		_, err := s.CreateToken(ctx, Token{ID: id, Name: id, SecretHash: []byte(id), WorkspaceID: w.ID, Scope: ScopeGrants, Access: "write", Grants: []Grant{
 			{DatabaseID: dbID, Access: "write"}, {BucketID: "bk_files000000000000000", Access: "read"},
-		}})
+		}}, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

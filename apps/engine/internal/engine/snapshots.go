@@ -13,7 +13,7 @@ import (
 
 // CreateSnapshot copies a branch to a new snapshot (PLAN 6.6).
 func (e *Engine) CreateSnapshot(ctx context.Context, t Target, label string) (meta.Snapshot, error) {
-	tg, err := e.resolve(ctx, t.Database, t.Branch)
+	tg, err := e.resolve(ctx, t.Workspace, t.Database, t.Branch)
 	if err != nil {
 		return meta.Snapshot{}, err
 	}
@@ -36,7 +36,7 @@ func (e *Engine) snapshot(ctx context.Context, tg target, kind, label string) (m
 	sn, err := e.meta.CreateSnapshot(ctx, meta.Snapshot{
 		ID: id, DatabaseID: tg.db.ID, BranchID: tg.branch.ID, BranchName: tg.branch.Name,
 		Kind: kind, Label: label, SizeBytes: size,
-	})
+	}, tg.db.WorkspaceID)
 	if err != nil {
 		_ = os.Remove(path)
 		return meta.Snapshot{}, err
@@ -46,7 +46,7 @@ func (e *Engine) snapshot(ctx context.Context, tg target, kind, label string) (m
 
 // ListSnapshots returns a branch's snapshots, newest first.
 func (e *Engine) ListSnapshots(ctx context.Context, t Target) ([]meta.Snapshot, error) {
-	tg, err := e.resolve(ctx, t.Database, t.Branch)
+	tg, err := e.resolve(ctx, t.Workspace, t.Database, t.Branch)
 	if err != nil {
 		return nil, err
 	}
@@ -54,8 +54,8 @@ func (e *Engine) ListSnapshots(ctx context.Context, t Target) ([]meta.Snapshot, 
 }
 
 // GetSnapshot returns one snapshot of a database.
-func (e *Engine) GetSnapshot(ctx context.Context, dbRef, snapshotID string) (meta.Snapshot, error) {
-	d, err := e.database(ctx, dbRef)
+func (e *Engine) GetSnapshot(ctx context.Context, ws, dbRef, snapshotID string) (meta.Snapshot, error) {
+	d, err := e.database(ctx, ws, dbRef)
 	if err != nil {
 		return meta.Snapshot{}, err
 	}
@@ -63,8 +63,8 @@ func (e *Engine) GetSnapshot(ctx context.Context, dbRef, snapshotID string) (met
 }
 
 // DeleteSnapshot removes a snapshot and its file.
-func (e *Engine) DeleteSnapshot(ctx context.Context, dbRef, snapshotID string) error {
-	sn, err := e.GetSnapshot(ctx, dbRef, snapshotID)
+func (e *Engine) DeleteSnapshot(ctx context.Context, ws, dbRef, snapshotID string) error {
+	sn, err := e.GetSnapshot(ctx, ws, dbRef, snapshotID)
 	if err != nil {
 		return err
 	}
@@ -83,8 +83,8 @@ func (e *Engine) removeSnapshot(ctx context.Context, sn meta.Snapshot) error {
 
 // RestoreSnapshot creates a new branch from a snapshot. It never overwrites
 // an existing branch; promoting the new branch is a separate step.
-func (e *Engine) RestoreSnapshot(ctx context.Context, dbRef, snapshotID, branchName string) (meta.Branch, error) {
-	return e.CreateBranch(ctx, dbRef, branchName, BranchSource{Snapshot: snapshotID}, NewBranchOptions{})
+func (e *Engine) RestoreSnapshot(ctx context.Context, ws, dbRef, snapshotID, branchName string) (meta.Branch, error) {
+	return e.CreateBranch(ctx, ws, dbRef, branchName, BranchSource{Snapshot: snapshotID}, NewBranchOptions{})
 }
 
 // ScheduleOptions configure a branch's snapshot schedule.
@@ -96,7 +96,7 @@ type ScheduleOptions struct {
 
 // SetSchedule creates or replaces a branch's snapshot schedule.
 func (e *Engine) SetSchedule(ctx context.Context, t Target, o ScheduleOptions) (meta.Schedule, error) {
-	tg, err := e.resolve(ctx, t.Database, t.Branch)
+	tg, err := e.resolve(ctx, t.Workspace, t.Database, t.Branch)
 	if err != nil {
 		return meta.Schedule{}, err
 	}
@@ -114,7 +114,7 @@ func (e *Engine) SetSchedule(ctx context.Context, t Target, o ScheduleOptions) (
 
 // GetSchedule returns a branch's schedule, if any.
 func (e *Engine) GetSchedule(ctx context.Context, t Target) (meta.Schedule, bool, error) {
-	tg, err := e.resolve(ctx, t.Database, t.Branch)
+	tg, err := e.resolve(ctx, t.Workspace, t.Database, t.Branch)
 	if err != nil {
 		return meta.Schedule{}, false, err
 	}
@@ -123,7 +123,7 @@ func (e *Engine) GetSchedule(ctx context.Context, t Target) (meta.Schedule, bool
 
 // DeleteSchedule removes a branch's schedule. Its snapshots stay.
 func (e *Engine) DeleteSchedule(ctx context.Context, t Target) error {
-	tg, err := e.resolve(ctx, t.Database, t.Branch)
+	tg, err := e.resolve(ctx, t.Workspace, t.Database, t.Branch)
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func (e *Engine) runSchedules(ctx context.Context, now time.Time) {
 	}
 	for _, sc := range scheds {
 		if sc.LastRunAt == nil || !now.Before(sc.LastRunAt.Add(sc.Every)) {
-			tg, err := e.resolve(ctx, sc.DatabaseID, sc.BranchID)
+			tg, err := e.resolveByID(ctx, sc.DatabaseID, sc.BranchID)
 			if err != nil {
 				continue
 			}

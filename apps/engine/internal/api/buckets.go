@@ -28,6 +28,7 @@ import (
 // BucketOut is a bucket.
 type BucketOut struct {
 	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id" doc:"The workspace the bucket is in."`
 	Name        string    `json:"name"`
 	PublicRead  bool      `json:"public_read" doc:"Anyone may read objects without a token."`
 	CORSOrigins []string  `json:"cors_origins" doc:"Origins a browser may call the S3 API from."`
@@ -38,7 +39,7 @@ type BucketOut struct {
 }
 
 func bucketOut(b meta.Bucket) BucketOut {
-	return BucketOut{ID: b.ID, Name: b.Name, PublicRead: b.PublicRead, CORSOrigins: b.CORSOrigins, SizeBytes: b.SizeBytes,
+	return BucketOut{ID: b.ID, WorkspaceID: b.WorkspaceID, Name: b.Name, PublicRead: b.PublicRead, CORSOrigins: b.CORSOrigins, SizeBytes: b.SizeBytes,
 		ObjectCount: b.ObjectCount, CreatedAt: b.CreatedAt, UpdatedAt: b.UpdatedAt}
 }
 
@@ -148,16 +149,18 @@ type objectGetIn struct {
 }
 
 // bucketFor resolves a bucket the principal can see and checks its access.
-// A bucket it can't see is not found, so tokens don't learn which exist.
+// The lookup is scoped to the workspace the principal acts in, so a bucket
+// of another workspace is not found, by name or by id. A bucket it can't
+// see is not found either, so tokens don't learn which exist.
 func (s *Server) bucketFor(ctx context.Context, p auth.Principal, ref, access string) (meta.Bucket, error) {
-	b, err := s.eng.GetBucket(ctx, ref)
-	if err != nil || !p.SeesBucket(b.ID) {
+	b, err := s.eng.GetBucket(ctx, p.WorkspaceID, ref)
+	if err != nil || !p.SeesBucket(b) {
 		if err != nil && apierr.As(err).Code != apierr.BucketNotFound {
 			return meta.Bucket{}, err
 		}
 		return meta.Bucket{}, apierr.Newf(apierr.BucketNotFound, "no bucket %q", ref)
 	}
-	if !p.BucketAtLeast(access, b.ID) {
+	if !p.BucketAtLeast(access, b) {
 		return meta.Bucket{}, apierr.New(apierr.Forbidden, "this token can't do that on this bucket")
 	}
 	return b, nil
@@ -193,13 +196,13 @@ func (s *Server) registerBuckets(api huma.API) {
 	huma.Register(api, op("list-buckets", http.MethodGet, "/v1/buckets", "List buckets", "Buckets", ""),
 		func(ctx context.Context, in *PageIn) (*bucketList, error) {
 			p := principalFrom(ctx)
-			all, err := s.eng.ListBuckets(ctx)
+			all, err := s.eng.ListBuckets(ctx, p.WorkspaceID)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
 			visible := []meta.Bucket{}
 			for _, b := range all {
-				if p.SeesBucket(b.ID) {
+				if p.SeesBucket(b) {
 					visible = append(visible, b)
 				}
 			}
@@ -218,11 +221,12 @@ func (s *Server) registerBuckets(api huma.API) {
 
 	huma.Register(api, created(op("create-bucket", http.MethodPost, "/v1/buckets", "Create a bucket", "Buckets", "bucket.create")),
 		func(ctx context.Context, in *createBucketIn) (*bucketBody, error) {
-			if err := requireInstanceAdmin(principalFrom(ctx)); err != nil {
+			p := principalFrom(ctx)
+			if err := requireWorkspaceAdmin(p); err != nil {
 				return nil, toProblem(ctx, err)
 			}
 			return idempotent(ctx, s, "create-bucket", in.IdempotencyKey, in.Body, func() (*bucketBody, error) {
-				b, err := s.eng.CreateBucket(ctx, in.Body.Name)
+				b, err := s.eng.CreateBucket(ctx, p.WorkspaceID, in.Body.Name)
 				if err != nil {
 					return nil, toProblem(ctx, err)
 				}
@@ -262,7 +266,7 @@ func (s *Server) registerBuckets(api huma.API) {
 				return nil, toProblem(ctx, err)
 			}
 			setTarget(ctx, b.ID)
-			if err := requireInstanceAdmin(p); err != nil {
+			if err := requireWorkspaceAdmin(p); err != nil {
 				return nil, toProblem(ctx, err)
 			}
 			if err := s.eng.DeleteBucket(ctx, b.ID); err != nil {
@@ -325,7 +329,7 @@ func (s *Server) registerBuckets(api huma.API) {
 		}
 		h := http.Header{}
 		hctx.EachHeader(func(name, value string) { h.Add(name, value) })
-		o, err := s.eng.PutObject(ctx, engine.PutObjectInput{BucketID: b.ID, Key: in.Key, Size: size, Body: body, Attrs: s3Attrs(h)})
+		o, err := s.eng.PutObject(ctx, engine.PutObjectInput{Workspace: b.WorkspaceID, BucketID: b.ID, Key: in.Key, Size: size, Body: body, Attrs: s3Attrs(h)})
 		if err != nil {
 			return nil, toProblem(ctx, err)
 		}
@@ -416,7 +420,7 @@ func (s *Server) registerBuckets(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			if _, err := s.eng.DeleteObject(ctx, b.ID, in.Key); err != nil {
+			if _, err := s.eng.DeleteObject(ctx, b.WorkspaceID, b.ID, in.Key); err != nil {
 				return nil, toProblem(ctx, err)
 			}
 			return nil, nil
@@ -435,7 +439,7 @@ func (s *Server) registerBuckets(api huma.API) {
 					return nil, toProblem(ctx, err)
 				}
 			}
-			o, err := s.eng.CopyObject(ctx, engine.CopyObjectInput{SrcBucketID: src.ID, SrcKey: in.Body.FromKey, BucketID: dst.ID, Key: in.Body.Key,
+			o, err := s.eng.CopyObject(ctx, engine.CopyObjectInput{Workspace: dst.WorkspaceID, SrcBucketID: src.ID, SrcKey: in.Body.FromKey, BucketID: dst.ID, Key: in.Body.Key,
 				Replace: in.Body.ContentType != "" || in.Body.Metadata != nil, Attrs: engine.ObjectAttrs{ContentType: in.Body.ContentType, Metadata: in.Body.Metadata}})
 			if err != nil {
 				return nil, toProblem(ctx, err)
@@ -509,8 +513,16 @@ func (s *Server) presignURL(ctx context.Context, p auth.Principal, scheme, host,
 	if err != nil {
 		return "", time.Time{}, err
 	}
+	// The URL carries no token, only the access key, which resolves in its
+	// token's workspace. An instance token's key belongs to none, so its URL
+	// names the workspace it was signed for, by id, which a rename can't
+	// break.
+	base := S3Prefix
+	if !p.Bound() {
+		base = workspacesPrefix + p.WorkspaceID + "/s3"
+	}
 	now := time.Now().UTC().Truncate(time.Second)
-	url := s3proto.Presign(s3proto.PresignInput{Method: method, Scheme: scheme, Host: host, Path: S3Prefix + "/" + bucket + "/" + key,
+	url := s3proto.Presign(s3proto.PresignInput{Method: method, Scheme: scheme, Host: host, Path: base + "/" + bucket + "/" + key,
 		AccessKeyID: auth.AccessKeyID(rec.ID), Secret: secret, Region: "us-east-1", Time: now, Expires: expires})
 	return url, now.Add(expires), nil
 }

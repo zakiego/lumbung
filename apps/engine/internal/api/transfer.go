@@ -90,10 +90,10 @@ func (s *Server) registerTransfer(api huma.API) {
 		if in.Mode == "replace" {
 			mode = engine.ImportReplace
 		}
-		if err := s.eng.Import(ctx, engine.Target{Database: d.ID, Branch: b.ID}, format, mode, body); err != nil {
+		if err := s.eng.Import(ctx, engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID}, format, mode, body); err != nil {
 			return nil, toProblem(ctx, err)
 		}
-		b, err = s.eng.GetBranch(ctx, d.ID, b.ID)
+		b, err = s.eng.GetBranch(ctx, d.WorkspaceID, d.ID, b.ID)
 		if err != nil {
 			return nil, toProblem(ctx, err)
 		}
@@ -115,7 +115,7 @@ func (s *Server) registerTransfer(api huma.API) {
 		if err != nil {
 			return nil, toProblem(ctx, err)
 		}
-		t := engine.Target{Database: d.ID, Branch: b.ID}
+		t := engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID}
 		if in.Format == "sql" {
 			// Fail before streaming when the dump can't be made at all.
 			if err := s.eng.SQLDumpable(ctx, t); err != nil {

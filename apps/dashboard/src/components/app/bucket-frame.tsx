@@ -7,13 +7,14 @@ import { TruncatedTip } from "@/components/ui/tooltip"
 import { can } from "@/lib/roles"
 import { type ObjectGroup, type ObjectSortKey, type SortDir, prefixTrail } from "./buckets"
 import { CONTAINER, PageBody, PageHeader } from "./shell"
+import { useWs } from "./workspace"
 
 export type BucketSection = "objects" | "connect" | "settings"
 
 const SECTIONS: { value: BucketSection; label: string; icon: LucideIcon; to: string; admin?: boolean }[] = [
-  { value: "objects", label: "Objects", icon: FilesIcon, to: "/buckets/$bucket" },
-  { value: "connect", label: "Connect", icon: PlugIcon, to: "/buckets/$bucket/connect" },
-  { value: "settings", label: "Settings", icon: SettingsIcon, to: "/buckets/$bucket/settings", admin: true },
+  { value: "objects", label: "Objects", icon: FilesIcon, to: "/w/$ws/buckets/$bucket" },
+  { value: "connect", label: "Connect", icon: PlugIcon, to: "/w/$ws/buckets/$bucket/connect" },
+  { value: "settings", label: "Settings", icon: SettingsIcon, to: "/w/$ws/buckets/$bucket/settings", admin: true },
 ]
 
 /** A bucket page: breadcrumb (with the folder trail on Objects), line tabs, then the body. */
@@ -33,7 +34,8 @@ export function BucketFrame({
   actions?: ReactNode
   children: ReactNode
 }) {
-  const { viewer } = useRouteContext({ from: "/_app" })
+  const ws = useWs()
+  const { viewer } = useRouteContext({ from: "/_app/w/$ws" })
   const trail = section === "objects" ? prefixTrail(prefix) : []
   const sections = SECTIONS.filter((s) => !s.admin || can(viewer.role, "admin"))
   return (
@@ -42,7 +44,7 @@ export function BucketFrame({
         <nav aria-label="Breadcrumb" className="min-w-0">
           <ol className="flex min-w-0 items-center gap-1.5 text-[13px]">
             <li className="hidden sm:block">
-              <Link to="/buckets" className="text-muted-foreground transition-colors duration-100 hover:text-foreground">
+              <Link to="/w/$ws/buckets" params={{ ws }} className="text-muted-foreground transition-colors duration-100 hover:text-foreground">
                 Buckets
               </Link>
             </li>
@@ -56,7 +58,7 @@ export function BucketFrame({
                     {bucket}
                   </h1>
                 ) : (
-                  <Link to="/buckets/$bucket" params={{ bucket }} search={keep} className="block truncate font-mono text-muted-foreground hover:text-foreground">
+                  <Link to="/w/$ws/buckets/$bucket" params={{ ws, bucket }} search={keep} className="block truncate font-mono text-muted-foreground hover:text-foreground">
                     {bucket}
                   </Link>
                 )}
@@ -73,7 +75,7 @@ export function BucketFrame({
                       {t.label}
                     </h1>
                   ) : (
-                    <Link to="/buckets/$bucket" params={{ bucket }} search={{ prefix: t.prefix, ...keep }} className="block truncate font-mono text-muted-foreground hover:text-foreground">
+                    <Link to="/w/$ws/buckets/$bucket" params={{ ws, bucket }} search={{ prefix: t.prefix, ...keep }} className="block truncate font-mono text-muted-foreground hover:text-foreground">
                       {t.label}
                     </Link>
                   )}
@@ -91,7 +93,7 @@ export function BucketFrame({
             <ScrollArea axis="x" fade bare>
               <TabsList aria-label="Bucket pages" className="w-full min-w-max shadow-none">
                 {sections.map((s) => (
-                  <TabsTab key={s.value} value={s.value} icon={<s.icon />} render={<Link to={s.to} params={{ bucket }} />}>
+                  <TabsTab key={s.value} value={s.value} icon={<s.icon />} render={<Link to={s.to} params={{ ws, bucket }} />}>
                     {s.label}
                   </TabsTab>
                 ))}

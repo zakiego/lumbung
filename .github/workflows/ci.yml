@@ -85,6 +85,9 @@ jobs:
       # PLAN 16.5: requests through the S3 handler must never create or
       # change a file outside object storage.
       - run: go test -run '^$' -fuzz '^FuzzS3Path$' -fuzztime 60s ./internal/api
+      # PLAN 17.9: requests with one workspace's token must never read or
+      # change anything of another workspace.
+      - run: go test -run '^$' -fuzz '^FuzzWorkspaceRequests$' -fuzztime 60s ./internal/api
 
   web:
     runs-on: ubuntu-latest
@@ -135,3 +138,7 @@ jobs:
       # The script talks to the engine through the SDK's built output.
       - run: pnpm --filter @lumbung/client build
       - run: pnpm e2e
+      # PLAN 17: a workspace token makes its own databases and a bucket
+      # through MCP, and another workspace's token can't see or touch them
+      # through MCP, REST, libSQL or S3.
+      - run: pnpm proof:workspaces

@@ -89,7 +89,7 @@ func (s *Server) registerBranches(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			all, err := s.eng.ListBranches(ctx, d.ID)
+			all, err := s.eng.ListBranches(ctx, d.WorkspaceID, d.ID)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -123,7 +123,7 @@ func (s *Server) registerBranches(api huma.API) {
 				Body any
 			}{d.ID, in.Body}, func() (*branchBody, error) {
 				opts := engine.NewBranchOptions{Protected: in.Body.Protected, ExpiresIn: time.Duration(in.Body.ExpiresInDays) * 24 * time.Hour}
-				b, err := s.eng.CreateBranch(ctx, d.ID, in.Body.Name, engine.BranchSource{Branch: in.Body.From, Snapshot: in.Body.FromSnapshot}, opts)
+				b, err := s.eng.CreateBranch(ctx, d.WorkspaceID, d.ID, in.Body.Name, engine.BranchSource{Branch: in.Body.From, Snapshot: in.Body.FromSnapshot}, opts)
 				if err != nil {
 					return nil, toProblem(ctx, err)
 				}
@@ -157,7 +157,7 @@ func (s *Server) registerBranches(api huma.API) {
 				}
 				u.ExpiresAt = &at
 			}
-			b, err = s.eng.UpdateBranch(ctx, d.ID, b.ID, u)
+			b, err = s.eng.UpdateBranch(ctx, d.WorkspaceID, d.ID, b.ID, u)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -171,7 +171,7 @@ func (s *Server) registerBranches(api huma.API) {
 				return nil, toProblem(ctx, err)
 			}
 			setTarget(ctx, d.ID+"/"+b.ID)
-			if err := s.eng.DeleteBranch(ctx, d.ID, b.ID); err != nil {
+			if err := s.eng.DeleteBranch(ctx, d.WorkspaceID, d.ID, b.ID); err != nil {
 				return nil, toProblem(ctx, err)
 			}
 			return nil, nil
@@ -186,11 +186,11 @@ func (s *Server) registerBranches(api huma.API) {
 			}
 			// A reset copies the parent's current data into the branch, so a
 			// token limited to the branch must not be able to pull it in.
-			if !p.AtLeast(auth.AccessWrite, d.ID, "") {
+			if !p.AtLeast(auth.AccessWrite, d, "") {
 				return nil, toProblem(ctx, apierr.New(apierr.Forbidden, "resetting needs write access to the whole database"))
 			}
 			setTarget(ctx, d.ID+"/"+b.ID)
-			b, err = s.eng.ResetBranch(ctx, d.ID, b.ID)
+			b, err = s.eng.ResetBranch(ctx, d.WorkspaceID, d.ID, b.ID)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -204,11 +204,11 @@ func (s *Server) registerBranches(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			if !p.AtLeast(auth.AccessAdmin, d.ID, "") {
+			if !p.AtLeast(auth.AccessAdmin, d, "") {
 				return nil, toProblem(ctx, apierr.New(apierr.Forbidden, "promoting needs admin access to the whole database"))
 			}
 			setTarget(ctx, d.ID+"/"+b.ID)
-			b, err = s.eng.PromoteBranch(ctx, d.ID, b.ID)
+			b, err = s.eng.PromoteBranch(ctx, d.WorkspaceID, d.ID, b.ID)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -227,7 +227,7 @@ func (s *Server) registerBranches(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			diff, err := s.eng.DiffBranches(ctx, d.ID, b.ID, a.ID)
+			diff, err := s.eng.DiffBranches(ctx, d.WorkspaceID, d.ID, b.ID, a.ID)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -240,7 +240,7 @@ func (s *Server) registerBranches(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			sc, err := s.eng.Schema(ctx, engine.Target{Database: d.ID, Branch: b.ID})
+			sc, err := s.eng.Schema(ctx, engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID})
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}

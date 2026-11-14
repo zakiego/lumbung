@@ -30,7 +30,7 @@ func seed(t *testing.T, e *Engine, db string) {
 	} {
 		mustQuery(t, e, db, Write, sql)
 	}
-	_, err := e.Query(bg, Target{Database: db}, Write, Statement{
+	_, err := e.Query(bg, Target{Workspace: ws(e), Database: db}, Write, Statement{
 		SQL: "INSERT INTO t (i, f, s, b, any_col) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
 		Args: []value.Value{
 			value.IntValue(math.MaxInt64), value.FloatValue(1), value.TextValue("it's \"quoted\"\nline"), value.BlobValue([]byte{0, 1, 255}), value.FloatValue(2),
@@ -62,11 +62,11 @@ func TestSQLDumpRoundTrip(t *testing.T) {
 	mustCreate(t, e, "src")
 	seed(t, e, "src")
 	var dump bytes.Buffer
-	if err := e.ExportSQL(bg, Target{Database: "src"}, &dump); err != nil {
+	if err := e.ExportSQL(bg, Target{Workspace: ws(e), Database: "src"}, &dump); err != nil {
 		t.Fatal(err)
 	}
 	mustCreate(t, e, "dst")
-	if err := e.Import(bg, Target{Database: "dst"}, ImportSQL, ImportIntoEmpty, bytes.NewReader(dump.Bytes())); err != nil {
+	if err := e.Import(bg, Target{Workspace: ws(e), Database: "dst"}, ImportSQL, ImportIntoEmpty, bytes.NewReader(dump.Bytes())); err != nil {
 		t.Fatalf("import dump: %v\n%s", err, dump.String())
 	}
 	for _, q := range []string{
@@ -80,8 +80,8 @@ func TestSQLDumpRoundTrip(t *testing.T) {
 			t.Errorf("%s:\nsrc %s\ndst %s", q, a, b)
 		}
 	}
-	a, _ := e.Schema(bg, Target{Database: "src"})
-	b, _ := e.Schema(bg, Target{Database: "dst"})
+	a, _ := e.Schema(bg, Target{Workspace: ws(e), Database: "src"})
+	b, _ := e.Schema(bg, Target{Workspace: ws(e), Database: "dst"})
 	if d := diffSchemas(a, b); len(d) != 0 {
 		t.Errorf("schema changed in the round trip: %+v", d)
 	}
@@ -92,14 +92,14 @@ func TestDBExportImport(t *testing.T) {
 	mustCreate(t, e, "src")
 	seed(t, e, "src")
 	var file bytes.Buffer
-	if err := e.ExportDB(bg, Target{Database: "src"}, &file); err != nil {
+	if err := e.ExportDB(bg, Target{Workspace: ws(e), Database: "src"}, &file); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.HasPrefix(file.Bytes(), sqliteHeader) {
 		t.Fatal("export isn't a SQLite file")
 	}
 	mustCreate(t, e, "dst")
-	if err := e.Import(bg, Target{Database: "dst"}, ImportDB, ImportIntoEmpty, bytes.NewReader(file.Bytes())); err != nil {
+	if err := e.Import(bg, Target{Workspace: ws(e), Database: "dst"}, ImportDB, ImportIntoEmpty, bytes.NewReader(file.Bytes())); err != nil {
 		t.Fatal(err)
 	}
 	q := "SELECT id, i, f, s, b, any_col FROM t ORDER BY id"
@@ -119,15 +119,15 @@ func TestImportRules(t *testing.T) {
 	mustQuery(t, e, "app", Write, "INSERT INTO keep VALUES (1)")
 	dump := "CREATE TABLE fresh(x);\nINSERT INTO fresh VALUES (7);\n"
 
-	err := e.Import(bg, Target{Database: "app"}, ImportSQL, ImportIntoEmpty, strings.NewReader(dump))
+	err := e.Import(bg, Target{Workspace: ws(e), Database: "app"}, ImportSQL, ImportIntoEmpty, strings.NewReader(dump))
 	wantCode(t, err, apierr.BranchNotEmpty, "import into a branch with tables")
-	err = e.Import(bg, Target{Database: "app"}, ImportSQL, ImportReplace, strings.NewReader(dump))
+	err = e.Import(bg, Target{Workspace: ws(e), Database: "app"}, ImportSQL, ImportReplace, strings.NewReader(dump))
 	wantCode(t, err, apierr.BranchProtected, "replace the default branch")
 
-	if _, err := e.CreateBranch(bg, "app", "work", BranchSource{}, NewBranchOptions{}); err != nil {
+	if _, err := e.CreateBranch(bg, ws(e), "app", "work", BranchSource{}, NewBranchOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Import(bg, Target{Database: "app", Branch: "work"}, ImportSQL, ImportReplace, strings.NewReader(dump)); err != nil {
+	if err := e.Import(bg, Target{Workspace: ws(e), Database: "app", Branch: "work"}, ImportSQL, ImportReplace, strings.NewReader(dump)); err != nil {
 		t.Fatal(err)
 	}
 	if v := scalar(t, mustOnBranch(t, e, "app", "work", Read, "SELECT x FROM fresh")); v.Int != 7 {
@@ -138,7 +138,7 @@ func TestImportRules(t *testing.T) {
 	}
 
 	mustCreate(t, e, "empty")
-	tgt := Target{Database: "empty"}
+	tgt := Target{Workspace: ws(e), Database: "empty"}
 	for name, body := range map[string]string{
 		"not sqlite":       "hello world, not a database at all" + strings.Repeat(".", 600),
 		"short header":     "SQLite format 3",
@@ -166,7 +166,7 @@ func TestImportRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Nothing staged is left next to the branch files.
-	d, _ := e.GetDatabase(bg, "empty")
+	d, _ := e.GetDatabase(bg, ws(e), "empty")
 	if m, _ := filepath.Glob(filepath.Join(e.Layout().DatabaseDir(d.ID), "*.tmp-*")); len(m) != 0 {
 		t.Fatalf("staged files left: %v", m)
 	}
@@ -177,7 +177,7 @@ func TestImportRules(t *testing.T) {
 func TestImportedFileIsConfined(t *testing.T) {
 	e := newEngine(t, nil)
 	mustCreate(t, e, "app")
-	if _, err := e.CreateBranch(bg, "app", "up", BranchSource{}, NewBranchOptions{}); err != nil {
+	if _, err := e.CreateBranch(bg, ws(e), "app", "up", BranchSource{}, NewBranchOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "evil.db")
@@ -190,7 +190,7 @@ func TestImportedFileIsConfined(t *testing.T) {
 	}
 	raw.Close()
 	body, _ := os.ReadFile(path)
-	if err := e.Import(bg, Target{Database: "app", Branch: "up"}, ImportDB, ImportReplace, bytes.NewReader(body)); err != nil {
+	if err := e.Import(bg, Target{Workspace: ws(e), Database: "app", Branch: "up"}, ImportDB, ImportReplace, bytes.NewReader(body)); err != nil {
 		t.Fatal(err)
 	}
 	if v := scalar(t, mustOnBranch(t, e, "app", "up", Read, "SELECT x FROM t")); v.Int != 1 {

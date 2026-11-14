@@ -34,7 +34,7 @@ func TestCopyDuringWrites(t *testing.T) {
 			defer wg.Done()
 			for ctx.Err() == nil {
 				n := batches.Add(1)
-				_, err := e.Batch(bg, Target{Database: "app"}, Write, []Statement{
+				_, err := e.Batch(bg, Target{Workspace: ws(e), Database: "app"}, Write, []Statement{
 					stmt("INSERT INTO pairs VALUES (?, 1, randomblob(2000))", n),
 					stmt("INSERT INTO pairs VALUES (?, 2, randomblob(2000))", n),
 				})
@@ -55,7 +55,7 @@ func TestCopyDuringWrites(t *testing.T) {
 	for i := 0; i < 15; i++ {
 		time.Sleep(10 * time.Millisecond)
 		name := fmt.Sprintf("copy-%d", i)
-		b, err := e.CreateBranch(bg, "app", name, BranchSource{}, NewBranchOptions{})
+		b, err := e.CreateBranch(bg, ws(e), "app", name, BranchSource{}, NewBranchOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -63,7 +63,7 @@ func TestCopyDuringWrites(t *testing.T) {
 			t.Fatal(err)
 		}
 		check(name)
-		sn, err := e.CreateSnapshot(bg, Target{Database: "app"}, "")
+		sn, err := e.CreateSnapshot(bg, Target{Workspace: ws(e), Database: "app"}, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,7 +86,7 @@ func TestMaintenanceDuringRequests(t *testing.T) {
 	mustCreate(t, e, "app")
 	mustQuery(t, e, "app", Write, "CREATE TABLE t(x)")
 	mustQuery(t, e, "app", Write, "INSERT INTO t VALUES (1)")
-	if _, err := e.CreateBranch(bg, "app", "dev", BranchSource{}, NewBranchOptions{}); err != nil {
+	if _, err := e.CreateBranch(bg, ws(e), "app", "dev", BranchSource{}, NewBranchOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(bg)
@@ -113,7 +113,7 @@ func TestMaintenanceDuringRequests(t *testing.T) {
 		}()
 	}
 	for i := 0; i < 10; i++ {
-		if _, err := e.ResetBranch(bg, "app", "dev"); err != nil {
+		if _, err := e.ResetBranch(bg, ws(e), "app", "dev"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -184,7 +184,7 @@ func TestCrashMidWrite(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		d, _ := e.GetDatabase(bg, "app")
+		d, _ := e.GetDatabase(bg, ws(e), "app")
 		if err := e.checkIntegrity(bg, e.Layout().BranchFile(d.ID, d.DefaultBranchID)); err != nil {
 			t.Fatalf("round %d: %v", round, err)
 		}
@@ -211,7 +211,7 @@ func crashChild(dir string) {
 		os.Exit(1)
 	}
 	for {
-		res, err := e.Batch(bg, Target{Database: "app"}, Write, []Statement{
+		res, err := e.Batch(bg, Target{Workspace: ws(e), Database: "app"}, Write, []Statement{
 			stmt("INSERT INTO log (pad) VALUES (randomblob(4000))"),
 			stmt("UPDATE counter SET n = n + 1"),
 			stmt("SELECT n FROM counter"),

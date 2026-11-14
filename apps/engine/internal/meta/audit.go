@@ -10,36 +10,55 @@ import (
 
 // AuditEntry is one management action.
 type AuditEntry struct {
-	ID        int64
-	At        time.Time
-	TokenID   string // the token that made the request
-	Actor     string // the dashboard user acting through the service token, if any
-	Action    string // e.g. database.create
-	Target    string // ids the action touched
-	Result    string // ok or error
-	Code      string // error code when Result is error
-	RequestID string
+	ID int64
+	At time.Time
+	// WorkspaceID is the workspace the action happened in. Empty for an
+	// instance action: workspaces, instance tokens, moves.
+	WorkspaceID string
+	TokenID     string // the token that made the request
+	Actor       string // the dashboard user acting through the service token, if any
+	Action      string // e.g. database.create
+	Target      string // ids the action touched
+	Result      string // ok or error
+	Code        string // error code when Result is error
+	RequestID   string
 }
 
-// AddAudit appends an entry and trims the log to keep at most maxRows.
+// AddAudit appends an entry and trims its workspace's part of the log to
+// the newest maxRows, so one busy workspace can't push another's history
+// out. Instance actions (no workspace) are trimmed the same way.
 func (s *Store) AddAudit(ctx context.Context, e AuditEntry, maxRows int) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO audit (at, token_id, actor, action, target, result, code, request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		now(), e.TokenID, e.Actor, e.Action, e.Target, e.Result, e.Code, e.RequestID)
+		`INSERT INTO audit (at, workspace_id, token_id, actor, action, target, result, code, request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		now(), e.WorkspaceID, e.TokenID, e.Actor, e.Action, e.Target, e.Result, e.Code, e.RequestID)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `DELETE FROM audit WHERE id <= (SELECT max(id) FROM audit) - ?`, maxRows)
+	_, err = s.db.ExecContext(ctx,
+		`DELETE FROM audit WHERE workspace_id = ?1 AND id <= coalesce((SELECT id FROM audit WHERE workspace_id = ?1 ORDER BY id DESC LIMIT 1 OFFSET ?2), 0)`,
+		e.WorkspaceID, maxRows)
 	return err
 }
 
-// ListAudit returns entries newest first, with ids below before (0: from
-// the newest).
-func (s *Store) ListAudit(ctx context.Context, before int64, limit int) ([]AuditEntry, error) {
-	q := `SELECT id, at, token_id, actor, action, target, result, code, request_id FROM audit`
-	args := []any{}
+// ListAudit returns one workspace's entries newest first, with ids below
+// before (0: from the newest).
+func (s *Store) ListAudit(ctx context.Context, wsID string, before int64, limit int) ([]AuditEntry, error) {
+	return s.listAudit(ctx, ` WHERE workspace_id = ?`, []any{wsID}, before, limit)
+}
+
+// ListAllAudit returns every entry, instance actions and every workspace's,
+// newest first. When wsID isn't empty it keeps only that workspace's.
+func (s *Store) ListAllAudit(ctx context.Context, wsID string, before int64, limit int) ([]AuditEntry, error) {
+	if wsID != "" {
+		return s.ListAudit(ctx, wsID, before, limit)
+	}
+	return s.listAudit(ctx, ` WHERE 1 = 1`, nil, before, limit)
+}
+
+func (s *Store) listAudit(ctx context.Context, where string, args []any, before int64, limit int) ([]AuditEntry, error) {
+	q := `SELECT id, at, workspace_id, token_id, actor, action, target, result, code, request_id FROM audit` + where
 	if before > 0 {
-		q += ` WHERE id < ?`
+		q += ` AND id < ?`
 		args = append(args, before)
 	}
 	q += ` ORDER BY id DESC LIMIT ?`
@@ -53,7 +72,7 @@ func (s *Store) ListAudit(ctx context.Context, before int64, limit int) ([]Audit
 	for rows.Next() {
 		var e AuditEntry
 		var at string
-		if err := rows.Scan(&e.ID, &at, &e.TokenID, &e.Actor, &e.Action, &e.Target, &e.Result, &e.Code, &e.RequestID); err != nil {
+		if err := rows.Scan(&e.ID, &at, &e.WorkspaceID, &e.TokenID, &e.Actor, &e.Action, &e.Target, &e.Result, &e.Code, &e.RequestID); err != nil {
 			return nil, err
 		}
 		e.At = *parseTime(sql.NullString{String: at, Valid: true})

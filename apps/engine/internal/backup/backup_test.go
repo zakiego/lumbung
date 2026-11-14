@@ -30,9 +30,19 @@ func open(t *testing.T, dir string) *engine.Engine {
 	return e
 }
 
+// ws is the id of the default workspace, where these tests keep their
+// databases and buckets.
+func ws(e *engine.Engine) string {
+	w, err := e.DefaultWorkspace(bg)
+	if err != nil {
+		panic(err)
+	}
+	return w.ID
+}
+
 func q(t *testing.T, e *engine.Engine, db, branch string, access engine.Access, sql string) *engine.Result {
 	t.Helper()
-	r, err := e.Query(bg, engine.Target{Database: db, Branch: branch}, access, engine.Statement{SQL: sql})
+	r, err := e.Query(bg, engine.Target{Workspace: ws(e), Database: db, Branch: branch}, access, engine.Statement{SQL: sql})
 	if err != nil {
 		t.Fatalf("%s: %v", sql, err)
 	}
@@ -43,19 +53,19 @@ func TestBackupAndRestore(t *testing.T) {
 	src := t.TempDir()
 	e := open(t, src)
 	for _, name := range []string{"app", "other", "gone"} {
-		if _, err := e.CreateDatabase(bg, name); err != nil {
+		if _, err := e.CreateDatabase(bg, ws(e), name); err != nil {
 			t.Fatal(err)
 		}
 		q(t, e, name, "", engine.Write, "CREATE TABLE t(x)")
 		q(t, e, name, "", engine.Write, "INSERT INTO t VALUES (1)")
 	}
-	if _, err := e.CreateBranch(bg, "app", "dev", engine.BranchSource{}, engine.NewBranchOptions{}); err != nil {
+	if _, err := e.CreateBranch(bg, ws(e), "app", "dev", engine.BranchSource{}, engine.NewBranchOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.CreateSnapshot(bg, engine.Target{Database: "app"}, "s"); err != nil {
+	if _, err := e.CreateSnapshot(bg, engine.Target{Workspace: ws(e), Database: "app"}, "s"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.DeleteDatabase(bg, "gone"); err != nil {
+	if _, err := e.DeleteDatabase(bg, ws(e), "gone"); err != nil {
 		t.Fatal(err)
 	}
 	_ = os.MkdirAll(filepath.Join(src, "secrets"), 0o700)
@@ -69,7 +79,7 @@ func TestBackupAndRestore(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for ctx.Err() == nil {
-			if _, err := e.Batch(bg, engine.Target{Database: "app"}, engine.Write, []engine.Statement{
+			if _, err := e.Batch(bg, engine.Target{Workspace: ws(e), Database: "app"}, engine.Write, []engine.Statement{
 				{SQL: "INSERT INTO t VALUES (2)"}, {SQL: "INSERT INTO t VALUES (2)"},
 			}); err != nil {
 				t.Errorf("writer: %v", err)
@@ -107,13 +117,13 @@ func TestBackupAndRestore(t *testing.T) {
 		t.Fatalf("restored copy has %d rows: a transaction was split", n)
 	}
 	q(t, r, "other", "", engine.Read, "SELECT * FROM t")
-	if _, err := r.GetBranch(bg, "app", "dev"); err == nil {
+	if _, err := r.GetBranch(bg, ws(r), "app", "dev"); err == nil {
 		t.Fatal("a branch whose file wasn't backed up was restored")
 	}
-	if snaps, _ := r.ListSnapshots(bg, engine.Target{Database: "app"}); len(snaps) != 0 {
+	if snaps, _ := r.ListSnapshots(bg, engine.Target{Workspace: ws(e), Database: "app"}); len(snaps) != 0 {
 		t.Fatal("snapshot records restored without their files")
 	}
-	if trash, _ := r.ListTrash(bg); len(trash) != 0 {
+	if trash, _ := r.ListTrash(bg, ws(r)); len(trash) != 0 {
 		t.Fatal("trashed database restored without its files")
 	}
 	if b, _ := os.ReadFile(filepath.Join(dst, "secrets", "service-token")); string(b) != "lmb_x\n" {
@@ -165,7 +175,7 @@ func TestBackupAndRestore(t *testing.T) {
 func TestRelativePaths(t *testing.T) {
 	src := t.TempDir()
 	e := open(t, src)
-	if _, err := e.CreateDatabase(bg, "app"); err != nil {
+	if _, err := e.CreateDatabase(bg, ws(e), "app"); err != nil {
 		t.Fatal(err)
 	}
 	q(t, e, "app", "", engine.Write, "CREATE TABLE t(x)")
@@ -195,7 +205,7 @@ func mustGetwd(t *testing.T) string {
 func TestMetaOnlyBackupsStayApart(t *testing.T) {
 	src := t.TempDir()
 	e := open(t, src)
-	if _, err := e.CreateDatabase(bg, "app"); err != nil {
+	if _, err := e.CreateDatabase(bg, ws(e), "app"); err != nil {
 		t.Fatal(err)
 	}
 	out := t.TempDir()
@@ -232,10 +242,10 @@ func TestMetaOnlyBackupsStayApart(t *testing.T) {
 func TestRestoreMeta(t *testing.T) {
 	src := t.TempDir()
 	e := open(t, src)
-	if _, err := e.CreateDatabase(bg, "app"); err != nil {
+	if _, err := e.CreateDatabase(bg, ws(e), "app"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.CreateBranch(bg, "app", "dev", engine.BranchSource{}, engine.NewBranchOptions{}); err != nil {
+	if _, err := e.CreateBranch(bg, ws(e), "app", "dev", engine.BranchSource{}, engine.NewBranchOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	dir, _, err := Run(bg, Options{DataDir: src, To: t.TempDir(), MetaOnly: true})
@@ -243,14 +253,14 @@ func TestRestoreMeta(t *testing.T) {
 		t.Fatal(err)
 	}
 	// After the backup: dev is deleted (its file goes), next is created.
-	dev, err := e.GetBranch(bg, "app", "dev")
+	dev, err := e.GetBranch(bg, ws(e), "app", "dev")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.DeleteBranch(bg, dev.DatabaseID, dev.ID); err != nil {
+	if err := e.DeleteBranch(bg, ws(e), dev.DatabaseID, dev.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.CreateBranch(bg, "app", "next", engine.BranchSource{}, engine.NewBranchOptions{}); err != nil {
+	if _, err := e.CreateBranch(bg, ws(e), "app", "next", engine.BranchSource{}, engine.NewBranchOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -275,10 +285,10 @@ func TestRestoreMeta(t *testing.T) {
 	// main is back and works; dev's record went with its file; next, made
 	// after the backup, isn't known.
 	q(t, r, "app", "", engine.Write, "CREATE TABLE t(x)")
-	if _, err := r.GetBranch(bg, "app", "dev"); err == nil {
+	if _, err := r.GetBranch(bg, ws(r), "app", "dev"); err == nil {
 		t.Fatal("a branch whose file is gone survived the restore")
 	}
-	if _, err := r.GetBranch(bg, "app", "next"); err == nil {
+	if _, err := r.GetBranch(bg, ws(r), "app", "next"); err == nil {
 		t.Fatal("a branch made after the backup appeared")
 	}
 }

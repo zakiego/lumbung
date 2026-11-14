@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input, PasswordInput } from "@/components/ui/input"
 import { Separator } from "@/components/ui/layout"
-import { ROLE_LABEL, type Role } from "@/lib/roles"
+import { ROLE_LABEL } from "@/lib/roles"
 
 const MIN_PASSWORD = 10
 
@@ -155,7 +155,7 @@ export function SetupForm({ onSetup }: { onSetup: (values: SetupValues) => Promi
   )
 }
 
-export function InviteForm({ email, role, onAccept }: { email: string; role: Role; onAccept: (values: { name: string; password: string }) => Promise<unknown> }) {
+export function InviteForm({ email, owner, onAccept }: { email: string; owner: boolean; onAccept: (values: { name: string; password: string }) => Promise<unknown> }) {
   const [name, setName] = useState("")
   const [password, setPassword] = useState("")
   const form = useSubmit(async (v: { name: string; password: string }) => {
@@ -167,8 +167,12 @@ export function InviteForm({ email, role, onAccept }: { email: string; role: Rol
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-lg border bg-card px-4 py-3 text-[13px]">
         <dt className="text-muted-foreground">Email</dt>
         <dd className="truncate">{email}</dd>
-        <dt className="text-muted-foreground">Role</dt>
-        <dd>{ROLE_LABEL[role]}</dd>
+        {owner && (
+          <>
+            <dt className="text-muted-foreground">Access</dt>
+            <dd>{ROLE_LABEL.owner}</dd>
+          </>
+        )}
       </dl>
       <Field>
         <FieldLabel>Your name</FieldLabel>

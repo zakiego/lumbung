@@ -45,8 +45,11 @@ func (s *Store) CountBranches(ctx context.Context, dbID string) (int, error) {
 
 // NewBranch is what CreateBranch records.
 type NewBranch struct {
-	ID               string
-	DatabaseID       string
+	ID         string
+	DatabaseID string
+	// WorkspaceID is the workspace the caller resolved the database in. The
+	// branch is only recorded if the database is still live there.
+	WorkspaceID      string
 	Name             string
 	ParentID         string // empty when made from a snapshot of a deleted branch
 	SourceSnapshotID string
@@ -60,15 +63,23 @@ func (s *Store) CreateBranch(ctx context.Context, nb NewBranch) (Branch, error) 
 		return Branch{}, apierr.Newf(apierr.InvalidName, "invalid branch name %q", nb.Name)
 	}
 	ts := now()
-	_, err := s.db.ExecContext(ctx,
+	// The copy that made the file took a while. The row only goes in if the
+	// database is still live in the workspace the caller found it in, checked
+	// in the same statement: a workspace deleted, or a database moved or
+	// deleted, meanwhile gets no new branch.
+	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO branches (id, database_id, name, parent_id, source_snapshot_id, protected, expires_at, created_at, updated_at)
-		 VALUES (?, ?, ?, nullif(?, ''), nullif(?, ''), ?, ?, ?, ?)`,
-		nb.ID, nb.DatabaseID, nb.Name, nb.ParentID, nb.SourceSnapshotID, nb.Protected, fmtTime(nb.ExpiresAt), ts, ts)
+		 SELECT ?, ?, ?, nullif(?, ''), nullif(?, ''), ?, ?, ?, ?
+		 WHERE EXISTS (`+databaseLiveIn+`)`,
+		nb.ID, nb.DatabaseID, nb.Name, nb.ParentID, nb.SourceSnapshotID, nb.Protected, fmtTime(nb.ExpiresAt), ts, ts, nb.DatabaseID, nb.WorkspaceID)
 	if isUnique(err) {
 		return Branch{}, apierr.Newf(apierr.NameTaken, "a branch named %q already exists", nb.Name)
 	}
 	if err != nil {
 		return Branch{}, fmt.Errorf("meta: insert branch: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return Branch{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q", nb.DatabaseID)
 	}
 	return s.GetBranch(ctx, nb.DatabaseID, nb.ID)
 }
@@ -193,18 +204,25 @@ func (s *Store) ExpiredBranches(ctx context.Context, at time.Time) ([]Branch, er
 	return out, rows.Err()
 }
 
-// ListDatabases returns live databases ordered by name.
-func (s *Store) ListDatabases(ctx context.Context) ([]Database, error) {
+// ListDatabases returns a workspace's live databases ordered by name.
+func (s *Store) ListDatabases(ctx context.Context, wsID string) ([]Database, error) {
+	return s.listDatabases(ctx, `workspace_id = ? AND deleted_at IS NULL ORDER BY name`, wsID)
+}
+
+// ListAllDatabases returns the live databases of every workspace, for the
+// engine's own jobs and backups.
+func (s *Store) ListAllDatabases(ctx context.Context) ([]Database, error) {
 	return s.listDatabases(ctx, `deleted_at IS NULL ORDER BY name`)
 }
 
-// ListTrash returns databases in the trash, most recently deleted first.
-func (s *Store) ListTrash(ctx context.Context) ([]Database, error) {
-	return s.listDatabases(ctx, `deleted_at IS NOT NULL ORDER BY deleted_at DESC`)
+// ListTrash returns a workspace's databases in the trash, most recently
+// deleted first.
+func (s *Store) ListTrash(ctx context.Context, wsID string) ([]Database, error) {
+	return s.listDatabases(ctx, `workspace_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC`, wsID)
 }
 
-func (s *Store) listDatabases(ctx context.Context, where string) ([]Database, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+dbCols+` FROM databases WHERE `+where)
+func (s *Store) listDatabases(ctx context.Context, where string, args ...any) ([]Database, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+dbCols+` FROM databases WHERE `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +250,7 @@ func (s *Store) RenameDatabase(ctx context.Context, dbID, name string) (Database
 	if err != nil {
 		return Database{}, err
 	}
-	return s.GetDatabase(ctx, dbID)
+	return s.DatabaseByID(ctx, dbID)
 }
 
 // SoftDeleteDatabase moves a database to the trash.
@@ -243,21 +261,31 @@ func (s *Store) SoftDeleteDatabase(ctx context.Context, dbID string, purgeAfter 
 	return err
 }
 
-// GetDeletedDatabase finds a database in the trash by id, or by name (the
-// most recently deleted one with that name).
-func (s *Store) GetDeletedDatabase(ctx context.Context, ref string) (Database, error) {
+// GetDeletedDatabase finds a database in a workspace's trash by id, or by
+// name (the most recently deleted one with that name).
+func (s *Store) GetDeletedDatabase(ctx context.Context, wsID, ref string) (Database, error) {
 	var row *sql.Row
 	switch {
 	case ids.IsID(ref, ids.Database):
-		row = s.db.QueryRowContext(ctx, `SELECT `+dbCols+` FROM databases WHERE id = ? AND deleted_at IS NOT NULL`, ref)
+		row = s.db.QueryRowContext(ctx, `SELECT `+dbCols+` FROM databases WHERE workspace_id = ? AND id = ? AND deleted_at IS NOT NULL`, wsID, ref)
 	case ids.ValidName(ref):
-		row = s.db.QueryRowContext(ctx, `SELECT `+dbCols+` FROM databases WHERE name = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT 1`, ref)
+		row = s.db.QueryRowContext(ctx, `SELECT `+dbCols+` FROM databases WHERE workspace_id = ? AND name = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT 1`, wsID, ref)
 	default:
 		return Database{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q in the trash", ref)
 	}
 	d, err := scanDatabase(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Database{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q in the trash", ref)
+	}
+	return d, err
+}
+
+// DeletedDatabaseByID finds a database in the trash by id alone, in any
+// workspace, for the engine's sweep of folders nothing owns.
+func (s *Store) DeletedDatabaseByID(ctx context.Context, id string) (Database, error) {
+	d, err := scanDatabase(s.db.QueryRowContext(ctx, `SELECT `+dbCols+` FROM databases WHERE id = ? AND deleted_at IS NOT NULL`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Database{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q in the trash", id)
 	}
 	return d, err
 }
@@ -275,10 +303,11 @@ func (s *Store) RestoreDatabase(ctx context.Context, dbID, name string) (Databas
 	if err != nil {
 		return Database{}, err
 	}
-	return s.GetDatabase(ctx, dbID)
+	return s.DatabaseByID(ctx, dbID)
 }
 
-// PurgeDue lists trashed databases whose retention has passed.
+// PurgeDue lists trashed databases whose retention has passed, in every
+// workspace.
 func (s *Store) PurgeDue(ctx context.Context, at time.Time) ([]Database, error) {
 	return s.listDatabases(ctx, `deleted_at IS NOT NULL AND purge_after <= '`+at.UTC().Format(TimeLayout)+`'`)
 }

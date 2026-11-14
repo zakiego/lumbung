@@ -24,8 +24,8 @@ import (
 	"github.com/zakiego/lumbung/apps/engine/internal/meta"
 )
 
-// CreateUpload starts a multipart upload.
-func (e *Engine) CreateUpload(ctx context.Context, bucketID, key string, attrs ObjectAttrs, tokenID string) (meta.Upload, error) {
+// CreateUpload starts a multipart upload in a bucket of the given workspace.
+func (e *Engine) CreateUpload(ctx context.Context, ws, bucketID, key string, attrs ObjectAttrs, tokenID string) (meta.Upload, error) {
 	if e.refused != nil {
 		return meta.Upload{}, e.refused
 	}
@@ -38,8 +38,14 @@ func (e *Engine) CreateUpload(ctx context.Context, bucketID, key string, attrs O
 	if err := e.checkDisk(); err != nil {
 		return meta.Upload{}, err
 	}
-	return e.meta.CreateUpload(ctx, meta.Upload{ID: ids.New(ids.Upload), BucketID: bucketID, Key: key,
-		ContentType: attrs.ContentType, Headers: attrs.Headers, Metadata: attrs.Metadata, TokenID: tokenID}, maxUploadsPerBucket)
+	var up meta.Upload
+	err := e.writeBucket(ctx, ws, bucketID, nil, func() error {
+		var err error
+		up, err = e.meta.CreateUpload(ctx, meta.Upload{ID: ids.New(ids.Upload), BucketID: bucketID, Key: key,
+			ContentType: attrs.ContentType, Headers: attrs.Headers, Metadata: attrs.Metadata, TokenID: tokenID}, maxUploadsPerBucket)
+		return err
+	})
+	return up, err
 }
 
 // GetUpload finds an upload in progress for this bucket and key.
@@ -57,6 +63,8 @@ func partRel(uploadID, file string) string { return path.Join("uploads", uploadI
 
 // UploadPartInput is one part.
 type UploadPartInput struct {
+	// Workspace is the workspace the caller resolved the bucket in.
+	Workspace               string
 	UploadID, BucketID, Key string
 	Number                  int
 	Size                    int64
@@ -86,7 +94,7 @@ func (e *Engine) UploadPart(ctx context.Context, in UploadPartInput) (string, er
 		}
 		return 0
 	}
-	res, err := e.reserveObjectBytes(ctx, u.BucketID, in.Size, credit)
+	res, err := e.reserveObjectBytes(ctx, in.Workspace, u.BucketID, in.Size, credit)
 	if err != nil {
 		return "", err
 	}
@@ -112,7 +120,7 @@ func (e *Engine) UploadPart(ctx context.Context, in UploadPartInput) (string, er
 		return "", err
 	}
 	etag := hex.EncodeToString(sum)
-	err = res.settle(func() error {
+	err = e.writeBucket(ctx, in.Workspace, u.BucketID, res, func() error {
 		return e.meta.PutPart(ctx, meta.Part{UploadID: u.ID, Number: in.Number, File: file, Size: in.Size, ETag: etag},
 			func(old string) string { return partRel(u.ID, old) }, e.gcAfter())
 	})
@@ -133,7 +141,7 @@ func normETag(s string) string { return strings.ToLower(strings.Trim(strings.Tri
 
 // CompleteUpload assembles the listed parts, in order, into the object.
 // The ETag is the MD5 of the parts' MD5s with a -<count> suffix.
-func (e *Engine) CompleteUpload(ctx context.Context, uploadID, bucketID, key string, list []CompletedPart, cond *meta.WriteCond) (meta.Object, error) {
+func (e *Engine) CompleteUpload(ctx context.Context, ws, uploadID, bucketID, key string, list []CompletedPart, cond *meta.WriteCond) (meta.Object, error) {
 	u, err := e.GetUpload(ctx, uploadID, bucketID, key)
 	if err != nil {
 		return meta.Object{}, err
@@ -187,7 +195,7 @@ func (e *Engine) CompleteUpload(ctx context.Context, uploadID, bucketID, key str
 	o := meta.Object{BucketID: u.BucketID, Key: u.Key, Size: total,
 		ETag:        fmt.Sprintf("%s-%d", hex.EncodeToString(digests.Sum(nil)), len(parts)),
 		ContentType: u.ContentType, Headers: u.Headers, Metadata: u.Metadata, Parts: len(parts)}
-	out, err := e.commitBlob(ctx, tmp, o, nil, func(o meta.Object) (meta.Object, error) {
+	out, err := e.commitBlob(ctx, ws, tmp, o, nil, func(o meta.Object) (meta.Object, error) {
 		return e.meta.CompleteUpload(ctx, u.ID, o, blobRel, e.gcAfter(), cond)
 	})
 	if err != nil {
@@ -234,12 +242,16 @@ func (c stopReader) Read(p []byte) (int, error) {
 }
 
 // AbortUpload ends an upload and removes its parts.
-func (e *Engine) AbortUpload(ctx context.Context, uploadID, bucketID, key string) error {
+func (e *Engine) AbortUpload(ctx context.Context, ws, uploadID, bucketID, key string) error {
 	u, err := e.GetUpload(ctx, uploadID, bucketID, key)
 	if err != nil {
 		return err
 	}
-	if _, err := e.meta.AbortUpload(ctx, u.ID); err != nil {
+	err = e.writeBucket(ctx, ws, u.BucketID, nil, func() error {
+		_, err := e.meta.AbortUpload(ctx, u.ID)
+		return err
+	})
+	if err != nil {
 		return err
 	}
 	return os.RemoveAll(e.layout.UploadDir(u.ID))
@@ -397,7 +409,7 @@ func (e *Engine) sweepObjects(ctx context.Context, now time.Time, minAge time.Du
 			}
 			_ = os.Remove(sdir) // only succeeds when empty
 		}
-		if _, err := e.meta.GetBucket(ctx, b.Name()); err != nil {
+		if _, err := e.meta.BucketByID(ctx, b.Name()); err != nil {
 			_ = os.Remove(bdir) // a deleted bucket's folder, once empty
 		}
 	}

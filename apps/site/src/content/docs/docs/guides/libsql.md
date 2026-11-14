@@ -32,6 +32,8 @@ The URL is `<engine>/libsql/<database>/<branch>/`. Both names can also be ids. K
 
 Over TLS, use `https://` or `libsql://` with your public hostname, for example `libsql://db.example.com/libsql/app/main/`.
 
+The database is looked up in the [workspace](/docs/concepts/workspaces/) of the token, so the URL is the same in every workspace. An instance token, which belongs to none, reaches the default workspace this way. For another one, put the workspace in the URL: `<engine>/v1/workspaces/<workspace>/libsql/<database>/<branch>/`.
+
 ## Batches
 
 `client.batch` runs the statements in one transaction, all or nothing:

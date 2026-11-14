@@ -20,7 +20,21 @@ export const ACCESS_LABEL: Record<Access, string> = { read: "Read", write: "Read
 
 export type TokenNames = { databases: Record<string, string>; branches: Record<string, string>; buckets?: Record<string, string> }
 
-export function TokenTable({ tokens, names, onRevoke }: { tokens: TokenOut[]; names: TokenNames; onRevoke: (t: TokenOut) => Promise<unknown> }) {
+/** What a token with no target reaches: the workspace it is in, or for an instance token every workspace. */
+export const WHOLE_WORKSPACE = "Whole workspace"
+export const EVERY_WORKSPACE = "Every workspace"
+
+export function TokenTable({
+  tokens,
+  names,
+  everything = WHOLE_WORKSPACE,
+  onRevoke,
+}: {
+  tokens: TokenOut[]
+  names: TokenNames
+  everything?: string
+  onRevoke: (t: TokenOut) => Promise<unknown>
+}) {
   if (tokens.length === 0) return <Empty icon={<KeyRoundIcon />} title="No tokens yet" />
   return (
     <Table>
@@ -53,7 +67,7 @@ export function TokenTable({ tokens, names, onRevoke }: { tokens: TokenOut[]; na
               </TableCell>
               <TableCell className="w-1/2 max-w-0 py-3 align-top sm:w-1/4">
                 {reach.length === 0 ? (
-                  <span className="block truncate text-muted-foreground">Everything</span>
+                  <span className="block truncate text-muted-foreground">{everything}</span>
                 ) : (
                   <ul className="flex flex-col gap-1">
                     {shown.map((r) => (
@@ -127,11 +141,11 @@ const MAX_SHOWN = 3
 
 type Reach = { key: string; label: string; access: Access }
 
-// What a token reaches below the instance, one entry per grant. Empty for an instance token.
+// What a token reaches below a whole workspace, one entry per grant. Empty for a workspace or instance token, which reach everything.
 function reaches(t: TokenOut, names: TokenNames): Reach[] {
   const grants = t.grants?.length
     ? t.grants
-    : t.scope === "instance"
+    : t.scope === "instance" || t.scope === "workspace"
       ? []
       : [{ database_id: t.database_id, branch_id: t.branch_id, bucket_id: t.bucket_id, access: t.access }]
   return grants.map((g) => {
@@ -180,6 +194,8 @@ type CreateTokenProps = {
   /** The engine's MCP endpoint, shown next to a new token so both can be pasted into an agent. */
   mcpUrl?: string
   loadBranches: (db: string) => Promise<string[]>
+  /** The label for a token with no target. */
+  everything?: string
   onCreate: (t: NewToken) => Promise<CreatedToken>
 }
 
@@ -194,7 +210,7 @@ function grantOf(r: Row): NewGrant {
   return { access: r.access, database: database || undefined, branch: database && r.branch !== ALL ? r.branch : undefined, bucket: bucketOf(r) || undefined }
 }
 
-export function CreateTokenDialog({ databases, buckets = [], mcpUrl, loadBranches, onCreate }: CreateTokenProps) {
+export function CreateTokenDialog({ databases, buckets = [], mcpUrl, loadBranches, everything: everythingLabel = WHOLE_WORKSPACE, onCreate }: CreateTokenProps) {
   const [name, setName] = useState("")
   const nextId = useRef(1)
   const [rows, setRows] = useState<Row[]>([{ id: 0, target: ALL, branch: ALL, access: "read" }])
@@ -284,6 +300,7 @@ export function CreateTokenDialog({ databases, buckets = [], mcpUrl, loadBranche
               databases={databases}
               buckets={buckets.filter((b) => b === bucketOf(row) || !usedBuckets.has(b))}
               offerEverything={rows.length === 1}
+              everything={everythingLabel}
               removable={rows.length > 1}
               loadBranches={loadBranches}
               onChange={(patch) => update(row.id, patch)}
@@ -343,13 +360,14 @@ type GrantRowProps = {
   databases: string[]
   buckets: string[]
   offerEverything: boolean
+  everything: string
   removable: boolean
   loadBranches: (db: string) => Promise<string[]>
   onChange: (patch: Partial<Row>) => void
   onRemove: () => void
 }
 
-function GrantRow({ row, suffix, databases, buckets, offerEverything, removable, loadBranches, onChange, onRemove }: GrantRowProps) {
+function GrantRow({ row, suffix, databases, buckets, offerEverything, everything, removable, loadBranches, onChange, onRemove }: GrantRowProps) {
   const database = databaseOf(row)
   const [branches, setBranches] = useState<string[]>([])
 
@@ -366,7 +384,7 @@ function GrantRow({ row, suffix, databases, buckets, offerEverything, removable,
   }, [database, loadBranches])
 
   const targets: ListData = [
-    ...(offerEverything ? [{ value: ALL, label: "Everything" }] : []),
+    ...(offerEverything ? [{ value: ALL, label: everything }] : []),
     ...(databases.length > 0 ? [{ type: "group" as const, label: "Databases", items: databases.map((d) => ({ value: DB + d, label: d })) }] : []),
     ...(buckets.length > 0 ? [{ type: "group" as const, label: "Buckets", items: buckets.map((b) => ({ value: BUCKET + b, label: `Bucket ${b}` })) }] : []),
   ]
@@ -382,7 +400,7 @@ function GrantRow({ row, suffix, databases, buckets, offerEverything, removable,
         <Select items={targets} value={row.target} onValueChange={(v) => typeof v === "string" && onChange({ target: v, branch: ALL })}>
           <SelectTrigger className="w-full" title={database || bucketOf(row) || undefined} />
           <SelectContent>
-            {offerEverything && <SelectItem value={ALL}>Everything</SelectItem>}
+            {offerEverything && <SelectItem value={ALL}>{everything}</SelectItem>}
             {databases.length > 0 && (
               <SelectGroup>
                 <SelectGroupLabel>Databases</SelectGroupLabel>

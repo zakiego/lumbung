@@ -22,6 +22,7 @@ import (
 	"github.com/zakiego/lumbung/apps/engine/internal/auth"
 	"github.com/zakiego/lumbung/apps/engine/internal/config"
 	"github.com/zakiego/lumbung/apps/engine/internal/engine"
+	"github.com/zakiego/lumbung/apps/engine/internal/meta"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlsplit"
 	"github.com/zakiego/lumbung/apps/engine/internal/value"
 )
@@ -81,7 +82,8 @@ func writeHranaHTTP(w http.ResponseWriter, e *apierr.Error) {
 type hranaCall struct {
 	ctx       context.Context
 	p         auth.Principal
-	target    engine.Target // database and branch ids
+	db        meta.Database // the database the stream is on, for access checks
+	target    engine.Target // workspace, database and branch ids
 	budget    *engine.Budget
 	requestID string
 }
@@ -128,9 +130,9 @@ func (s *Server) libsqlHandler(cursor bool) http.Handler {
 
 		var st *libsqlStream
 		if baton == nil {
-			st, ae = s.libsql.open(p.TokenID, b.ID, s.eng.Config())
+			st, ae = s.libsql.open(p.TokenID, streamOwner(p), b.ID, s.eng.Config())
 		} else {
-			st, ae = s.libsql.lookup(*baton, p.TokenID, b.ID)
+			st, ae = s.libsql.lookup(*baton, streamOwner(p), b.ID)
 		}
 		if ae != nil {
 			writeHranaHTTP(w, ae)
@@ -144,7 +146,7 @@ func (s *Server) libsqlHandler(cursor bool) http.Handler {
 			return
 		}
 		c := &hranaCall{
-			ctx: ctx, p: p, target: engine.Target{Database: d.ID, Branch: b.ID},
+			ctx: ctx, p: p, db: d, target: engine.Target{Workspace: d.WorkspaceID, Database: d.ID, Branch: b.ID},
 			budget: s.eng.NewBudget(), requestID: id,
 		}
 		if cursor {
@@ -356,7 +358,7 @@ func (s *Server) hranaRun(c *hranaCall, st *libsqlStream, es engine.Statement) (
 		if st.tx != nil || st.aborted {
 			return nil, apierr.New(apierr.SQLError, "SQL error").WithDetail("cannot start a transaction within a transaction")
 		}
-		acc := access(c.p, c.target.Database, c.target.Branch, ctl.readOnly)
+		acc := access(c.p, c.db, c.target.Branch, ctl.readOnly)
 		deadline := time.Now().Add(s.eng.Config().LibSQLTxTimeout)
 		tx, err := s.eng.BeginTx(c.ctx, c.target, acc, engine.TxOptions{Migration: st.fkOff && acc == engine.Write, Deadline: deadline})
 		if err != nil {
@@ -421,7 +423,7 @@ func (s *Server) hranaRun(c *hranaCall, st *libsqlStream, es engine.Statement) (
 		if st.fkOff {
 			refuse = apierr.New(apierr.BadRequest, "PRAGMA foreign_keys = OFF on this stream applies to the next transaction only: send BEGIN before the writes, or PRAGMA foreign_keys = ON")
 		}
-		r, err = s.eng.QueryWith(c.ctx, c.target, access(c.p, c.target.Database, c.target.Branch, false), es, c.budget, refuse)
+		r, err = s.eng.QueryWith(c.ctx, c.target, access(c.p, c.db, c.target.Branch, false), es, c.budget, refuse)
 	}
 	var results []*engine.Result
 	if r != nil {
@@ -667,7 +669,10 @@ type libsqlStreams struct {
 // request, which serializes the stream's requests.
 type libsqlStream struct {
 	id, tokenID, branchID string
-	reg                   *libsqlStreams
+	// owner is who opened the stream (streamOwner). Only the same caller,
+	// acting in the same workspace at the same level, may continue it.
+	owner string
+	reg   *libsqlStreams
 
 	mu         sync.Mutex
 	secret     string
@@ -689,7 +694,7 @@ func randomHex(n int) string {
 }
 
 // open makes a stream under the caps and returns it locked.
-func (r *libsqlStreams) open(tokenID, branchID string, cfg config.Config) (*libsqlStream, *apierr.Error) {
+func (r *libsqlStreams) open(tokenID, owner, branchID string, cfg config.Config) (*libsqlStream, *apierr.Error) {
 	maxAll, maxToken, idle := cfg.LibSQLMaxStreams, cfg.LibSQLStreamsPerToken, cfg.LibSQLStreamIdle
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -702,13 +707,23 @@ func (r *libsqlStreams) open(tokenID, branchID string, cfg config.Config) (*libs
 	if r.perToken[tokenID] >= maxToken {
 		return nil, apierr.Newf(apierr.TooManyStreams, "this token has %d open libSQL streams, the most allowed", maxToken)
 	}
-	st := &libsqlStream{id: randomHex(16), tokenID: tokenID, branchID: branchID, reg: r, sqls: map[int32]string{}}
+	st := &libsqlStream{id: randomHex(16), tokenID: tokenID, owner: owner, branchID: branchID, reg: r, sqls: map[int32]string{}}
 	st.mu.Lock()
 	st.idleAt = time.Now().Add(idle)
 	st.timer = time.AfterFunc(idle, st.expire)
 	r.m[st.id] = st
 	r.perToken[tokenID]++
 	return st, nil
+}
+
+// streamOwner names who a stream belongs to. For an ordinary token it is
+// the token. The dashboard's service token acts for many users, each
+// narrowed to their own level in one workspace (PLAN 17.8), so the
+// workspace, level and user are part of it too: a transaction a user began
+// with write access can't be continued by a request narrowed to read, or
+// by another user, even with the baton.
+func streamOwner(p auth.Principal) string {
+	return strings.Join([]string{p.TokenID, p.Scope, p.WorkspaceID, p.Access, p.Actor}, "\x00")
 }
 
 func badBaton() *apierr.Error {
@@ -718,7 +733,7 @@ func badBaton() *apierr.Error {
 // lookup finds the stream a baton names and returns it locked. A baton that
 // is stale, made for another token or branch, or for a closed stream is
 // refused the same way.
-func (r *libsqlStreams) lookup(baton, tokenID, branchID string) (*libsqlStream, *apierr.Error) {
+func (r *libsqlStreams) lookup(baton, owner, branchID string) (*libsqlStream, *apierr.Error) {
 	id, secret, ok := strings.Cut(baton, ".")
 	if !ok {
 		return nil, badBaton()
@@ -726,7 +741,7 @@ func (r *libsqlStreams) lookup(baton, tokenID, branchID string) (*libsqlStream, 
 	r.mu.Lock()
 	st := r.m[id]
 	r.mu.Unlock()
-	if st == nil || st.tokenID != tokenID || st.branchID != branchID {
+	if st == nil || subtle.ConstantTimeCompare([]byte(st.owner), []byte(owner)) != 1 || st.branchID != branchID {
 		return nil, badBaton()
 	}
 	st.mu.Lock()

@@ -149,8 +149,8 @@ func CheckCORSOrigins(origins []string) error {
 	return nil
 }
 
-// CreateBucket creates an empty bucket.
-func (e *Engine) CreateBucket(ctx context.Context, name string) (meta.Bucket, error) {
+// CreateBucket creates an empty bucket in a workspace.
+func (e *Engine) CreateBucket(ctx context.Context, ws, name string) (meta.Bucket, error) {
 	if e.refused != nil {
 		return meta.Bucket{}, e.refused
 	}
@@ -160,23 +160,23 @@ func (e *Engine) CreateBucket(ctx context.Context, name string) (meta.Bucket, er
 	if err := e.checkDisk(); err != nil {
 		return meta.Bucket{}, err
 	}
-	return e.meta.CreateBucket(ctx, ids.New(ids.Bucket), name, e.cfg.MaxBuckets)
+	return e.meta.CreateBucket(ctx, ws, ids.New(ids.Bucket), name, e.cfg.MaxBuckets)
 }
 
-// GetBucket finds a bucket by name or id.
-func (e *Engine) GetBucket(ctx context.Context, ref string) (meta.Bucket, error) {
+// GetBucket finds a bucket of a workspace by name or id.
+func (e *Engine) GetBucket(ctx context.Context, ws, ref string) (meta.Bucket, error) {
 	if e.refused != nil {
 		return meta.Bucket{}, e.refused
 	}
-	return e.meta.GetBucket(ctx, ref)
+	return e.meta.GetBucket(ctx, ws, ref)
 }
 
-// ListBuckets returns every bucket by name.
-func (e *Engine) ListBuckets(ctx context.Context) ([]meta.Bucket, error) {
+// ListBuckets returns a workspace's buckets by name.
+func (e *Engine) ListBuckets(ctx context.Context, ws string) ([]meta.Bucket, error) {
 	if e.refused != nil {
 		return nil, e.refused
 	}
-	return e.meta.ListBuckets(ctx)
+	return e.meta.ListBuckets(ctx, ws)
 }
 
 // UpdateBucket changes a bucket's name or settings.
@@ -215,20 +215,26 @@ func (e *Engine) DeleteBucket(ctx context.Context, id string) error {
 type reservation struct {
 	e        *Engine
 	bucketID string
+	ws       string
 	n        int64
 	done     bool
 }
 
-// reserveObjectBytes claims room for n new bytes in a bucket and in the
-// instance's object storage. credit returns the space the write frees (the
+// reserveObjectBytes claims room for n new bytes in a bucket, in its
+// workspace's own cap on object bytes, and in the instance's object storage. credit returns the space the write frees (the
 // object or part it replaces); it is read under the same lock as the usage,
 // so it can't be stale against it. Release the claim when the write fails,
 // or record the write with settle, which drops the claim in the same step so
 // the bytes are never counted twice.
-func (e *Engine) reserveObjectBytes(ctx context.Context, bucketID string, n int64, credit func() int64) (*reservation, error) {
+func (e *Engine) reserveObjectBytes(ctx context.Context, ws, bucketID string, n int64, credit func() int64) (*reservation, error) {
 	e.objMu.Lock()
 	defer e.objMu.Unlock()
-	used, total, err := e.meta.ObjectUsage(ctx, bucketID)
+	// Fail early for a bucket that left the workspace; writeBucket checks
+	// again when the write commits.
+	if err := e.meta.BucketIn(ctx, ws, bucketID); err != nil {
+		return nil, err
+	}
+	u, err := e.meta.ObjectUsage(ctx, bucketID)
 	if err != nil {
 		return nil, err
 	}
@@ -236,17 +242,21 @@ func (e *Engine) reserveObjectBytes(ctx context.Context, bucketID string, n int6
 	if credit != nil {
 		freed = credit()
 	}
-	used -= freed
-	total -= freed
+	used, inWS, total := u.Bucket-freed, u.Workspace-freed, u.Total-freed
 	if used+e.objReserved[bucketID]+n > e.cfg.MaxBucketBytes {
 		return nil, apierr.Newf(apierr.BucketSizeLimit, "%d more bytes would pass the %d byte bucket size limit", n, e.cfg.MaxBucketBytes)
 	}
+	if l := u.WorkspaceLimit; l > 0 && inWS+e.objReservedWS[u.WorkspaceID]+n > l {
+		return nil, apierr.Newf(apierr.WorkspaceQuotaExceeded, "%d more bytes would pass the workspace's %d byte limit on its buckets", n, l)
+	}
 	if total+e.objReservedTotal+n > e.cfg.MaxObjectStorageBytes {
-		return nil, apierr.Newf(apierr.ObjectQuotaExceeded, "%d more bytes would pass the %d byte object storage quota", n, e.cfg.MaxObjectStorageBytes)
+		// No numbers: the instance's total is other workspaces' business.
+		return nil, apierr.New(apierr.ObjectQuotaExceeded, "the write would pass the instance's object storage quota")
 	}
 	e.objReserved[bucketID] += n
+	e.objReservedWS[u.WorkspaceID] += n
 	e.objReservedTotal += n
-	return &reservation{e: e, bucketID: bucketID, n: n}, nil
+	return &reservation{e: e, bucketID: bucketID, ws: u.WorkspaceID, n: n}, nil
 }
 
 func (r *reservation) releaseLocked() {
@@ -258,6 +268,9 @@ func (r *reservation) releaseLocked() {
 	e.objReserved[r.bucketID] -= r.n
 	if e.objReserved[r.bucketID] == 0 {
 		delete(e.objReserved, r.bucketID)
+	}
+	if e.objReservedWS[r.ws] -= r.n; e.objReservedWS[r.ws] <= 0 {
+		delete(e.objReservedWS, r.ws)
 	}
 	e.objReservedTotal -= r.n
 }
@@ -272,17 +285,25 @@ func (r *reservation) release() {
 	r.releaseLocked()
 }
 
-// settle runs record (which commits the write to meta.db) and drops the
-// claim while no other write can check the quota in between.
-func (r *reservation) settle(record func() error) error {
-	if r == nil {
-		return record()
+// writeBucket runs record, which commits a write to a bucket's objects or
+// uploads in meta.db, and drops the write's claim (res may be nil) while no
+// other write can check the quota in between.
+//
+// First it checks that the bucket is still in the workspace the caller
+// resolved it in, and that the workspace isn't in the trash. Moving a
+// bucket and deleting a workspace take the same lock, so a write that was
+// in flight during either one either commits before it, or finds the
+// bucket gone and commits nothing. Without this an upload that began under
+// the old workspace's token would land after the move, uncounted against
+// the new workspace's limit, or after the delete, in a trashed workspace.
+func (e *Engine) writeBucket(ctx context.Context, ws, bucketID string, res *reservation, record func() error) error {
+	e.objMu.Lock()
+	defer e.objMu.Unlock()
+	defer res.releaseLocked()
+	if err := e.meta.BucketIn(ctx, ws, bucketID); err != nil {
+		return err
 	}
-	r.e.objMu.Lock()
-	defer r.e.objMu.Unlock()
-	err := record()
-	r.releaseLocked()
-	return err
+	return record()
 }
 
 // checkDiskFor refuses a write of n bytes that would leave less free space
@@ -383,6 +404,10 @@ func blobRel(bucketID, blobID string) string {
 
 // PutObjectInput is one object write.
 type PutObjectInput struct {
+	// Workspace is the workspace the caller resolved the bucket in. Every
+	// write to a bucket takes it and is refused if the bucket isn't in it
+	// any more when the write commits.
+	Workspace  string
 	BucketID   string
 	Key        string
 	Size       int64     // declared length; required
@@ -410,7 +435,7 @@ func (e *Engine) PutObject(ctx context.Context, in PutObjectInput) (meta.Object,
 	if in.Size > e.cfg.MaxObjectBytes {
 		return meta.Object{}, apierr.Newf(apierr.ObjectTooLarge, "the object is %d bytes; the limit is %d", in.Size, e.cfg.MaxObjectBytes)
 	}
-	res, err := e.reserveObjectBytes(ctx, in.BucketID, in.Size, e.objectCredit(ctx, in.BucketID, in.Key))
+	res, err := e.reserveObjectBytes(ctx, in.Workspace, in.BucketID, in.Size, e.objectCredit(ctx, in.BucketID, in.Key))
 	if err != nil {
 		return meta.Object{}, err
 	}
@@ -428,7 +453,7 @@ func (e *Engine) PutObject(ctx context.Context, in PutObjectInput) (meta.Object,
 	}
 	o := meta.Object{BucketID: in.BucketID, Key: in.Key, Size: in.Size, ETag: hex.EncodeToString(sum),
 		ContentType: in.Attrs.ContentType, Headers: in.Attrs.Headers, Metadata: in.Attrs.Metadata}
-	return e.commitBlob(ctx, tmp, o, res, func(o meta.Object) (meta.Object, error) {
+	return e.commitBlob(ctx, in.Workspace, tmp, o, res, func(o meta.Object) (meta.Object, error) {
 		return e.meta.PutObject(ctx, o, blobRel, e.gcAfter(), in.Cond)
 	})
 }
@@ -448,7 +473,7 @@ func (e *Engine) objectCredit(ctx context.Context, bucketID, key string) func() 
 // record. Placing and recording hold the commit lock shared, so the orphan
 // sweep never sees a placed file before its row. A failed record removes
 // the file; record must only fail when nothing was committed.
-func (e *Engine) commitBlob(ctx context.Context, tmp string, o meta.Object, res *reservation, record func(meta.Object) (meta.Object, error)) (meta.Object, error) {
+func (e *Engine) commitBlob(ctx context.Context, ws, tmp string, o meta.Object, res *reservation, record func(meta.Object) (meta.Object, error)) (meta.Object, error) {
 	o.BlobID = ids.New(ids.Blob)
 	e.objCommit.RLock()
 	defer e.objCommit.RUnlock()
@@ -457,7 +482,7 @@ func (e *Engine) commitBlob(ctx context.Context, tmp string, o meta.Object, res 
 		return meta.Object{}, err
 	}
 	var out meta.Object
-	err = res.settle(func() error {
+	err = e.writeBucket(ctx, ws, o.BucketID, res, func() error {
 		var err error
 		out, err = record(o)
 		return err
@@ -510,20 +535,29 @@ func (e *Engine) OpenObject(ctx context.Context, bucketID, key string) (meta.Obj
 
 // ---- deleting and copying
 
-// DeleteObject removes an object. Deleting a key that doesn't exist
-// succeeds, as in the S3 protocol. It reports whether one was there.
-func (e *Engine) DeleteObject(ctx context.Context, bucketID, key string) (bool, error) {
+// DeleteObject removes an object of a bucket in the given workspace.
+// Deleting a key that doesn't exist succeeds, as in the S3 protocol. It
+// reports whether one was there.
+func (e *Engine) DeleteObject(ctx context.Context, ws, bucketID, key string) (bool, error) {
 	if e.refused != nil {
 		return false, e.refused
 	}
 	if !ValidKey(key) {
 		return false, nil
 	}
-	return e.meta.DeleteObject(ctx, bucketID, key, blobRel, e.gcAfter())
+	var existed bool
+	err := e.writeBucket(ctx, ws, bucketID, nil, func() error {
+		var err error
+		existed, err = e.meta.DeleteObject(ctx, bucketID, key, blobRel, e.gcAfter())
+		return err
+	})
+	return existed, err
 }
 
 // CopyObjectInput copies an object, within a bucket or across buckets.
 type CopyObjectInput struct {
+	// Workspace is the workspace the caller resolved both buckets in.
+	Workspace           string
 	SrcBucketID, SrcKey string
 	BucketID, Key       string
 	// Replace sets Attrs on the copy instead of the source's.
@@ -566,7 +600,11 @@ func (e *Engine) CopyObject(ctx context.Context, in CopyObjectInput) (meta.Objec
 	if src.Size > e.cfg.MaxObjectBytes {
 		return meta.Object{}, apierr.Newf(apierr.ObjectTooLarge, "the object is %d bytes; the limit is %d", src.Size, e.cfg.MaxObjectBytes)
 	}
-	res, err := e.reserveObjectBytes(ctx, in.BucketID, src.Size, e.objectCredit(ctx, in.BucketID, in.Key))
+	// The source too: a copy never crosses workspaces.
+	if err := e.meta.BucketIn(ctx, in.Workspace, in.SrcBucketID); err != nil {
+		return meta.Object{}, err
+	}
+	res, err := e.reserveObjectBytes(ctx, in.Workspace, in.BucketID, src.Size, e.objectCredit(ctx, in.BucketID, in.Key))
 	if err != nil {
 		return meta.Object{}, err
 	}
@@ -578,7 +616,7 @@ func (e *Engine) CopyObject(ctx context.Context, in CopyObjectInput) (meta.Objec
 	defer os.Remove(tmp)
 	o := meta.Object{BucketID: in.BucketID, Key: in.Key, Size: src.Size, ETag: src.ETag, Parts: src.Parts,
 		ContentType: attrs.ContentType, Headers: attrs.Headers, Metadata: attrs.Metadata}
-	return e.commitBlob(ctx, tmp, o, res, func(o meta.Object) (meta.Object, error) {
+	return e.commitBlob(ctx, in.Workspace, tmp, o, res, func(o meta.Object) (meta.Object, error) {
 		return e.meta.PutObject(ctx, o, blobRel, e.gcAfter(), nil)
 	})
 }

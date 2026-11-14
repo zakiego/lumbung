@@ -43,7 +43,7 @@ var sqliteHeader = []byte("SQLite format 3\x00")
 // everything passed. The mode's rule is checked again at the moment of the
 // swap, so writes that land during a long import are never silently lost.
 func (e *Engine) Import(ctx context.Context, t Target, format ImportFormat, mode ImportMode, r io.Reader) error {
-	tg, err := e.resolve(ctx, t.Database, t.Branch)
+	tg, err := e.resolve(ctx, t.Workspace, t.Database, t.Branch)
 	if err != nil {
 		return err
 	}
@@ -100,10 +100,10 @@ func (e *Engine) Import(ctx context.Context, t Target, format ImportFormat, mode
 	_ = removeCompanions(staged)
 	grow := fileBytes(staged) - fileBytes(tg.path)
 	if grow > 0 {
-		if err := e.reserveBytes(grow); err != nil {
+		if err := e.reserveBytes(ctx, tg.db.WorkspaceID, grow); err != nil {
 			return err
 		}
-		defer e.releaseBytes(grow)
+		defer e.releaseBytes(tg.db.WorkspaceID, grow)
 	}
 	if err := e.swapBranchFile(ctx, tg, staged, allowed); err != nil {
 		return err
@@ -330,7 +330,7 @@ func importErr(err error) error {
 
 // ExportDB writes a consistent copy of a branch as a SQLite file.
 func (e *Engine) ExportDB(ctx context.Context, t Target, w io.Writer) error {
-	tg, err := e.resolve(ctx, t.Database, t.Branch)
+	tg, err := e.resolve(ctx, t.Workspace, t.Database, t.Branch)
 	if err != nil {
 		return err
 	}
@@ -366,6 +366,13 @@ func (e *Engine) copyBranch(ctx context.Context, tg target, dst string) error {
 		return apierr.New(apierr.Busy, "timed out waiting for the branch")
 	}
 	defer g.unshare()
+	// The wait may have been for a workspace delete, a database delete or a
+	// move, which hold the gate alone. Look the branch up again, in the
+	// workspace it was found in: after any of those it is no longer there,
+	// and nothing is copied.
+	if _, err := e.resolve(ctx, tg.db.WorkspaceID, tg.db.ID, tg.branch.ID); err != nil {
+		return err
+	}
 	if _, err := e.copyDB(ctx, tg.path, dst); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return apierr.New(apierr.StatementTimeout, "the copy ran too long")

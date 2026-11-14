@@ -111,6 +111,8 @@ s3 = boto3.client(
 
 Clients that only accept a hostname, without a path, can't reach `/v1/s3` yet.
 
+An access key works in the [workspace](/docs/concepts/workspaces/) of its token, so the endpoint is the same in every workspace and bucket names only need to be unique there. An instance token's key reaches the default workspace; for another one, use `<engine>/v1/workspaces/<workspace>/s3` as the endpoint.
+
 ## Behind a proxy
 
 S3 requests are signed, and the signature covers the path and the `Host` header. A proxy in front of the engine must pass both through unchanged: keep the original `Host`, and don't normalize URLs (merging `//` or resolving `..` changes keys like `a//b`, and the signature then fails). See [Reverse proxy and TLS](/docs/self-hosting/reverse-proxy/).

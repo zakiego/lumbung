@@ -30,6 +30,8 @@ export interface AuditOut {
   /** Ids the action touched, slash-separated. */
   target: string;
   token_id: string;
+  /** The workspace the action happened in. Empty for an instance action: workspaces, instance tokens, moves. */
+  workspace_id: string;
 }
 
 export interface BatchBody {
@@ -87,6 +89,8 @@ export interface BucketOut {
   /** Bytes the objects take. */
   size_bytes: number;
   updated_at: string;
+  /** The workspace the bucket is in. */
+  workspace_id: string;
 }
 
 export interface Change {
@@ -158,6 +162,16 @@ export interface CreateDatabaseInBody {
   name: string;
 }
 
+export interface CreateInstanceTokenInBody {
+  /** The token's level in every workspace. Only admin may manage workspaces, instance tokens and the instance audit log. */
+  access: "read" | "write" | "admin";
+  /** Also make an S3 access key for this token. Its secret is shown once, like the token. */
+  access_key?: boolean;
+  /** 0: never expires. The expiry is capped at the creator's. */
+  expires_in_days?: number;
+  name: string;
+}
+
 export interface CreateSnapshotInBody {
   label?: string;
 }
@@ -171,7 +185,7 @@ export interface CreateTokenInBody {
   branch?: string;
   /** Bucket name or id, for a bucket token. Not with database. */
   bucket?: string;
-  /** Database name or id. Omit for an instance token. */
+  /** Database name or id, for a token that reaches one database. Without database, bucket and grants the token reaches the whole workspace. */
   database?: string;
   /** 0: never expires. A token that expires can't create one that outlives it: the expiry is capped at the creator's. */
   expires_in_days?: number;
@@ -181,7 +195,7 @@ export interface CreateTokenInBody {
 }
 
 export interface CreateTokenOutBody {
-  /** The token's level. For a grants token, the highest level among its grants; each grant has its own. */
+  /** The token's level. For a workspace token it holds for everything in the workspace. For a grants token it is the highest level among its grants; each grant has its own. */
   access: "read" | "write" | "admin";
   /** The S3 access key id, when the token has an access key. */
   access_key_id: string;
@@ -193,18 +207,30 @@ export interface CreateTokenOutBody {
   /** For a database token, the database it reaches. */
   database_id: string;
   expires_at: string | null;
-  /** Everything the token reaches below the instance: one entry for a database or bucket token, several for a grants token, none for an instance token. */
+  /** What the token reaches below a whole workspace: one entry for a database or bucket token, several for a grants token, none for a workspace or instance token. */
   grants: GrantOut[];
   id: string;
   last_used_at: string | null;
   name: string;
-  scope: "instance" | "database" | "bucket" | "grants";
+  scope: "instance" | "workspace" | "database" | "bucket" | "grants";
   /** The S3 secret access key, when access_key was set. Shown once. */
   secret_access_key?: string;
   /** The dashboard's service token. */
   service: boolean;
   /** The full token. Shown once; only its hash is stored. */
   token: string;
+  /** The workspace the token belongs to. Empty for an instance token. */
+  workspace_id: string;
+}
+
+export interface CreateWorkspaceInBody {
+  max_buckets?: number;
+  max_database_bytes?: number;
+  /** Omit for the instance's setting for new workspaces. 0: no limit of its own. */
+  max_databases?: number;
+  max_object_bytes?: number;
+  /** Lowercase letters, digits and hyphens. Unique on the instance. */
+  name: string;
 }
 
 export interface DatabaseListBody {
@@ -214,22 +240,26 @@ export interface DatabaseListBody {
 }
 
 export interface DatabaseOut {
+  /** Branches the token reaches: all of them, unless it is limited to some. */
   branch_count: number;
   created_at: string;
-  /** Name of the default branch. */
+  /** Name of the default branch. Empty for a token that can't reach that branch. */
   default_branch: string;
+  /** Empty for a token that can't reach the default branch. */
   default_branch_id: string;
   /** When it went to the trash, or null. */
   deleted_at: string | null;
   id: string;
-  /** Start of the last minute with a query, or null. */
+  /** Start of the last minute with a query on a branch the token reaches, or null. */
   last_activity_at: string | null;
   name: string;
   /** When a trashed database is removed for good, or null. */
   purge_after: string | null;
-  /** Space all branches take on disk. */
+  /** Space the branches the token reaches take on disk. */
   size_bytes: number;
   updated_at: string;
+  /** The workspace the database is in. */
+  workspace_id: string;
 }
 
 export interface Diff {
@@ -266,6 +296,11 @@ export interface Index {
   sql: string;
   table: string;
   unique: boolean;
+}
+
+export interface MoveIn {
+  /** The workspace to move it to, by name or id. */
+  workspace: string;
 }
 
 export interface ObjectListBody {
@@ -354,6 +389,11 @@ export interface RestoreDatabaseInBody {
 export interface RestoreSnapshotInBody {
   /** Name of the new branch the snapshot is restored into. */
   name: string;
+}
+
+export interface RestoreWorkspaceInBody {
+  /** Restore under this name instead of the old one. */
+  name?: string;
 }
 
 export interface ResultOut {
@@ -450,7 +490,7 @@ export interface TokenListBody {
 }
 
 export interface TokenOut {
-  /** The token's level. For a grants token, the highest level among its grants; each grant has its own. */
+  /** The token's level. For a workspace token it holds for everything in the workspace. For a grants token it is the highest level among its grants; each grant has its own. */
   access: "read" | "write" | "admin";
   /** The S3 access key id, when the token has an access key. */
   access_key_id: string;
@@ -462,14 +502,16 @@ export interface TokenOut {
   /** For a database token, the database it reaches. */
   database_id: string;
   expires_at: string | null;
-  /** Everything the token reaches below the instance: one entry for a database or bucket token, several for a grants token, none for an instance token. */
+  /** What the token reaches below a whole workspace: one entry for a database or bucket token, several for a grants token, none for a workspace or instance token. */
   grants: GrantOut[];
   id: string;
   last_used_at: string | null;
   name: string;
-  scope: "instance" | "database" | "bucket" | "grants";
+  scope: "instance" | "workspace" | "database" | "bucket" | "grants";
   /** The dashboard's service token. */
   service: boolean;
+  /** The workspace the token belongs to. Empty for an instance token. */
+  workspace_id: string;
 }
 
 export interface Trigger {
@@ -497,8 +539,63 @@ export interface UpdateDatabaseInBody {
   name: string;
 }
 
+export interface UpdateWorkspaceInBody {
+  max_buckets?: number;
+  max_database_bytes?: number;
+  /** 0: no limit of its own. */
+  max_databases?: number;
+  max_object_bytes?: number;
+  name?: string;
+}
+
 export interface View {
   name: string;
   sql: string;
+}
+
+export interface WorkspaceLimitsOut {
+  /** Most buckets. 0: no limit of its own. */
+  max_buckets: number;
+  /** Most bytes the branch files of its databases may take together. 0: no limit of its own. */
+  max_database_bytes: number;
+  /** Most databases, counting the trash. 0: no limit of its own. */
+  max_databases: number;
+  /** Most bytes its buckets may hold together, counting multipart uploads in progress. 0: no limit of its own. */
+  max_object_bytes: number;
+}
+
+export interface WorkspaceListBody {
+  data: WorkspaceOut[];
+  /** Pass as cursor for the next page; empty on the last page. */
+  next_cursor: string;
+}
+
+export interface WorkspaceOut {
+  created_at: string;
+  /** The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted. */
+  default: boolean;
+  /** When it went to the trash, or null. */
+  deleted_at: string | null;
+  id: string;
+  /** The workspace's own limits. The instance limits always apply on top. Left out for a token that doesn't reach the whole workspace. */
+  limits?: WorkspaceLimitsOut;
+  name: string;
+  /** When a trashed workspace is removed for good, or null. */
+  purge_after: string | null;
+  updated_at: string;
+  /** What the workspace holds now. Left out for a token that doesn't reach the whole workspace. */
+  usage?: WorkspaceUsageOut;
+}
+
+export interface WorkspaceUsageOut {
+  buckets: number;
+  /** Bytes the branch files of its live databases take. */
+  database_bytes: number;
+  /** Databases, counting the trash. */
+  databases: number;
+  /** Bytes its buckets hold, counting multipart uploads in progress. */
+  object_bytes: number;
+  /** Live tokens. */
+  tokens: number;
 }
 

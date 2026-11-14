@@ -53,6 +53,27 @@ Object storage has its own quotas, apart from the branches'. An upload needs its
 
 Fixed by the S3 protocol: keys are at most 1024 bytes, custom metadata at most 2 KB, a multipart upload has at most 10,000 parts, and every part but the last is at least 5 MiB. A bucket has at most 1,000 multipart uploads in progress.
 
+## Workspaces
+
+The limits above are for the whole instance. Each [workspace](/docs/concepts/workspaces/#limits) can have lower ones of its own, set when it is made or changed later by an instance admin. `0` means no limit of its own.
+
+| Limit | Default for a new workspace | Setting | Error |
+|---|---|---|---|
+| Databases in one workspace, counting its trash | 20 | `LUMBUNG_WORKSPACE_MAX_DATABASES` | `limit_reached` |
+| Buckets in one workspace | 20 | `LUMBUNG_WORKSPACE_MAX_BUCKETS` | `limit_reached` |
+| Size of a workspace's branches together | 2 GiB | `LUMBUNG_WORKSPACE_MAX_DATABASE_BYTES` | `workspace_quota_exceeded` (507) |
+| Size of a workspace's buckets together, counting multipart uploads in progress | 5 GiB | `LUMBUNG_WORKSPACE_MAX_OBJECT_BYTES` | `workspace_quota_exceeded` (507), `QuotaExceeded` on the S3 API |
+| Live tokens in one workspace | 1,000 | `LUMBUNG_MAX_TOKENS_PER_WORKSPACE` | `limit_reached` |
+| Workspaces, counting the trash | 100 | `LUMBUNG_MAX_WORKSPACES` | `limit_reached` |
+
+The default workspace starts with no limits of its own, so an instance that never makes a workspace is bound by the instance limits alone.
+
+The byte limits work like the instance's: a write, a branch copy, an import or an upload that would pass one is refused before anything is kept, and reads and deletes keep working. Revoked tokens are cleared after `LUMBUNG_TRASH_RETENTION`; until then a workspace holds at most ten times its live-token limit in token records, so minting and revoking in a loop hits `limit_reached` too.
+
+## Requests from the dashboard
+
+The dashboard uses one token, the service token, for everyone who signs in. Its requests are counted per person, by the name it sends in `X-Lumbung-Actor`, so one person can't use up the rate limit for the rest. Only the service token is counted this way.
+
 ## Connections
 
 Each open branch has one writer connection and up to `LUMBUNG_READERS_PER_BRANCH` (4) read-only ones. Writes to one branch run one at a time; reads run alongside them. At most `LUMBUNG_MAX_OPEN_BRANCHES` (64) branches keep connections open; the least recently used idle one closes to make room, and any branch idle for `LUMBUNG_IDLE_CONN_TIMEOUT` (5 minutes) closes on its own. A closed branch reopens on the next request.

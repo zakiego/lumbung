@@ -50,6 +50,11 @@ type Engine struct {
 	sizes    map[string]int64 // bytes on disk by branch id
 	total    int64
 	reserved int64 // room promised to write transactions in flight
+	// The same, by workspace, for each workspace's own cap on database
+	// bytes (PLAN 17.5). owner is the workspace of each branch in sizes.
+	owner      map[string]string
+	wsTotal    map[string]int64
+	wsReserved map[string]int64
 
 	stop chan struct{}
 	done chan struct{}
@@ -64,6 +69,7 @@ type Engine struct {
 	// Object storage (objects.go).
 	objMu            sync.Mutex
 	objReserved      map[string]int64 // bytes promised to writes in flight, by bucket
+	objReservedWS    map[string]int64 // the same, by workspace
 	objReservedTotal int64
 	objCommit        sync.RWMutex // writers share it; the orphan sweep takes it alone
 	sealer           *auth.Sealer
@@ -93,20 +99,24 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*Engine, er
 		}
 	}()
 	e := &Engine{
-		unlock:    unlock,
-		cfg:       cfg,
-		layout:    layout,
-		log:       log,
-		pools:     map[string]*branchPool{},
-		closing:   map[string]chan struct{}{},
-		sizes:     map[string]int64{},
-		txs:       map[*Tx]struct{}{},
-		stop:      make(chan struct{}),
-		done:      make(chan struct{}),
-		freeBytes: storage.FreeBytes,
+		unlock:     unlock,
+		cfg:        cfg,
+		layout:     layout,
+		log:        log,
+		pools:      map[string]*branchPool{},
+		closing:    map[string]chan struct{}{},
+		sizes:      map[string]int64{},
+		owner:      map[string]string{},
+		wsTotal:    map[string]int64{},
+		wsReserved: map[string]int64{},
+		txs:        map[*Tx]struct{}{},
+		stop:       make(chan struct{}),
+		done:       make(chan struct{}),
+		freeBytes:  storage.FreeBytes,
 
-		objReserved: map[string]int64{},
-		lastSweep:   time.Now(),
+		objReserved:   map[string]int64{},
+		objReservedWS: map[string]int64{},
+		lastSweep:     time.Now(),
 	}
 	key, err := auth.LoadOrCreateKey(layout.AccessKeyFile())
 	if err != nil {
@@ -307,8 +317,14 @@ func (e *Engine) tick(now time.Time) {
 		}
 	}()
 	e.deleteExpiredBranches(ctx)
+	// Revoked tokens are kept for the trash retention, then cleared, so the
+	// tokens table can't grow without bound.
+	if _, err := e.meta.PurgeRevokedTokens(ctx, now.Add(-e.cfg.TrashRetention)); err != nil {
+		e.log.Error("purge revoked tokens", "err", err)
+	}
 	e.runSchedules(ctx, now)
 	e.purgeTrash(ctx, now)
+	e.purgeWorkspaces(ctx, now)
 	e.objectHousekeeping(ctx, now)
 }
 
@@ -342,12 +358,18 @@ func (e *Engine) closeIdle(cutoff time.Time) {
 
 // scanUsage measures every live branch file at start.
 func (e *Engine) scanUsage(ctx context.Context) error {
-	branches, err := e.meta.ListLiveBranches(ctx)
+	workspaces, err := e.meta.ListWorkspaces(ctx)
 	if err != nil {
 		return err
 	}
-	for _, b := range branches {
-		e.recordSize(b.ID, fileBytes(e.layout.BranchFile(b.DatabaseID, b.ID)))
+	for _, w := range workspaces {
+		branches, err := e.meta.ListWorkspaceBranches(ctx, w.ID)
+		if err != nil {
+			return err
+		}
+		for _, b := range branches {
+			e.recordSize(w.ID, b.ID, fileBytes(e.layout.BranchFile(b.DatabaseID, b.ID)))
+		}
 	}
 	return nil
 }
@@ -363,18 +385,57 @@ func fileBytes(path string) int64 {
 	return n
 }
 
-func (e *Engine) recordSize(branchID string, n int64) {
+// recordSize sets what a branch takes on disk, counted for the instance and
+// for the workspace it is in.
+func (e *Engine) recordSize(ws, branchID string, n int64) {
 	e.usageMu.Lock()
 	defer e.usageMu.Unlock()
-	e.total += n - e.sizes[branchID]
-	e.sizes[branchID] = n
+	e.forgetLocked(branchID)
+	e.sizes[branchID], e.owner[branchID] = n, ws
+	e.total += n
+	e.wsTotal[ws] += n
 }
 
 func (e *Engine) forgetSize(branchID string) {
 	e.usageMu.Lock()
 	defer e.usageMu.Unlock()
-	e.total -= e.sizes[branchID]
+	e.forgetLocked(branchID)
+}
+
+func (e *Engine) forgetLocked(branchID string) {
+	n, ok := e.sizes[branchID]
+	if !ok {
+		return
+	}
+	ws := e.owner[branchID]
+	e.total -= n
+	if e.wsTotal[ws] -= n; e.wsTotal[ws] <= 0 {
+		delete(e.wsTotal, ws)
+	}
 	delete(e.sizes, branchID)
+	delete(e.owner, branchID)
+}
+
+// forgetWorkspace drops every branch size counted for a workspace: when it
+// goes to the trash, and again when it is purged, so nothing recorded late
+// stays counted against the instance.
+func (e *Engine) forgetWorkspace(ws string) {
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	for id, owner := range e.owner {
+		if owner == ws {
+			e.forgetLocked(id)
+		}
+	}
+	delete(e.wsTotal, ws)
+}
+
+// WorkspaceBytes is the space the branches of a workspace's live databases
+// take.
+func (e *Engine) WorkspaceBytes(ws string) int64 {
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	return e.wsTotal[ws]
 }
 
 // TotalBytes is the space all live branches take.
@@ -396,15 +457,16 @@ func (e *Engine) checkDisk() error {
 	return nil
 }
 
-// CreateDatabase creates a database with an empty default branch, main.
-func (e *Engine) CreateDatabase(ctx context.Context, name string) (meta.Database, error) {
+// CreateDatabase creates a database in a workspace, with an empty default
+// branch, main.
+func (e *Engine) CreateDatabase(ctx context.Context, ws, name string) (meta.Database, error) {
 	if e.refused != nil {
 		return meta.Database{}, e.refused
 	}
 	if !ids.ValidName(name) {
 		return meta.Database{}, apierr.Newf(apierr.InvalidName, "invalid database name %q", name)
 	}
-	if _, err := e.meta.GetDatabase(ctx, name); err == nil {
+	if _, err := e.meta.GetDatabase(ctx, ws, name); err == nil {
 		return meta.Database{}, apierr.Newf(apierr.NameTaken, "a database named %q already exists", name)
 	}
 	n, err := e.meta.CountDatabases(ctx)
@@ -412,7 +474,7 @@ func (e *Engine) CreateDatabase(ctx context.Context, name string) (meta.Database
 		return meta.Database{}, err
 	}
 	if n >= e.cfg.MaxDatabases {
-		return meta.Database{}, apierr.Newf(apierr.LimitReached, "the instance has the most databases allowed (%d)", e.cfg.MaxDatabases)
+		return meta.Database{}, apierr.New(apierr.LimitReached, "the instance can't hold more databases")
 	}
 	if err := e.checkDisk(); err != nil {
 		return meta.Database{}, err
@@ -436,13 +498,13 @@ func (e *Engine) CreateDatabase(ctx context.Context, name string) (meta.Database
 		_ = os.RemoveAll(e.layout.DatabaseDir(dbID))
 		return meta.Database{}, mapAcquire(err)
 	}
-	d, _, err := e.meta.CreateDatabase(ctx, name, dbID, branchID, e.cfg.MaxDatabases)
+	d, _, err := e.meta.CreateDatabase(ctx, ws, name, dbID, branchID, e.cfg.MaxDatabases)
 	if err != nil {
 		e.dropPool(branchID)
 		_ = os.RemoveAll(e.layout.DatabaseDir(dbID))
 		return meta.Database{}, err
 	}
-	e.recordSize(branchID, fileBytes(path))
+	e.recordSize(ws, branchID, fileBytes(path))
 	return d, nil
 }
 
@@ -469,16 +531,33 @@ type target struct {
 	path   string
 }
 
-// resolve finds a database and branch by name or id. An empty branch means
-// the database's default branch.
-func (e *Engine) resolve(ctx context.Context, dbRef, branchRef string) (target, error) {
+// resolve finds a database of a workspace and a branch of it, by name or id.
+// An empty branch means the database's default branch.
+func (e *Engine) resolve(ctx context.Context, ws, dbRef, branchRef string) (target, error) {
 	if e.refused != nil {
 		return target{}, e.refused
 	}
-	d, err := e.meta.GetDatabase(ctx, dbRef)
+	d, err := e.meta.GetDatabase(ctx, ws, dbRef)
 	if err != nil {
 		return target{}, err
 	}
+	return e.resolveIn(ctx, d, branchRef)
+}
+
+// resolveByID finds a database and branch by their ids alone, for the
+// engine's own jobs, which start from ids in meta.db and not from a request.
+func (e *Engine) resolveByID(ctx context.Context, dbID, branchID string) (target, error) {
+	if e.refused != nil {
+		return target{}, e.refused
+	}
+	d, err := e.meta.DatabaseByID(ctx, dbID)
+	if err != nil {
+		return target{}, err
+	}
+	return e.resolveIn(ctx, d, branchID)
+}
+
+func (e *Engine) resolveIn(ctx context.Context, d meta.Database, branchRef string) (target, error) {
 	if branchRef == "" {
 		branchRef = d.DefaultBranchID
 	}

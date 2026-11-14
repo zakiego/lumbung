@@ -51,13 +51,19 @@ func scanSnapshot(r scanner) (Snapshot, error) {
 	return sn, nil
 }
 
-// CreateSnapshot records a snapshot whose file already exists.
-func (s *Store) CreateSnapshot(ctx context.Context, sn Snapshot) (Snapshot, error) {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO snapshots (id, database_id, branch_id, branch_name, kind, label, size_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		sn.ID, sn.DatabaseID, sn.BranchID, sn.BranchName, sn.Kind, sn.Label, sn.SizeBytes, now())
+// CreateSnapshot records a snapshot whose file already exists. wsID is the
+// workspace the caller resolved the database in: the snapshot is only
+// recorded if the database is still live there (see databaseLiveIn).
+func (s *Store) CreateSnapshot(ctx context.Context, sn Snapshot, wsID string) (Snapshot, error) {
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO snapshots (id, database_id, branch_id, branch_name, kind, label, size_bytes, created_at)
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (`+databaseLiveIn+`)`,
+		sn.ID, sn.DatabaseID, sn.BranchID, sn.BranchName, sn.Kind, sn.Label, sn.SizeBytes, now(), sn.DatabaseID, wsID)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return Snapshot{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q", sn.DatabaseID)
 	}
 	return s.GetSnapshot(ctx, sn.DatabaseID, sn.ID)
 }

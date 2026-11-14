@@ -12,7 +12,16 @@ type ctxKey int
 const (
 	keyInfo ctxKey = iota
 	keyLog
+	// keySel holds the workspace a qualified URL names (PLAN 17.3).
+	keySel
 )
+
+// selFrom returns the workspace a qualified URL named, by name or id, or ""
+// for a short URL.
+func selFrom(ctx context.Context) string {
+	sel, _ := ctx.Value(keySel).(string)
+	return sel
+}
 
 // requestInfo is per-request state the middleware and handlers share.
 type requestInfo struct {

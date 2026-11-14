@@ -13,7 +13,7 @@ import (
 var bg = context.Background()
 
 func onBranch(e *Engine, db, branch string, access Access, sql string, args ...any) (*Result, error) {
-	return e.Query(bg, Target{Database: db, Branch: branch}, access, stmt(sql, args...))
+	return e.Query(bg, Target{Workspace: ws(e), Database: db, Branch: branch}, access, stmt(sql, args...))
 }
 
 func mustOnBranch(t *testing.T, e *Engine, db, branch string, access Access, sql string, args ...any) *Result {
@@ -31,7 +31,7 @@ func TestBranchLifecycle(t *testing.T) {
 	mustQuery(t, e, "app", Write, "CREATE TABLE t(x)")
 	mustQuery(t, e, "app", Write, "INSERT INTO t VALUES (1)")
 
-	dev, err := e.CreateBranch(bg, "app", "dev", BranchSource{}, NewBranchOptions{})
+	dev, err := e.CreateBranch(bg, ws(e), "app", "dev", BranchSource{}, NewBranchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,15 +47,15 @@ func TestBranchLifecycle(t *testing.T) {
 		t.Fatalf("main rows %d", v.Int)
 	}
 
-	_, err = e.CreateBranch(bg, "app", "dev", BranchSource{}, NewBranchOptions{})
+	_, err = e.CreateBranch(bg, ws(e), "app", "dev", BranchSource{}, NewBranchOptions{})
 	wantCode(t, err, apierr.NameTaken, "duplicate branch")
-	_, err = e.CreateBranch(bg, "app", "Bad_Name", BranchSource{}, NewBranchOptions{})
+	_, err = e.CreateBranch(bg, ws(e), "app", "Bad_Name", BranchSource{}, NewBranchOptions{})
 	wantCode(t, err, apierr.InvalidName, "bad name")
-	_, err = e.CreateBranch(bg, "app", "x", BranchSource{Branch: "nope"}, NewBranchOptions{})
+	_, err = e.CreateBranch(bg, ws(e), "app", "x", BranchSource{Branch: "nope"}, NewBranchOptions{})
 	wantCode(t, err, apierr.BranchNotFound, "missing source")
 
 	// Branch of a branch.
-	feat, err := e.CreateBranch(bg, "app", "feat", BranchSource{Branch: "dev"}, NewBranchOptions{})
+	feat, err := e.CreateBranch(bg, ws(e), "app", "feat", BranchSource{Branch: "dev"}, NewBranchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestBranchLifecycle(t *testing.T) {
 
 	// Rename keeps the id and data.
 	name := "develop"
-	renamed, err := e.UpdateBranch(bg, "app", "dev", BranchChanges{Name: &name})
+	renamed, err := e.UpdateBranch(bg, ws(e), "app", "dev", BranchChanges{Name: &name})
 	if err != nil || renamed.ID != dev.ID || renamed.Name != "develop" {
 		t.Fatalf("rename: %+v %v", renamed, err)
 	}
@@ -74,7 +74,7 @@ func TestBranchLifecycle(t *testing.T) {
 	wantCode(t, err, apierr.BranchNotFound, "old name")
 
 	// Reset copies the parent again.
-	if _, err := e.ResetBranch(bg, "app", "develop"); err != nil {
+	if _, err := e.ResetBranch(bg, ws(e), "app", "develop"); err != nil {
 		t.Fatal(err)
 	}
 	if v := scalar(t, mustOnBranch(t, e, "app", "develop", Read, "SELECT count(*) FROM t")); v.Int != 1 {
@@ -83,38 +83,38 @@ func TestBranchLifecycle(t *testing.T) {
 
 	// Delete removes the file; main can't be deleted or reset.
 	path := e.Layout().BranchFile(d.ID, feat.ID)
-	if err := e.DeleteBranch(bg, "app", "feat"); err != nil {
+	if err := e.DeleteBranch(bg, ws(e), "app", "feat"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("branch file left behind")
 	}
-	wantCode(t, e.DeleteBranch(bg, "app", "main"), apierr.BranchProtected, "delete main")
-	_, err = e.ResetBranch(bg, "app", "main")
+	wantCode(t, e.DeleteBranch(bg, ws(e), "app", "main"), apierr.BranchProtected, "delete main")
+	_, err = e.ResetBranch(bg, ws(e), "app", "main")
 	wantCode(t, err, apierr.BranchProtected, "reset main")
 	f := false
-	_, err = e.UpdateBranch(bg, "app", "main", BranchChanges{Protected: &f})
+	_, err = e.UpdateBranch(bg, ws(e), "app", "main", BranchChanges{Protected: &f})
 	wantCode(t, err, apierr.BranchProtected, "unprotect main")
 
 	// A protected branch can't be deleted or reset until unprotected.
 	on := true
-	if _, err := e.UpdateBranch(bg, "app", "develop", BranchChanges{Protected: &on}); err != nil {
+	if _, err := e.UpdateBranch(bg, ws(e), "app", "develop", BranchChanges{Protected: &on}); err != nil {
 		t.Fatal(err)
 	}
-	wantCode(t, e.DeleteBranch(bg, "app", "develop"), apierr.BranchProtected, "delete protected")
-	if _, err := e.UpdateBranch(bg, "app", "develop", BranchChanges{Protected: &f}); err != nil {
+	wantCode(t, e.DeleteBranch(bg, ws(e), "app", "develop"), apierr.BranchProtected, "delete protected")
+	if _, err := e.UpdateBranch(bg, ws(e), "app", "develop", BranchChanges{Protected: &f}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Reset of a branch whose parent is gone.
-	child, err := e.CreateBranch(bg, "app", "child", BranchSource{Branch: "develop"}, NewBranchOptions{})
+	child, err := e.CreateBranch(bg, ws(e), "app", "child", BranchSource{Branch: "develop"}, NewBranchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.DeleteBranch(bg, "app", "develop"); err != nil {
+	if err := e.DeleteBranch(bg, ws(e), "app", "develop"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = e.ResetBranch(bg, "app", child.ID)
+	_, err = e.ResetBranch(bg, ws(e), "app", child.ID)
 	wantCode(t, err, apierr.ParentGone, "reset with parent gone")
 }
 
@@ -122,11 +122,11 @@ func TestPromote(t *testing.T) {
 	e := newEngine(t, nil)
 	mustCreate(t, e, "app")
 	mustQuery(t, e, "app", Write, "CREATE TABLE t(x)")
-	if _, err := e.CreateBranch(bg, "app", "next", BranchSource{}, NewBranchOptions{ExpiresIn: time.Hour}); err != nil {
+	if _, err := e.CreateBranch(bg, ws(e), "app", "next", BranchSource{}, NewBranchOptions{ExpiresIn: time.Hour}); err != nil {
 		t.Fatal(err)
 	}
 	mustOnBranch(t, e, "app", "next", Write, "ALTER TABLE t ADD COLUMN y")
-	b, err := e.PromoteBranch(bg, "app", "next")
+	b, err := e.PromoteBranch(bg, ws(e), "app", "next")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestPromote(t *testing.T) {
 	if len(r.Columns) != 2 {
 		t.Fatalf("default has %d columns", len(r.Columns))
 	}
-	old, err := e.GetBranch(bg, "app", "main")
+	old, err := e.GetBranch(bg, ws(e), "app", "main")
 	if err != nil || !old.Protected {
 		t.Fatalf("old default: %+v %v", old, err)
 	}
@@ -147,34 +147,34 @@ func TestPromote(t *testing.T) {
 func TestBranchCap(t *testing.T) {
 	e := newEngine(t, func(c *config.Config) { c.MaxBranches = 2 })
 	mustCreate(t, e, "app")
-	if _, err := e.CreateBranch(bg, "app", "one", BranchSource{}, NewBranchOptions{}); err != nil {
+	if _, err := e.CreateBranch(bg, ws(e), "app", "one", BranchSource{}, NewBranchOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := e.CreateBranch(bg, "app", "two", BranchSource{}, NewBranchOptions{})
+	_, err := e.CreateBranch(bg, ws(e), "app", "two", BranchSource{}, NewBranchOptions{})
 	wantCode(t, err, apierr.LimitReached, "branch cap")
 	e.freeBytes = func(string) (int64, error) { return 1, nil }
-	if err := e.DeleteBranch(bg, "app", "one"); err != nil {
+	if err := e.DeleteBranch(bg, ws(e), "app", "one"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = e.CreateBranch(bg, "app", "two", BranchSource{}, NewBranchOptions{})
+	_, err = e.CreateBranch(bg, ws(e), "app", "two", BranchSource{}, NewBranchOptions{})
 	wantCode(t, err, apierr.DiskFull, "branch with a full disk")
 }
 
 func TestExpiredBranches(t *testing.T) {
 	e := newEngine(t, nil)
 	mustCreate(t, e, "app")
-	if _, err := e.CreateBranch(bg, "app", "pr-1", BranchSource{}, NewBranchOptions{ExpiresIn: time.Millisecond}); err != nil {
+	if _, err := e.CreateBranch(bg, ws(e), "app", "pr-1", BranchSource{}, NewBranchOptions{ExpiresIn: time.Millisecond}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.CreateBranch(bg, "app", "pr-2", BranchSource{}, NewBranchOptions{ExpiresIn: time.Millisecond, Protected: true}); err != nil {
+	if _, err := e.CreateBranch(bg, ws(e), "app", "pr-2", BranchSource{}, NewBranchOptions{ExpiresIn: time.Millisecond, Protected: true}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(5 * time.Millisecond)
 	e.tick(time.Now())
-	if _, err := e.GetBranch(bg, "app", "pr-1"); err == nil {
+	if _, err := e.GetBranch(bg, ws(e), "app", "pr-1"); err == nil {
 		t.Fatal("expired branch kept")
 	}
-	if _, err := e.GetBranch(bg, "app", "pr-2"); err != nil {
+	if _, err := e.GetBranch(bg, ws(e), "app", "pr-2"); err != nil {
 		t.Fatal("protected expired branch deleted")
 	}
 }
@@ -191,7 +191,7 @@ func TestSchemaAndDiff(t *testing.T) {
 	} {
 		mustQuery(t, e, "app", Write, sql)
 	}
-	sc, err := e.Schema(bg, Target{Database: "app"})
+	sc, err := e.Schema(bg, Target{Workspace: ws(e), Database: "app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestSchemaAndDiff(t *testing.T) {
 		t.Fatalf("users columns: %+v", users.Columns)
 	}
 
-	if _, err := e.CreateBranch(bg, "app", "mig", BranchSource{}, NewBranchOptions{}); err != nil {
+	if _, err := e.CreateBranch(bg, ws(e), "app", "mig", BranchSource{}, NewBranchOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, sql := range []string{
@@ -220,7 +220,7 @@ func TestSchemaAndDiff(t *testing.T) {
 	} {
 		mustOnBranch(t, e, "app", "mig", Write, sql)
 	}
-	diff, err := e.DiffBranches(bg, "app", "mig", "main")
+	diff, err := e.DiffBranches(bg, ws(e), "app", "mig", "main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestSchemaAndDiff(t *testing.T) {
 	if len(diff.BranchDDL) == 0 || len(diff.BaseDDL) == 0 {
 		t.Error("diff is missing DDL")
 	}
-	same, err := e.DiffBranches(bg, "app", "main", "main")
+	same, err := e.DiffBranches(bg, ws(e), "app", "main", "main")
 	if err != nil || len(same.Changes) != 0 {
 		t.Fatalf("self diff: %+v %v", same, err)
 	}
