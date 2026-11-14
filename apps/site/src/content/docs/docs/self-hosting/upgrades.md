@@ -57,7 +57,7 @@ If a new version migrated `meta.db`, an older binary refuses to serve it: `/heal
 
    <!-- docs-test: skip needs Docker Compose -->
    ```sh
-   docker compose run --rm engine lumbungd restore --meta-only --from /data/backups
+   docker compose run --rm engine restore --meta-only --from /data/backups
    ```
 
 4. Start it:
