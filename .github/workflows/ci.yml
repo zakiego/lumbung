@@ -104,6 +104,10 @@ jobs:
       - run: pnpm --filter '!@lumbung/engine' -r --if-present test
       - run: pnpm --filter @lumbung/site build
       - run: pnpm --filter @lumbung/dashboard build
+      - name: Dashboard configuration page matches the code
+        run: |
+          pnpm --filter @lumbung/dashboard docs:gen
+          git diff --exit-code -- apps/site/src/content/docs/docs/reference/dashboard-configuration.md
       - run: pnpm check:links
       # Every code sample in the docs runs against a live engine.
       - run: pnpm docs:test

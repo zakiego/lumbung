@@ -7,7 +7,7 @@ description: From nothing to a first query in five minutes, with Docker Compose 
 
 You need Docker with Compose, and Go to build the CLI.
 
-## 1. Start the engine
+## 1. Start Lumbung
 
 <!-- docs-test: skip starts containers; the docs test runs the engine binary directly -->
 ```sh
@@ -16,7 +16,7 @@ cd lumbung
 docker compose up -d --build
 ```
 
-The engine listens on `http://127.0.0.1:4870`, only on this machine. On first start it creates a service token, an instance admin.
+The engine listens on `http://127.0.0.1:4870` and the dashboard on `http://localhost:4871/app`, only on this machine. On first start the engine creates a service token, an instance admin.
 
 ## 2. Install the CLI and log in
 
@@ -60,6 +60,7 @@ lumbung branch delete try-email-index --db app --yes
 
 ## Next
 
+- [Use the dashboard](/docs/guides/dashboard/): set up the owner and look at `app` and its branches.
 - [Connect from Node](/docs/guides/node/) with the TypeScript SDK.
 - [Tokens and scopes](/docs/concepts/tokens/): make a token for each app instead of using the service token.
 - [Docker Compose](/docs/self-hosting/docker-compose/) for running it for real.
