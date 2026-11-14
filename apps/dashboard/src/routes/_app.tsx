@@ -3,7 +3,7 @@ import { AppShell } from "@/components/app/shell"
 import { listBuckets } from "@/fns/buckets"
 import { listDatabases } from "@/fns/databases"
 import { APP_BASE } from "@/lib/paths"
-import { loadSession } from "@/lib/session-cache"
+import { loadSession, primeSession } from "@/lib/session-cache"
 
 export const Route = createFileRoute("/_app")({
   beforeLoad: async ({ location }) => {
@@ -21,8 +21,9 @@ export const Route = createFileRoute("/_app")({
 })
 
 function AppLayout() {
-  const { viewer } = Route.useRouteContext()
+  const { viewer, engineUrl } = Route.useRouteContext()
   const { databases, buckets } = Route.useLoaderData()
+  primeSession({ viewer, needsSetup: false, engineUrl })
   return (
     <AppShell viewer={viewer} databases={databases} buckets={buckets}>
       <Outlet />
