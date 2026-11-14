@@ -46,7 +46,7 @@ func bucketOut(b meta.Bucket) BucketOut {
 type ObjectOut struct {
 	Key          string            `json:"key"`
 	Size         int64             `json:"size"`
-	ETag         string            `json:"etag" doc:"MD5 of the content, or for a multipart object the MD5 of the parts' MD5s with -<parts>. Without quotes."`
+	ETag         string            `json:"etag" doc:"MD5 of the content, or for a multipart object the MD5 of the parts' MD5s, a dash and the number of parts. Without quotes."`
 	ContentType  string            `json:"content_type"`
 	LastModified time.Time         `json:"last_modified"`
 	Headers      map[string]string `json:"headers" doc:"Stored Cache-Control, Content-Disposition, Content-Encoding, Content-Language and Expires."`

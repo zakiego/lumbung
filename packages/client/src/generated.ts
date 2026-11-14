@@ -252,7 +252,7 @@ export interface ObjectListBody {
 
 export interface ObjectOut {
   content_type: string;
-  /** MD5 of the content, or for a multipart object the MD5 of the parts' MD5s with -<parts>. Without quotes. */
+  /** MD5 of the content, or for a multipart object the MD5 of the parts' MD5s, a dash and the number of parts. Without quotes. */
   etag: string;
   /** Stored Cache-Control, Content-Disposition, Content-Encoding, Content-Language and Expires. */
   headers: Record<string, string>;

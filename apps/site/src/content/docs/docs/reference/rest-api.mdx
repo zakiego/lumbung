@@ -145,7 +145,7 @@ Response `200`:
 | Field | Type | Description |
 |---|---|---|
 | `content_type` (required) | string |  |
-| `etag` (required) | string | MD5 of the content, or for a multipart object the MD5 of the parts' MD5s with -<parts>. Without quotes. |
+| `etag` (required) | string | MD5 of the content, or for a multipart object the MD5 of the parts' MD5s, a dash and the number of parts. Without quotes. |
 | `headers` (required) | object | Stored Cache-Control, Content-Disposition, Content-Encoding, Content-Language and Expires. |
 | `key` (required) | string |  |
 | `last_modified` (required) | string |  |
@@ -166,9 +166,9 @@ Streams the content with its stored headers, ETag and Last-Modified. A Range hea
 | `If-None-Match` | header | string |  |
 | `If-Match` | header | string |  |
 
-Response `200`: the file, as `*/*`.
-
 Response `206`: the file, as `*/*`.
+
+Response `200`: the file, as `*/*`.
 
 ### Upload an object
 
@@ -188,7 +188,7 @@ Response `200`:
 | Field | Type | Description |
 |---|---|---|
 | `content_type` (required) | string |  |
-| `etag` (required) | string | MD5 of the content, or for a multipart object the MD5 of the parts' MD5s with -<parts>. Without quotes. |
+| `etag` (required) | string | MD5 of the content, or for a multipart object the MD5 of the parts' MD5s, a dash and the number of parts. Without quotes. |
 | `headers` (required) | object | Stored Cache-Control, Content-Disposition, Content-Encoding, Content-Language and Expires. |
 | `key` (required) | string |  |
 | `last_modified` (required) | string |  |

@@ -837,7 +837,7 @@
             "type": "string"
           },
           "etag": {
-            "description": "MD5 of the content, or for a multipart object the MD5 of the parts' MD5s with -\u003cparts\u003e. Without quotes.",
+            "description": "MD5 of the content, or for a multipart object the MD5 of the parts' MD5s, a dash and the number of parts. Without quotes.",
             "type": "string"
           },
           "headers": {
