@@ -1,0 +1,80 @@
+---
+// The landing page's document: head tags, the theme set before first paint,
+// and landing.css (which only landing pages import, keeping the docs
+// Tailwind-free).
+import "@/styles/landing.css"
+import { site, themeColor } from "@/lib/site"
+
+const canonical = new URL(Astro.url.pathname, Astro.site).href
+const image = new URL("/og/index.png", Astro.site).href
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: site.name,
+  description: site.description,
+  url: canonical,
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "macOS, Linux",
+  codeRepository: site.github,
+}
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {/* Same choice as the docs (Starlight's key), else the system's. Rocket
+        Loader would defer this without data-cfasync, flashing the wrong theme. */}
+    <script is:inline data-cfasync="false">
+      ;(() => {
+        const root = document.documentElement
+        const light = matchMedia("(prefers-color-scheme: light)")
+        let stored = null
+        try {
+          stored = localStorage.getItem("starlight-theme")
+        } catch {}
+        const apply = () => {
+          root.dataset.theme = stored === "light" || stored === "dark" ? stored : light.matches ? "light" : "dark"
+        }
+        apply()
+        light.addEventListener("change", apply)
+        root.dataset.js = ""
+      })()
+    </script>
+    <title>{site.title}</title>
+    <meta name="description" content={site.description} />
+    <link rel="canonical" href={canonical} />
+    <meta name="robots" content="index, follow" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content={themeColor.dark} media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content={themeColor.light} media="(prefers-color-scheme: light)" />
+
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="sitemap" href="/sitemap-index.xml" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={site.name} />
+    <meta property="og:locale" content="en" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:title" content={site.title} />
+    <meta property="og:description" content={site.description} />
+    <meta property="og:image" content={image} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={site.ogAlt} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={site.title} />
+    <meta name="twitter:description" content={site.description} />
+    <meta name="twitter:image" content={image} />
+    <meta name="twitter:image:alt" content={site.ogAlt} />
+
+    <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

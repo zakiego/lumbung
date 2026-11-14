@@ -1,89 +1,179 @@
 /* The landing page's styles. Only the landing layout imports this file, so
    Starlight's docs pages never load Tailwind's reset. */
+@layer ui-sdk;
 @import "tailwindcss" source("..");
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme inline {
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-heading: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
 
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-secondary-text: var(--secondary-text);
-  --color-faint: var(--faint);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-brand: var(--brand);
-  --color-success: var(--success);
-  --color-warning: var(--warning);
-  --color-destructive: var(--destructive);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --color-code: var(--code);
-  --color-foreground: var(--foreground);
   --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.5);
-  --radius-md: calc(var(--radius) * 0.75);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.5);
-  --radius-2xl: calc(var(--radius) * 2);
+  --color-foreground: var(--foreground);
+  --color-secondary-text: var(--secondary-text);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-faint: var(--faint);
+  --color-surface: var(--surface);
+  --color-code: var(--code);
+  --color-border: var(--border);
+  --color-hairline: var(--hairline);
+  --color-hover: var(--hover);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-hover: var(--secondary-hover);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
 }
 
-/* Marketing stays dark. Neutrals do the work; indigo is a small accent. */
-:root {
+/* Dark is the default look. Indigo is only the focus ring and selection.
+   .scheme-dark keeps a piece dark in the light theme (the terminal). */
+:root,
+.scheme-dark {
   color-scheme: dark;
-  --radius: 0.5rem;
   --background: #08090a;
   --foreground: #f7f8f8;
-  --card: #0f1011;
-  --card-foreground: #f7f8f8;
-  --popover: #0f1011;
-  --popover-foreground: #f7f8f8;
-  --primary: #e5e5e6;
-  --primary-foreground: #08090a;
-  --secondary: rgba(255, 255, 255, 0.05);
-  --secondary-foreground: #f7f8f8;
   --secondary-text: #d0d6e0;
-  --muted: #141516;
   --muted-foreground: #8a8f98;
   --faint: #62666d;
-  --accent: #191a1b;
-  --accent-foreground: #f7f8f8;
-  --brand: #7170ff;
-  --success: #27a644;
-  --warning: #f0bf00;
-  --destructive: #eb5757;
-  --code: #1c1c1f;
+  --surface: #0f1011;
+  --code: #141516;
   --border: #23252a;
-  --input: #2a2b30;
+  --hairline: rgba(255, 255, 255, 0.08);
+  --hover: rgba(255, 255, 255, 0.08);
+  --primary: #e5e5e6;
+  --primary-hover: #ffffff;
+  --primary-foreground: #08090a;
+  --secondary: rgba(255, 255, 255, 0.05);
+  --secondary-hover: #191a1b;
   --ring: #5e6ad2;
+  --success: #27a644;
+  --mark: #e8e2cf;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: #ffffff;
+  --foreground: #282a30;
+  --secondary-text: #3c4149;
+  --muted-foreground: #6f6e77;
+  --faint: #8f8e96;
+  --surface: #f9f8f9;
+  --code: #f7f6f7;
+  --border: #e9e8ea;
+  --hairline: #e9e8ea;
+  --hover: rgba(0, 0, 0, 0.05);
+  --primary: #282a30;
+  --primary-hover: #08090a;
+  --primary-foreground: #ffffff;
+  --secondary: rgba(0, 0, 0, 0.04);
+  --secondary-hover: rgba(0, 0, 0, 0.07);
+  --success: #1a7f34;
+  --mark: #1f2a1f;
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    border-color: var(--border);
+  }
+  html {
+    background: var(--background);
+    /* Anchors and focused elements land below the 64px sticky header. */
+    scroll-padding-top: 80px;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+  a,
+  button {
+    touch-action: manipulation;
+  }
+  button {
+    user-select: none;
+    -webkit-user-select: none;
   }
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-background font-sans text-foreground antialiased;
     font-feature-settings: "cv01", "ss03";
   }
   ::selection {
     background: color-mix(in lch, #5e6ad2, black 10%);
     color: #fff;
+  }
+  :focus-visible {
+    outline: 1px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Code from Astro's <Code theme="css-variables">: a calm, vesper-like set on
+   dark and its readable counterpart on light. */
+:root,
+.scheme-dark {
+  --astro-code-background: transparent;
+  --astro-code-foreground: #d0d6e0;
+  --astro-code-token-keyword: #a0a0a0;
+  --astro-code-token-string: #99ffe4;
+  --astro-code-token-string-expression: #99ffe4;
+  --astro-code-token-function: #ffc799;
+  --astro-code-token-constant: #ffc799;
+  --astro-code-token-parameter: #d0d6e0;
+  --astro-code-token-punctuation: #8a8f98;
+  --astro-code-token-comment: #8a8f98;
+  --astro-code-token-link: #99ffe4;
+}
+:root[data-theme="light"] {
+  --astro-code-foreground: #282a30;
+  --astro-code-token-keyword: #6f6e77;
+  --astro-code-token-string: #0f7b6c;
+  --astro-code-token-string-expression: #0f7b6c;
+  --astro-code-token-function: #a04f00;
+  --astro-code-token-constant: #a04f00;
+  --astro-code-token-parameter: #282a30;
+  --astro-code-token-punctuation: #6f6e77;
+  --astro-code-token-comment: #6f6e77;
+  --astro-code-token-link: #0f7b6c;
+}
+
+/* The press feel every button and pill shares. In a layer, so a utility's
+   own transition list on the same element still wins. */
+@layer components {
+  .press {
+    transition-property: background-color, color, scale;
+    transition-duration: 100ms;
+    transition-timing-function: var(--ease-out-quad);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .press:active {
+      scale: 0.97;
+    }
+  }
+}
+
+/* Until the demo hydrates and starts at its first step, keep the finished
+   session (the server's poster) from flashing. Without JS or with reduced
+   motion, the poster shows. */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-js] [data-terminal="poster"] [data-screen] {
+    visibility: hidden;
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    scale: 0.8;
+  }
+}
+@keyframes pulse-dot {
+  50% {
+    opacity: 0.35;
   }
 }
