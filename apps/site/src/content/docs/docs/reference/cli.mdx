@@ -110,6 +110,58 @@ lumbung branch reset BRANCH [flags]
       --db string   database name or id (default: the profile's)
 ```
 
+## lumbung bucket
+
+List, create, change and delete buckets.
+
+### lumbung bucket create
+
+Create a bucket (needs an instance admin token).
+
+```text
+lumbung bucket create NAME
+```
+
+```sh
+lumbung bucket create photos
+```
+
+### lumbung bucket delete
+
+Delete an empty bucket.
+
+```text
+lumbung bucket delete NAME
+```
+
+### lumbung bucket list
+
+List buckets.
+
+```text
+lumbung bucket list
+```
+
+### lumbung bucket update
+
+Change a bucket's name, public read access or CORS origins.
+
+```text
+lumbung bucket update NAME [flags]
+```
+
+```text
+      --cors strings   origins a browser may call the S3 API from (comma-separated; empty clears)
+      --name string    rename the bucket
+      --private        require a token to read objects
+      --public         let anyone read objects without a token
+```
+
+```sh
+lumbung bucket update photos --public
+lumbung bucket update photos --cors https://app.example.com
+```
+
 ## lumbung db
 
 List, create, delete and restore databases.
@@ -256,6 +308,106 @@ lumbung migrate status [flags]
       --dir string      folder of .sql files (default "migrations")
 ```
 
+## lumbung object
+
+List, upload, download, copy, delete and presign objects.
+
+### lumbung object cp
+
+Copy an object, within a bucket or to another.
+
+```text
+lumbung object cp SRC_BUCKET/KEY DST_BUCKET/KEY
+```
+
+```sh
+lumbung object cp photos/cat.jpg backups/2026/cat.jpg
+```
+
+### lumbung object get
+
+Download an object.
+
+```text
+lumbung object get BUCKET/KEY [flags]
+```
+
+```text
+  -o, --output string   write to this file instead of standard output
+```
+
+```sh
+lumbung object get photos/2026/cat.jpg -o cat.jpg
+lumbung object get docs/notes.txt
+```
+
+### lumbung object ls
+
+List objects, with folders from /.
+
+```text
+lumbung object ls BUCKET[/PREFIX] [flags]
+```
+
+```text
+      --limit int   stop after about this many entries (0: all)
+  -r, --recursive   list every key under the prefix instead of rolling folders up
+```
+
+```sh
+lumbung object ls photos
+lumbung object ls photos/2026/ --recursive
+```
+
+### lumbung object presign
+
+Print a presigned S3 URL for one object.
+
+Prints a URL anyone can use to GET (or PUT) one object until it expires. It is signed with the token's access key, so the token must have one (`lumbung token create --access-key`).
+
+```text
+lumbung object presign BUCKET/KEY [flags]
+```
+
+```text
+      --expires duration   how long the URL stays valid (default 1h0m0s)
+      --method string      GET to download or PUT to upload (default "GET")
+```
+
+```sh
+lumbung object presign photos/cat.jpg --expires 1h
+lumbung object presign uploads/new.bin --method PUT
+```
+
+### lumbung object put
+
+Upload a file as an object.
+
+Uploads FILE. When the destination ends with / or names only the bucket, the file's name is appended as the key.
+
+```text
+lumbung object put FILE BUCKET/KEY [flags]
+```
+
+```text
+      --cache-control string   a Cache-Control header to store with the object
+      --content-type string    the object's content type (default: guessed from the file)
+      --meta stringArray       custom metadata as name=value (repeatable)
+```
+
+```sh
+lumbung object put cat.jpg photos/2026/
+lumbung object put report.pdf docs/q3.pdf --meta owner=finance
+```
+
+### lumbung object rm
+
+Delete an object.
+
+```text
+lumbung object rm BUCKET/KEY
+```
+
 ### lumbung query
 
 Run one SQL statement.
@@ -355,7 +507,9 @@ lumbung token create [flags]
 
 ```text
       --access string         read, write or admin (default "read")
+      --access-key            also make an S3 access key for the token
       --branch string         limit the token to this branch of --db
+      --bucket string         limit the token to this bucket (instead of --db)
       --db string             limit the token to this database (default: the whole instance)
       --expires-in-days int   expire after this many days (0: never)
       --name string           what the token is for
@@ -363,6 +517,7 @@ lumbung token create [flags]
 
 ```sh
 lumbung token create --name ci --db app --access write --expires-in-days 90
+lumbung token create --name uploads --bucket photos --access write --access-key
 ```
 
 ### lumbung token list
