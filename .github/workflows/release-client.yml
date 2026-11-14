@@ -1,0 +1,65 @@
+name: Release client
+
+# Publishes the TypeScript SDK to GitHub Packages when a client-vX.Y.Z tag is
+# pushed. The tag must match packages/client/package.json. Steps: ops/README.md.
+on:
+  push:
+    tags: ["client-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-client
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tag matches the package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(node -p 'require("./packages/client/package.json").version')
+          if [ "$TAG" != "client-v$version" ]; then
+            echo "::error::tag $TAG doesn't match packages/client version $version"
+            exit 1
+          fi
+      # SDK tests build and start a real lumbungd from this commit.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/engine/go.mod
+          cache-dependency-path: apps/engine/go.sum
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          registry-url: https://npm.pkg.github.com
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @lumbung/client build
+      - run: pnpm --filter @lumbung/client typecheck
+      - run: pnpm --filter @lumbung/client test
+      # GitHub Packages only accepts a scope named after the repository owner,
+      # so the package goes out as @<owner>/lumbung-client. The workspace keeps
+      # @lumbung/client and "private" so nothing publishes it by accident.
+      - name: Publish
+        working-directory: packages/client
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          scope=$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')
+          npm pkg delete private
+          npm pkg set \
+            "name=@$scope/lumbung-client" \
+            "repository.type=git" \
+            "repository.url=git+https://github.com/${GITHUB_REPOSITORY}.git" \
+            "repository.directory=packages/client" \
+            "publishConfig.registry=https://npm.pkg.github.com"
+          npm publish

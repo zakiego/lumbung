@@ -218,7 +218,7 @@ Added in milestone 11 (ADR 0005). The libSQL remote protocol over HTTP (Hrana v2
 - Typed errors that carry the API's `code`. Retries only on safe reads.
 - `@lumbung/client/drizzle`: adapter on Drizzle's `sqlite-proxy` driver, with a tested example.
 - Tests run against a real engine binary, not mocks.
-- Not published anywhere until Zaki says so.
+- Published to GitHub Packages (the repository owner's scope, `UNLICENSED`) by `.github/workflows/release-client.yml` on a `client-vX.Y.Z` tag. Release steps are in `ops/README.md`.
 
 ### `lumbung` (CLI)
 
@@ -314,12 +314,11 @@ Work top to bottom. Each one ends green in CI, with its docs pages written.
 
 Object storage continues with milestones 12 to 17 in section 16.9.
 
-Later, not scheduled: MCP OAuth for Claude on the web, publishing the SDK and CLI, the open-source checklist (license, security policy, contribution guide), read replicas.
+Later, not scheduled: MCP OAuth for Claude on the web, publishing the CLI, publishing the SDK to public npm, the open-source checklist (license, security policy, contribution guide), read replicas.
 
 ## 15. Open questions for Zaki
 
 - License for when the repo goes public.
-- Where to publish `@lumbung/client` (npm public, or GitHub Packages while private).
 - Whether the public hostname stays `lumbung.zakiego.com` or moves to its own domain.
 
 ## 16. Object storage
