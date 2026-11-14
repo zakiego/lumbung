@@ -26,11 +26,17 @@ The person opens the link, picks a name and a password, and is signed in. There'
 
 | Role | Can |
 |---|---|
-| Owner | Everything, including tokens, members, invites and instance settings |
-| Member | Create and change databases, branches, snapshots, data and schema, and read the audit log |
-| Read-only | Browse databases and data, and run read-only SQL |
+| Owner | Everything, including tokens, members, invites, instance settings, and creating, changing and deleting buckets |
+| Member | Create and change databases, branches, snapshots, data and schema, upload and delete objects, and read the audit log |
+| Read-only | Browse databases and data, run read-only SQL, and browse and download objects |
 
 Read-only SQL from the dashboard runs on a read-only connection, the same as a token with `read` access. At least one owner always remains: the last owner can't be removed or demoted. A role change signs that person out, so it applies at once.
+
+## Buckets
+
+Buckets are in the sidebar under Buckets. A bucket page lists its objects with folders rolled up at `/`; click a folder to go in, and the breadcrumb to go back. Upload sends files into the folder you're in, streamed through the dashboard to the engine, so their size is limited by the [object limits](/docs/concepts/limits/#object-storage), not by the dashboard. Downloads always save as files: the dashboard never shows an object's content in the page.
+
+An owner's bucket settings turn public read on or off, set the CORS origins for browser uploads, show the S3 endpoint, and delete the bucket once it is empty.
 
 ## Passkeys
 
