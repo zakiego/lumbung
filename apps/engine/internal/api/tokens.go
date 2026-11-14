@@ -306,6 +306,7 @@ func (s *Server) register() {
 	s.registerSnapshots(s.api)
 	s.registerTransfer(s.api)
 	s.registerTokens(s.api)
+	s.registerBuckets(s.api)
 	for _, f := range s.extra {
 		f(s.api)
 	}

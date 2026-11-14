@@ -187,6 +187,228 @@ Response `200`:
 | `data` (required) | DatabaseOut[] |  |
 | `next_cursor` (required) | string | Pass as cursor for the next page; empty on the last page. |
 
+## Buckets
+
+### List buckets
+
+`GET /v1/buckets`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `limit` | query | integer | Most items to return. |
+| `cursor` | query | string | The next_cursor from the previous page. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `data` (required) | BucketOut[] |  |
+| `next_cursor` (required) | string | Pass as cursor for the next page; empty on the last page. |
+
+### Create a bucket
+
+`POST /v1/buckets`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `Idempotency-Key` | header | string | Retrying with the same key returns the first response instead of creating twice. |
+
+Request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `name` (required) | string | 3 to 63 lowercase letters, digits and hyphens. |
+
+Response `201`:
+
+| Field | Type | Description |
+|---|---|---|
+| `cors_origins` (required) | string[] | Origins a browser may call the S3 API from. |
+| `created_at` (required) | string |  |
+| `id` (required) | string |  |
+| `name` (required) | string |  |
+| `object_count` (required) | integer |  |
+| `public_read` (required) | boolean | Anyone may read objects without a token. |
+| `size_bytes` (required) | integer | Bytes the objects take. |
+| `updated_at` (required) | string |  |
+
+### Get a bucket
+
+`GET /v1/buckets/{bucket}`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `bucket` (required) | path | string | Bucket name or id. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `cors_origins` (required) | string[] | Origins a browser may call the S3 API from. |
+| `created_at` (required) | string |  |
+| `id` (required) | string |  |
+| `name` (required) | string |  |
+| `object_count` (required) | integer |  |
+| `public_read` (required) | boolean | Anyone may read objects without a token. |
+| `size_bytes` (required) | integer | Bytes the objects take. |
+| `updated_at` (required) | string |  |
+
+### Change a bucket's name or settings
+
+`PATCH /v1/buckets/{bucket}`
+
+Request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `cors_origins` | string[] | * or scheme://host[:port] each. |
+| `name` | string | Rename the bucket. S3 paths and URLs that name it stop working. |
+| `public_read` | boolean |  |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `cors_origins` (required) | string[] | Origins a browser may call the S3 API from. |
+| `created_at` (required) | string |  |
+| `id` (required) | string |  |
+| `name` (required) | string |  |
+| `object_count` (required) | integer |  |
+| `public_read` (required) | boolean | Anyone may read objects without a token. |
+| `size_bytes` (required) | integer | Bytes the objects take. |
+| `updated_at` (required) | string |  |
+
+### Delete an empty bucket
+
+`DELETE /v1/buckets/{bucket}`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `bucket` (required) | path | string | Bucket name or id. |
+
+Response `204`: no content.
+
+## Objects
+
+### Copy an object into this bucket
+
+`POST /v1/buckets/{bucket}/copy`
+
+Request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `content_type` | string | Set to replace the content type and metadata instead of copying them. |
+| `from_bucket` | string | Source bucket name or id; defaults to this bucket. |
+| `from_key` (required) | string |  |
+| `key` (required) | string | Key of the copy in this bucket. |
+| `metadata` | object | With content_type: the copy's metadata. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `content_type` (required) | string |  |
+| `etag` (required) | string | MD5 of the content, or for a multipart object the MD5 of the parts' MD5s with -<parts>. Without quotes. |
+| `headers` (required) | object | Stored Cache-Control, Content-Disposition, Content-Encoding, Content-Language and Expires. |
+| `key` (required) | string |  |
+| `last_modified` (required) | string |  |
+| `metadata` (required) | object | Custom metadata (x-amz-meta-* headers), lowercase names without the prefix. |
+| `size` (required) | integer |  |
+
+### Download an object
+
+`GET /v1/buckets/{bucket}/object`
+
+Streams the content with its stored headers, ETag and Last-Modified. A Range header returns 206 with that part. HEAD returns the headers only.
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `Range` | header | string | One byte range, bytes=start-end. |
+| `If-None-Match` | header | string |  |
+| `If-Match` | header | string |  |
+
+Response `200`: the file, as `application/octet-stream`.
+
+Response `206`: the file, as `application/octet-stream`.
+
+### Upload an object
+
+`PUT /v1/buckets/{bucket}/object`
+
+Send the content as the raw request body with a Content-Length. Content-Type, Cache-Control, Content-Disposition, Content-Encoding, Content-Language and Expires are stored, and x-amz-meta-* headers become metadata. An existing object with the key is replaced.
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `bucket` (required) | path | string | Bucket name or id. |
+| `key` (required) | query | string | Object key. |
+
+Request body: the raw file, as `application/octet-stream`.
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `content_type` (required) | string |  |
+| `etag` (required) | string | MD5 of the content, or for a multipart object the MD5 of the parts' MD5s with -<parts>. Without quotes. |
+| `headers` (required) | object | Stored Cache-Control, Content-Disposition, Content-Encoding, Content-Language and Expires. |
+| `key` (required) | string |  |
+| `last_modified` (required) | string |  |
+| `metadata` (required) | object | Custom metadata (x-amz-meta-* headers), lowercase names without the prefix. |
+| `size` (required) | integer |  |
+
+### Delete an object
+
+`DELETE /v1/buckets/{bucket}/object`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `bucket` (required) | path | string | Bucket name or id. |
+| `key` (required) | query | string | Object key. |
+
+Response `204`: no content.
+
+### List objects
+
+`GET /v1/buckets/{bucket}/objects`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `prefix` | query | string | Only keys that start with this. |
+| `delimiter` | query | string | Roll up keys that contain this after the prefix into prefixes, like folders. Usually /. |
+| `limit` | query | integer | Most objects and prefixes to return together. |
+| `cursor` | query | string | The next_cursor from the previous page. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `data` (required) | ObjectOut[] |  |
+| `next_cursor` (required) | string | Pass as cursor for the next page; empty on the last page. |
+| `prefixes` (required) | string[] | Common prefixes under the delimiter, like folders. |
+
+### Make a presigned S3 URL
+
+`POST /v1/buckets/{bucket}/presign`
+
+Signs a GET or PUT URL for one key with the calling token's access key, so the token must have one. GET needs read access, PUT needs write. The URL stops working when it expires or the token is revoked.
+
+Request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `expires_in` | integer | Seconds the URL stays valid, at most LUMBUNG_PRESIGN_MAX_EXPIRY. |
+| `key` (required) | string |  |
+| `method` | string: GET, PUT | GET to download, PUT to upload. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `expires_at` (required) | string |  |
+| `method` (required) | string |  |
+| `url` (required) | string | The presigned S3 URL. Anyone holding it can use it until it expires or the token is revoked. |
+
 ## Branches
 
 ### List branches

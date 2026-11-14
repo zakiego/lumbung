@@ -69,6 +69,26 @@ export interface BranchOut {
   updated_at: string;
 }
 
+export interface BucketListBody {
+  data: BucketOut[];
+  /** Pass as cursor for the next page; empty on the last page. */
+  next_cursor: string;
+}
+
+export interface BucketOut {
+  /** Origins a browser may call the S3 API from. */
+  cors_origins: string[];
+  created_at: string;
+  id: string;
+  name: string;
+  object_count: number;
+  /** Anyone may read objects without a token. */
+  public_read: boolean;
+  /** Bytes the objects take. */
+  size_bytes: number;
+  updated_at: string;
+}
+
 export interface Change {
   after: string;
   before: string;
@@ -105,6 +125,18 @@ export interface ColumnOut {
   name: string;
 }
 
+export interface CopyInBody {
+  /** Set to replace the content type and metadata instead of copying them. */
+  content_type?: string;
+  /** Source bucket name or id; defaults to this bucket. */
+  from_bucket?: string;
+  from_key: string;
+  /** Key of the copy in this bucket. */
+  key: string;
+  /** With content_type: the copy's metadata. */
+  metadata?: Record<string, string>;
+}
+
 export interface CreateBranchInBody {
   /** Delete the branch automatically after this many days. 0 keeps it. */
   expires_in_days?: number;
@@ -114,6 +146,11 @@ export interface CreateBranchInBody {
   from_snapshot?: string;
   name: string;
   protected?: boolean;
+}
+
+export interface CreateBucketInBody {
+  /** 3 to 63 lowercase letters, digits and hyphens. */
+  name: string;
 }
 
 export interface CreateDatabaseInBody {
@@ -205,12 +242,48 @@ export interface Index {
   unique: boolean;
 }
 
+export interface ObjectListBody {
+  data: ObjectOut[];
+  /** Pass as cursor for the next page; empty on the last page. */
+  next_cursor: string;
+  /** Common prefixes under the delimiter, like folders. */
+  prefixes: string[];
+}
+
+export interface ObjectOut {
+  content_type: string;
+  /** MD5 of the content, or for a multipart object the MD5 of the parts' MD5s with -<parts>. Without quotes. */
+  etag: string;
+  /** Stored Cache-Control, Content-Disposition, Content-Encoding, Content-Language and Expires. */
+  headers: Record<string, string>;
+  key: string;
+  last_modified: string;
+  /** Custom metadata (x-amz-meta-* headers), lowercase names without the prefix. */
+  metadata: Record<string, string>;
+  size: number;
+}
+
 export interface Point {
   at: string;
   errors: number;
   queries: number;
   rows_read: number;
   rows_written: number;
+}
+
+export interface PresignInBody {
+  /** Seconds the URL stays valid, at most LUMBUNG_PRESIGN_MAX_EXPIRY. */
+  expires_in?: number;
+  key: string;
+  /** GET to download, PUT to upload. */
+  method?: "GET" | "PUT";
+}
+
+export interface PresignOutBody {
+  expires_at: string;
+  method: string;
+  /** The presigned S3 URL. Anyone holding it can use it until it expires or the token is revoked. */
+  url: string;
 }
 
 export interface Problem {
@@ -381,6 +454,14 @@ export interface UpdateBranchInBody {
   expires_in_days?: number;
   name?: string;
   protected?: boolean;
+}
+
+export interface UpdateBucketInBody {
+  /** * or scheme://host[:port] each. */
+  cors_origins?: string[];
+  /** Rename the bucket. S3 paths and URLs that name it stop working. */
+  name?: string;
+  public_read?: boolean;
 }
 
 export interface UpdateDatabaseInBody {
