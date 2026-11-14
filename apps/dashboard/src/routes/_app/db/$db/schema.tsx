@@ -1,13 +1,38 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { DbFrame } from "@/components/app/db-frame"
-import { ComingNext } from "@/components/app/states"
+import { SchemaView } from "@/components/app/schema-view"
+import { ErrorState, RowsSkeleton } from "@/components/app/states"
+import { getSchema } from "@/fns/databases"
 import { pageTitle } from "@/lib/paths"
 
 export const Route = createFileRoute("/_app/db/$db/schema")({
+  loaderDeps: ({ search }) => ({ branch: search.branch }),
+  loader: async ({ params, deps, parentMatchPromise }) => {
+    const parent = await parentMatchPromise
+    const database = parent.loaderData?.database
+    const branches = parent.loaderData?.branches ?? []
+    const branch = deps.branch && branches.some((b) => b.name === deps.branch) ? deps.branch : (database?.default_branch ?? "main")
+    return { schema: await getSchema({ data: { db: params.db, branch } }) }
+  },
   head: ({ params }) => ({ meta: [{ title: pageTitle("Schema", params.db) }] }),
-  component: () => (
+  pendingComponent: () => (
     <DbFrame section="schema">
-      <ComingNext />
+      <RowsSkeleton rows={5} />
     </DbFrame>
   ),
+  errorComponent: ({ error }) => (
+    <DbFrame section="schema">
+      <ErrorState error={error} title="Couldn't load the schema" />
+    </DbFrame>
+  ),
+  component: SchemaPage,
 })
+
+function SchemaPage() {
+  const { schema } = Route.useLoaderData()
+  return (
+    <DbFrame section="schema">
+      <SchemaView schema={schema} />
+    </DbFrame>
+  )
+}

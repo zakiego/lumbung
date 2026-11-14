@@ -146,7 +146,7 @@ test("the kit's parts render and work together", async () => {
   expect(screen.getByRole("menuitem", { name: "Profile" })).toBeTruthy()
   await user.keyboard("{Escape}")
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull())
-  expect(document.activeElement).toBe(account)
+  await waitFor(() => expect(document.activeElement).toBe(account))
 
   const keep = screen.getByRole("checkbox", { name: "Keep it" })
   keep.focus()
