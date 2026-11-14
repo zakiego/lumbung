@@ -23,7 +23,7 @@ Stating a compatibility fact is fine ("works with the libSQL client").
 |---|---|
 | Name | Lumbung. Repo `zakiego/lumbung`, private for now |
 | Engine | Go server `lumbungd`. Owns databases, branches, tokens, REST API, MCP |
-| Dashboard | TanStack Start (Nitro) + shadcn, a client of the engine's API |
+| Dashboard | TanStack Start (Nitro) + ui-sdk (ADR 0004), a client of the engine's API |
 | Dashboard login | Better Auth, invite-only: email and password plus passkeys, roles owner, member, read-only |
 | Site | Astro + Starlight: landing at `/`, docs at `/docs`, static on Cloudflare Pages |
 | Client API | Own REST API and own SDK first. libSQL wire protocol is a later milestone |
@@ -225,7 +225,7 @@ Rules:
 
 ## 10. Dashboard
 
-Built with `/zaki-design-ui`, starting from a shadcn block per that skill. Screens:
+Built with `/zaki-design-ui` on ui-sdk components (ADR 0004; this said shadcn until milestone 8). Screens:
 
 - First-run setup (creates the owner), login, accept invite.
 - Databases: list with size, branch count, last activity. Create. Trash with restore.

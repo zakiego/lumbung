@@ -1,15 +1,8 @@
 import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router"
 import type { ReactNode } from "react"
+import { Toaster } from "@/components/ui/toast"
+import { BOOT_SCRIPT } from "@/lib/theme"
 import appCss from "@/styles/app.css?url"
-
-// Set the theme class before first paint so a dark page never flashes light.
-// data-cfasync keeps Cloudflare Rocket Loader from deferring it.
-const THEME_SCRIPT = `(function(){try{
-var t=localStorage.getItem('lumbung.theme')||'system';
-var d=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);
-document.documentElement.classList.add(d?'dark':'light');
-document.documentElement.style.colorScheme=d?'dark':'light';
-}catch(e){}})();`
 
 export const Route = createRootRoute({
   head: () => ({
@@ -21,7 +14,8 @@ export const Route = createRootRoute({
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+      // The edge only forwards /app to the dashboard, so the icon lives there too.
+      { rel: "icon", type: "image/svg+xml", href: "/app/favicon.svg" },
     ],
   }),
   shellComponent: RootDocument,
@@ -32,11 +26,13 @@ function RootDocument({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script data-cfasync="false" dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        {/* data-cfasync keeps Cloudflare Rocket Loader from deferring the theme script. */}
+        <script data-cfasync="false" dangerouslySetInnerHTML={{ __html: BOOT_SCRIPT }} />
         <HeadContent />
       </head>
       <body>
         {children}
+        <Toaster />
         <Scripts />
       </body>
     </html>

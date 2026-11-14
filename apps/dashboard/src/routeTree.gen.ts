@@ -9,68 +9,485 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as PrototypesOverviewRouteImport } from './routes/prototypes/overview'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as SetupRouteImport } from './routes/setup'
+import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppAccountRouteImport } from './routes/_app/account'
+import { Route as AppAuditRouteImport } from './routes/_app/audit'
+import { Route as AppMembersRouteImport } from './routes/_app/members'
+import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppTokensRouteImport } from './routes/_app/tokens'
+import { Route as AppTrashRouteImport } from './routes/_app/trash'
+import { Route as ApiHealthRouteImport } from './routes/api/health'
+import { Route as InviteTokenRouteImport } from './routes/invite.$token'
+import { Route as AppDbDbRouteRouteImport } from './routes/_app/db/$db/route'
+import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as AppDbDbIndexRouteImport } from './routes/_app/db/$db/index'
+import { Route as AppDbDbBranchesRouteImport } from './routes/_app/db/$db/branches'
+import { Route as AppDbDbDataRouteImport } from './routes/_app/db/$db/data'
+import { Route as AppDbDbSchemaRouteImport } from './routes/_app/db/$db/schema'
+import { Route as AppDbDbSettingsRouteImport } from './routes/_app/db/$db/settings'
+import { Route as AppDbDbSnapshotsRouteImport } from './routes/_app/db/$db/snapshots'
+import { Route as AppDbDbSqlRouteImport } from './routes/_app/db/$db/sql'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PrototypesOverviewRoute = PrototypesOverviewRouteImport.update({
-  id: '/prototypes/overview',
-  path: '/prototypes/overview',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAccountRoute = AppAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAuditRoute = AppAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMembersRoute = AppMembersRouteImport.update({
+  id: '/members',
+  path: '/members',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTokensRoute = AppTokensRouteImport.update({
+  id: '/tokens',
+  path: '/tokens',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTrashRoute = AppTrashRouteImport.update({
+  id: '/trash',
+  path: '/trash',
+  getParentRoute: () => AppRoute,
+} as any)
+const ApiHealthRoute = ApiHealthRouteImport.update({
+  id: '/api/health',
+  path: '/api/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InviteTokenRoute = InviteTokenRouteImport.update({
+  id: '/invite/$token',
+  path: '/invite/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppDbDbRouteRoute = AppDbDbRouteRouteImport.update({
+  id: '/db/$db',
+  path: '/db/$db',
+  getParentRoute: () => AppRoute,
+} as any)
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppDbDbIndexRoute = AppDbDbIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppDbDbRouteRoute,
+} as any)
+const AppDbDbBranchesRoute = AppDbDbBranchesRouteImport.update({
+  id: '/branches',
+  path: '/branches',
+  getParentRoute: () => AppDbDbRouteRoute,
+} as any)
+const AppDbDbDataRoute = AppDbDbDataRouteImport.update({
+  id: '/data',
+  path: '/data',
+  getParentRoute: () => AppDbDbRouteRoute,
+} as any)
+const AppDbDbSchemaRoute = AppDbDbSchemaRouteImport.update({
+  id: '/schema',
+  path: '/schema',
+  getParentRoute: () => AppDbDbRouteRoute,
+} as any)
+const AppDbDbSettingsRoute = AppDbDbSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppDbDbRouteRoute,
+} as any)
+const AppDbDbSnapshotsRoute = AppDbDbSnapshotsRouteImport.update({
+  id: '/snapshots',
+  path: '/snapshots',
+  getParentRoute: () => AppDbDbRouteRoute,
+} as any)
+const AppDbDbSqlRoute = AppDbDbSqlRouteImport.update({
+  id: '/sql',
+  path: '/sql',
+  getParentRoute: () => AppDbDbRouteRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/prototypes/overview': typeof PrototypesOverviewRoute
+  '/': typeof AppIndexRoute
+  '/login': typeof LoginRoute
+  '/setup': typeof SetupRoute
+  '/account': typeof AppAccountRoute
+  '/audit': typeof AppAuditRoute
+  '/members': typeof AppMembersRoute
+  '/settings': typeof AppSettingsRoute
+  '/tokens': typeof AppTokensRoute
+  '/trash': typeof AppTrashRoute
+  '/api/health': typeof ApiHealthRoute
+  '/invite/$token': typeof InviteTokenRoute
+  '/db/$db': typeof AppDbDbRouteRouteWithChildren
+  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/db/$db/branches': typeof AppDbDbBranchesRoute
+  '/db/$db/data': typeof AppDbDbDataRoute
+  '/db/$db/schema': typeof AppDbDbSchemaRoute
+  '/db/$db/settings': typeof AppDbDbSettingsRoute
+  '/db/$db/snapshots': typeof AppDbDbSnapshotsRoute
+  '/db/$db/sql': typeof AppDbDbSqlRoute
+  '/db/$db/': typeof AppDbDbIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/prototypes/overview': typeof PrototypesOverviewRoute
+  '/login': typeof LoginRoute
+  '/setup': typeof SetupRoute
+  '/account': typeof AppAccountRoute
+  '/audit': typeof AppAuditRoute
+  '/members': typeof AppMembersRoute
+  '/settings': typeof AppSettingsRoute
+  '/tokens': typeof AppTokensRoute
+  '/trash': typeof AppTrashRoute
+  '/api/health': typeof ApiHealthRoute
+  '/invite/$token': typeof InviteTokenRoute
+  '/': typeof AppIndexRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/db/$db/branches': typeof AppDbDbBranchesRoute
+  '/db/$db/data': typeof AppDbDbDataRoute
+  '/db/$db/schema': typeof AppDbDbSchemaRoute
+  '/db/$db/settings': typeof AppDbDbSettingsRoute
+  '/db/$db/snapshots': typeof AppDbDbSnapshotsRoute
+  '/db/$db/sql': typeof AppDbDbSqlRoute
+  '/db/$db': typeof AppDbDbIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/prototypes/overview': typeof PrototypesOverviewRoute
+  '/_app': typeof AppRouteWithChildren
+  '/login': typeof LoginRoute
+  '/setup': typeof SetupRoute
+  '/_app/account': typeof AppAccountRoute
+  '/_app/audit': typeof AppAuditRoute
+  '/_app/members': typeof AppMembersRoute
+  '/_app/settings': typeof AppSettingsRoute
+  '/_app/tokens': typeof AppTokensRoute
+  '/_app/trash': typeof AppTrashRoute
+  '/api/health': typeof ApiHealthRoute
+  '/invite/$token': typeof InviteTokenRoute
+  '/_app/': typeof AppIndexRoute
+  '/_app/db/$db': typeof AppDbDbRouteRouteWithChildren
+  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/_app/db/$db/branches': typeof AppDbDbBranchesRoute
+  '/_app/db/$db/data': typeof AppDbDbDataRoute
+  '/_app/db/$db/schema': typeof AppDbDbSchemaRoute
+  '/_app/db/$db/settings': typeof AppDbDbSettingsRoute
+  '/_app/db/$db/snapshots': typeof AppDbDbSnapshotsRoute
+  '/_app/db/$db/sql': typeof AppDbDbSqlRoute
+  '/_app/db/$db/': typeof AppDbDbIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/prototypes/overview'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/setup'
+    | '/account'
+    | '/audit'
+    | '/members'
+    | '/settings'
+    | '/tokens'
+    | '/trash'
+    | '/api/health'
+    | '/invite/$token'
+    | '/db/$db'
+    | '/api/auth/$'
+    | '/db/$db/branches'
+    | '/db/$db/data'
+    | '/db/$db/schema'
+    | '/db/$db/settings'
+    | '/db/$db/snapshots'
+    | '/db/$db/sql'
+    | '/db/$db/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/prototypes/overview'
-  id: '__root__' | '/' | '/prototypes/overview'
+  to:
+    | '/login'
+    | '/setup'
+    | '/account'
+    | '/audit'
+    | '/members'
+    | '/settings'
+    | '/tokens'
+    | '/trash'
+    | '/api/health'
+    | '/invite/$token'
+    | '/'
+    | '/api/auth/$'
+    | '/db/$db/branches'
+    | '/db/$db/data'
+    | '/db/$db/schema'
+    | '/db/$db/settings'
+    | '/db/$db/snapshots'
+    | '/db/$db/sql'
+    | '/db/$db'
+  id:
+    | '__root__'
+    | '/_app'
+    | '/login'
+    | '/setup'
+    | '/_app/account'
+    | '/_app/audit'
+    | '/_app/members'
+    | '/_app/settings'
+    | '/_app/tokens'
+    | '/_app/trash'
+    | '/api/health'
+    | '/invite/$token'
+    | '/_app/'
+    | '/_app/db/$db'
+    | '/api/auth/$'
+    | '/_app/db/$db/branches'
+    | '/_app/db/$db/data'
+    | '/_app/db/$db/schema'
+    | '/_app/db/$db/settings'
+    | '/_app/db/$db/snapshots'
+    | '/_app/db/$db/sql'
+    | '/_app/db/$db/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  PrototypesOverviewRoute: typeof PrototypesOverviewRoute
+  AppRoute: typeof AppRouteWithChildren
+  LoginRoute: typeof LoginRoute
+  SetupRoute: typeof SetupRoute
+  ApiHealthRoute: typeof ApiHealthRoute
+  InviteTokenRoute: typeof InviteTokenRoute
+  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
+    '/_app': {
+      id: '/_app'
+      path: ''
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/prototypes/overview': {
-      id: '/prototypes/overview'
-      path: '/prototypes/overview'
-      fullPath: '/prototypes/overview'
-      preLoaderRoute: typeof PrototypesOverviewRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/': {
+      id: '/_app/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/account': {
+      id: '/_app/account'
+      path: '/account'
+      fullPath: '/account'
+      preLoaderRoute: typeof AppAccountRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/audit': {
+      id: '/_app/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AppAuditRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/members': {
+      id: '/_app/members'
+      path: '/members'
+      fullPath: '/members'
+      preLoaderRoute: typeof AppMembersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/tokens': {
+      id: '/_app/tokens'
+      path: '/tokens'
+      fullPath: '/tokens'
+      preLoaderRoute: typeof AppTokensRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/trash': {
+      id: '/_app/trash'
+      path: '/trash'
+      fullPath: '/trash'
+      preLoaderRoute: typeof AppTrashRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/api/health': {
+      id: '/api/health'
+      path: '/api/health'
+      fullPath: '/api/health'
+      preLoaderRoute: typeof ApiHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invite/$token': {
+      id: '/invite/$token'
+      path: '/invite/$token'
+      fullPath: '/invite/$token'
+      preLoaderRoute: typeof InviteTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/db/$db': {
+      id: '/_app/db/$db'
+      path: '/db/$db'
+      fullPath: '/db/$db'
+      preLoaderRoute: typeof AppDbDbRouteRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/api/auth/$': {
+      id: '/api/auth/$'
+      path: '/api/auth/$'
+      fullPath: '/api/auth/$'
+      preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/db/$db/': {
+      id: '/_app/db/$db/'
+      path: '/'
+      fullPath: '/db/$db/'
+      preLoaderRoute: typeof AppDbDbIndexRouteImport
+      parentRoute: typeof AppDbDbRouteRoute
+    }
+    '/_app/db/$db/branches': {
+      id: '/_app/db/$db/branches'
+      path: '/branches'
+      fullPath: '/db/$db/branches'
+      preLoaderRoute: typeof AppDbDbBranchesRouteImport
+      parentRoute: typeof AppDbDbRouteRoute
+    }
+    '/_app/db/$db/data': {
+      id: '/_app/db/$db/data'
+      path: '/data'
+      fullPath: '/db/$db/data'
+      preLoaderRoute: typeof AppDbDbDataRouteImport
+      parentRoute: typeof AppDbDbRouteRoute
+    }
+    '/_app/db/$db/schema': {
+      id: '/_app/db/$db/schema'
+      path: '/schema'
+      fullPath: '/db/$db/schema'
+      preLoaderRoute: typeof AppDbDbSchemaRouteImport
+      parentRoute: typeof AppDbDbRouteRoute
+    }
+    '/_app/db/$db/settings': {
+      id: '/_app/db/$db/settings'
+      path: '/settings'
+      fullPath: '/db/$db/settings'
+      preLoaderRoute: typeof AppDbDbSettingsRouteImport
+      parentRoute: typeof AppDbDbRouteRoute
+    }
+    '/_app/db/$db/snapshots': {
+      id: '/_app/db/$db/snapshots'
+      path: '/snapshots'
+      fullPath: '/db/$db/snapshots'
+      preLoaderRoute: typeof AppDbDbSnapshotsRouteImport
+      parentRoute: typeof AppDbDbRouteRoute
+    }
+    '/_app/db/$db/sql': {
+      id: '/_app/db/$db/sql'
+      path: '/sql'
+      fullPath: '/db/$db/sql'
+      preLoaderRoute: typeof AppDbDbSqlRouteImport
+      parentRoute: typeof AppDbDbRouteRoute
     }
   }
 }
 
+interface AppDbDbRouteRouteChildren {
+  AppDbDbBranchesRoute: typeof AppDbDbBranchesRoute
+  AppDbDbDataRoute: typeof AppDbDbDataRoute
+  AppDbDbSchemaRoute: typeof AppDbDbSchemaRoute
+  AppDbDbSettingsRoute: typeof AppDbDbSettingsRoute
+  AppDbDbSnapshotsRoute: typeof AppDbDbSnapshotsRoute
+  AppDbDbSqlRoute: typeof AppDbDbSqlRoute
+  AppDbDbIndexRoute: typeof AppDbDbIndexRoute
+}
+
+const AppDbDbRouteRouteChildren: AppDbDbRouteRouteChildren = {
+  AppDbDbBranchesRoute: AppDbDbBranchesRoute,
+  AppDbDbDataRoute: AppDbDbDataRoute,
+  AppDbDbSchemaRoute: AppDbDbSchemaRoute,
+  AppDbDbSettingsRoute: AppDbDbSettingsRoute,
+  AppDbDbSnapshotsRoute: AppDbDbSnapshotsRoute,
+  AppDbDbSqlRoute: AppDbDbSqlRoute,
+  AppDbDbIndexRoute: AppDbDbIndexRoute,
+}
+
+const AppDbDbRouteRouteWithChildren = AppDbDbRouteRoute._addFileChildren(
+  AppDbDbRouteRouteChildren,
+)
+
+interface AppRouteChildren {
+  AppAccountRoute: typeof AppAccountRoute
+  AppAuditRoute: typeof AppAuditRoute
+  AppMembersRoute: typeof AppMembersRoute
+  AppSettingsRoute: typeof AppSettingsRoute
+  AppTokensRoute: typeof AppTokensRoute
+  AppTrashRoute: typeof AppTrashRoute
+  AppIndexRoute: typeof AppIndexRoute
+  AppDbDbRouteRoute: typeof AppDbDbRouteRouteWithChildren
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppAccountRoute: AppAccountRoute,
+  AppAuditRoute: AppAuditRoute,
+  AppMembersRoute: AppMembersRoute,
+  AppSettingsRoute: AppSettingsRoute,
+  AppTokensRoute: AppTokensRoute,
+  AppTrashRoute: AppTrashRoute,
+  AppIndexRoute: AppIndexRoute,
+  AppDbDbRouteRoute: AppDbDbRouteRouteWithChildren,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  PrototypesOverviewRoute: PrototypesOverviewRoute,
+  AppRoute: AppRouteWithChildren,
+  LoginRoute: LoginRoute,
+  SetupRoute: SetupRoute,
+  ApiHealthRoute: ApiHealthRoute,
+  InviteTokenRoute: InviteTokenRoute,
+  ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,19 +1,52 @@
-import * as React from "react"
-import { Input as InputPrimitive } from "@base-ui/react/input"
-import { cn } from "@/lib/utils"
+import { Input as InputPart } from "@ui-sdk/react/input"
+import {
+  PasswordInputControl,
+  PasswordInput as PasswordInputPart,
+  PasswordInputToggle,
+} from "@ui-sdk/react/password-input"
+import { Textarea as TextareaPart } from "@ui-sdk/react/textarea"
+import { EyeIcon, EyeOffIcon } from "lucide-react"
+import type { ComponentProps } from "react"
+import { type Styled, cn } from "@/lib/utils"
 
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
-  return (
-    <InputPrimitive
-      type={type}
-      data-slot="input"
-      className={cn(
-        "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base transition-colors outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:disabled:bg-input/80 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
-        className
-      )}
-      {...props}
-    />
-  )
+// 16px text on phones so focusing a field doesn't zoom the page.
+const field =
+  "w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 text-base text-foreground caret-brand transition-[border-color] duration-100 placeholder:text-faint focus-visible:border-ring focus-visible:outline-none data-disabled:cursor-not-allowed data-disabled:opacity-50 data-invalid:border-destructive md:text-[13px]"
+
+export function Input({ className, ...props }: Styled<typeof InputPart>) {
+  return <InputPart className={cn(field, "h-8", className)} {...props} />
 }
 
-export { Input }
+export function Textarea({ className, ...props }: Styled<typeof TextareaPart>) {
+  return <TextareaPart className={cn(field, "min-h-20 py-1.5", className)} {...props} />
+}
+
+type PasswordInputProps = Omit<ComponentProps<typeof PasswordInputPart>, "className" | "children"> & {
+  className?: string
+  placeholder?: string
+  id?: string
+}
+
+export function PasswordInput({ className, placeholder, id, ...props }: PasswordInputProps) {
+  return (
+    <PasswordInputPart
+      className={cn(
+        "flex h-8 w-full items-center rounded-md border border-input transition-[border-color] duration-100 has-focus-visible:border-ring data-disabled:opacity-50 has-data-invalid:border-destructive",
+        className,
+      )}
+      {...props}
+    >
+      <PasswordInputControl
+        id={id}
+        placeholder={placeholder}
+        className="h-full min-w-0 flex-1 bg-transparent pl-2.5 text-base text-foreground caret-brand outline-none placeholder:text-faint md:text-[13px]"
+      />
+      <PasswordInputToggle
+        aria-label="Show password"
+        className="mr-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-[5px] text-faint hover:text-foreground"
+      >
+        {(state) => (state.visible ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />)}
+      </PasswordInputToggle>
+    </PasswordInputPart>
+  )
+}

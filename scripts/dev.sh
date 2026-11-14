@@ -37,7 +37,12 @@ dashboard)
   port=$((base + 1))
   echo "dashboard: http://localhost:$port"
   cd "$root/apps/dashboard"
-  exec ./node_modules/.bin/vite dev --port "$port" --strictPort
+  # Point at this checkout's engine and its service token, and bind auth to this port.
+  LUMBUNG_ENGINE_URL="http://127.0.0.1:$base" \
+    LUMBUNG_PUBLIC_ENGINE_URL="http://127.0.0.1:$base" \
+    LUMBUNG_SERVICE_TOKEN_FILE="$root/apps/engine/data/secrets/service-token" \
+    LUMBUNG_DASHBOARD_URL="http://localhost:$port" \
+    exec ./node_modules/.bin/vite dev --port "$port" --strictPort
   ;;
 site)
   port=$((base + 2))

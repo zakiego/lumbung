@@ -98,10 +98,12 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The dashboard and the docs samples import the SDK's built output.
+      - run: pnpm --filter @lumbung/client build
       - run: pnpm --filter '!@lumbung/engine' -r typecheck
       - run: pnpm --filter '!@lumbung/engine' -r --if-present test
       - run: pnpm --filter @lumbung/site build
+      - run: pnpm --filter @lumbung/dashboard build
       - run: pnpm check:links
       # Every code sample in the docs runs against a live engine.
-      - run: pnpm --filter @lumbung/client build
       - run: pnpm docs:test

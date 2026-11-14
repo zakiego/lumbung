@@ -6,7 +6,7 @@ Lumbung: a self-hosted SQLite database platform with branches, an HTTP API, MCP,
 
 ```
 apps/engine      Go module: cmd/lumbungd (server), cmd/lumbung (CLI)
-apps/dashboard   TanStack Start (Nitro) + shadcn + Better Auth, a client of the engine API
+apps/dashboard   TanStack Start (Nitro) + ui-sdk + Better Auth, a client of the engine API
 apps/site        Astro + Starlight: landing and docs (Cloudflare Pages)
 apps/edge        Cloudflare Worker that routes our public hostname
 packages/client  @lumbung/client TypeScript SDK and Drizzle adapter

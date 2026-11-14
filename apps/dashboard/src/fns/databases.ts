@@ -1,0 +1,140 @@
+// Databases and branches, through the engine's REST API.
+import type { BranchOut, DatabaseOut, Diff, Schema, StatsOutBody } from "@lumbung/client"
+import { createServerFn } from "@tanstack/react-start"
+import { z } from "zod"
+import { config } from "@/server/config"
+import { call, engineFor } from "@/server/engine"
+import { requireCan } from "@/server/session"
+
+const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "Use lowercase letters, digits and dashes, up to 63 characters.")
+const ref = z.string().min(1).max(100)
+const db = z.object({ db: ref })
+const branch = z.object({ db: ref, branch: ref })
+
+async function all<T>(page: (cursor?: string) => Promise<{ data: T[]; nextCursor: string }>, max = 1000): Promise<T[]> {
+  const out: T[] = []
+  let cursor: string | undefined
+  do {
+    const p = await page(cursor)
+    out.push(...p.data)
+    cursor = p.nextCursor || undefined
+  } while (cursor && out.length < max)
+  return out
+}
+
+export const listDatabases = createServerFn({ method: "GET" }).handler(async (): Promise<DatabaseOut[]> => {
+  const viewer = await requireCan("read")
+  const e = engineFor(viewer)
+  return call(() => all((cursor) => e.databases.list({ limit: 100, cursor })))
+})
+
+export const listTrash = createServerFn({ method: "GET" }).handler(async (): Promise<DatabaseOut[]> => {
+  const viewer = await requireCan("read")
+  const e = engineFor(viewer)
+  return call(() => all((cursor) => e.databases.trash({ limit: 100, cursor })))
+})
+
+export const getDatabase = createServerFn({ method: "GET" })
+  .validator(db)
+  .handler(async ({ data }): Promise<{ database: DatabaseOut; branches: BranchOut[] }> => {
+    const viewer = await requireCan("read")
+    const e = engineFor(viewer)
+    return call(async () => {
+      const [database, branches] = await Promise.all([e.databases.get(data.db), all((cursor) => e.branches.list(data.db, { limit: 100, cursor }))])
+      return { database, branches }
+    })
+  })
+
+export const createDatabase = createServerFn({ method: "POST" })
+  .validator(z.object({ name }))
+  .handler(async ({ data }) => {
+    const viewer = await requireCan("write")
+    return call(() => engineFor(viewer).databases.create(data.name))
+  })
+
+export const renameDatabase = createServerFn({ method: "POST" })
+  .validator(z.object({ db: ref, name }))
+  .handler(async ({ data }) => {
+    const viewer = await requireCan("write")
+    return call(() => engineFor(viewer).databases.rename(data.db, data.name))
+  })
+
+export const deleteDatabase = createServerFn({ method: "POST" })
+  .validator(db)
+  .handler(async ({ data }) => {
+    const viewer = await requireCan("write")
+    return call(() => engineFor(viewer).databases.delete(data.db))
+  })
+
+export const restoreDatabase = createServerFn({ method: "POST" })
+  .validator(z.object({ db: ref, name: name.optional() }))
+  .handler(async ({ data }) => {
+    const viewer = await requireCan("write")
+    return call(() => engineFor(viewer).databases.restore(data.db, data.name))
+  })
+
+export const createBranch = createServerFn({ method: "POST" })
+  .validator(z.object({ db: ref, name, from: ref.optional(), expiresInDays: z.number().int().min(1).max(3650).optional() }))
+  .handler(async ({ data }) => {
+    const viewer = await requireCan("write")
+    return call(() => engineFor(viewer).branches.create(data.db, data.name, { from: data.from, expiresInDays: data.expiresInDays }))
+  })
+
+export const updateBranch = createServerFn({ method: "POST" })
+  .validator(
+    z.object({ db: ref, branch: ref, name: name.optional(), protected: z.boolean().optional(), expiresInDays: z.number().int().min(0).max(3650).optional() }),
+  )
+  .handler(async ({ data }) => {
+    const viewer = await requireCan("write")
+    const { db: d, branch: b, ...patch } = data
+    return call(() => engineFor(viewer).branches.update(d, b, patch))
+  })
+
+export const deleteBranch = createServerFn({ method: "POST" })
+  .validator(branch)
+  .handler(async ({ data }) => {
+    const viewer = await requireCan("write")
+    await call(() => engineFor(viewer).branches.delete(data.db, data.branch))
+    return { ok: true }
+  })
+
+export const resetBranch = createServerFn({ method: "POST" })
+  .validator(branch)
+  .handler(async ({ data }) => {
+    const viewer = await requireCan("write")
+    return call(() => engineFor(viewer).branches.reset(data.db, data.branch))
+  })
+
+export const promoteBranch = createServerFn({ method: "POST" })
+  .validator(branch)
+  .handler(async ({ data }) => {
+    const viewer = await requireCan("write")
+    return call(() => engineFor(viewer).branches.promote(data.db, data.branch))
+  })
+
+export const diffBranch = createServerFn({ method: "GET" })
+  .validator(z.object({ db: ref, branch: ref, against: ref }))
+  .handler(async ({ data }): Promise<Diff> => {
+    const viewer = await requireCan("read")
+    return call(() => engineFor(viewer).branches.diff(data.db, data.branch, data.against))
+  })
+
+export const getSchema = createServerFn({ method: "GET" })
+  .validator(branch)
+  .handler(async ({ data }): Promise<Schema> => {
+    const viewer = await requireCan("read")
+    return call(() => engineFor(viewer).branches.schema(data.db, data.branch))
+  })
+
+export const getStats = createServerFn({ method: "GET" })
+  .validator(z.object({ db: ref, branch: ref, window: z.enum(["1h", "6h", "24h", "48h"]).default("24h") }))
+  .handler(async ({ data }): Promise<StatsOutBody> => {
+    const viewer = await requireCan("read")
+    return call(() => engineFor(viewer).branches.stats(data.db, data.branch, data.window))
+  })
+
+// The engine URL for connect snippets. Tokens never leave the server; snippets read $LUMBUNG_TOKEN.
+export const getConnectInfo = createServerFn({ method: "GET" }).handler(async () => {
+  await requireCan("read")
+  return { engineUrl: config().publicEngineUrl }
+})
