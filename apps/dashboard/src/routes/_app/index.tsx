@@ -1,17 +1,16 @@
 import type { AuditOut } from "@lumbung/client"
-import { Await, Link, createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
+import { Await, Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { CircleAlertIcon, DatabaseIcon } from "lucide-react"
 import { RecentActivity } from "@/components/app/activity"
 import { DatabaseTable } from "@/components/app/database-table"
-import { CreateDatabaseDialog } from "@/components/app/name-dialog"
+import { CreateDatabaseDialog, useCreateDatabase } from "@/components/app/name-dialog"
 import { RequestsChart } from "@/components/app/requests-chart"
 import { PageBody, PageHeader, PageTitle } from "@/components/app/shell"
 import { ChartFailed, Deferred, Stat, StatGrid, WindowSelect } from "@/components/app/stats"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
 import { Card, CardContent, CardHeader, CardTitle, Empty, Skeleton, StatusText } from "@/components/ui/surface"
-import { toast } from "@/components/ui/toast"
 import { listAudit } from "@/fns/admin"
-import { createDatabase, getWorkspaceStats, listDatabases } from "@/fns/databases"
+import { getWorkspaceStats, listDatabases } from "@/fns/databases"
 import { formatBytes, number } from "@/lib/format"
 import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
@@ -75,17 +74,10 @@ function OverviewPage() {
   const { databases, stats, activity } = Route.useLoaderData()
   const { range } = Route.useLoaderDeps()
   const { viewer } = Route.useRouteContext()
-  const router = useRouter()
   const navigate = useNavigate({ from: Route.fullPath })
   const canWrite = can(viewer.role, "write")
 
-  async function create(name: string) {
-    // A failure shows under the dialog's field, so only success gets a toast.
-    await createDatabase({ data: { name } })
-    toast.success(`Created ${name}`)
-    await router.invalidate()
-    await router.navigate({ to: "/db/$db", params: { db: name } })
-  }
+  const create = useCreateDatabase()
 
   const actions = canWrite ? <CreateDatabaseDialog onCreate={create} /> : undefined
 

@@ -15,7 +15,7 @@ import {
   UserIcon,
   UsersIcon,
 } from "lucide-react"
-import { createContext, type ReactNode, use, useEffect, useState } from "react"
+import { createContext, type ReactElement, type ReactNode, use, useEffect, useState } from "react"
 import { Avatar } from "@/components/ui/avatar"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { DialogShortcut, DialogTrigger, createDialogController } from "@/components/ui/dialog"
@@ -30,8 +30,10 @@ import { forgetSession } from "@/lib/session-cache"
 import { type Theme, applyTheme, readSidebarCollapsed, readTheme, setSidebarCollapsed } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 import type { Viewer } from "@/server/session"
+import { CreateBucketDialog, useCreateBucket } from "./buckets"
 import { CommandPalette } from "./command-palette"
 import { Mark } from "./mark"
+import { CreateDatabaseDialog, useCreateDatabase } from "./name-dialog"
 
 type ShellState = {
   drawer: ReturnType<typeof createDrawerController<unknown, unknown>>
@@ -113,6 +115,10 @@ function SidebarBody({
     { show: can(viewer.role, "admin"), to: "/settings", label: "Settings", icon: <SettingsIcon /> },
   ]
   const instance = all.filter((item) => item.show)
+  const canWrite = can(viewer.role, "write")
+  const canAdmin = can(viewer.role, "admin")
+  const createDb = useCreateDatabase(onNavigate)
+  const createBucket = useCreateBucket(onNavigate)
 
   return (
     <>
@@ -130,20 +136,34 @@ function SidebarBody({
           <div className="flex flex-col gap-0.5">
             <NavItem to="/" label="Overview" icon={<LayoutGridIcon />} exact rail={rail} onNavigate={onNavigate} />
           </div>
-          <NavGroup label="Databases">
-            {databases === null && <p className="px-2 text-xs text-muted-foreground sidebar-collapsed:hidden">Can't load databases</p>}
-            {databases?.length === 0 && <p className="px-2 text-xs text-muted-foreground sidebar-collapsed:hidden">None yet</p>}
-            {databases?.map((d) => (
-              <NavItem key={d.id} to="/db/$db" params={{ db: d.name }} label={d.name} icon={<DatabaseIcon />} rail={rail} onNavigate={onNavigate} />
-            ))}
-          </NavGroup>
-          <NavGroup label="Buckets" to="/buckets" onNavigate={onNavigate}>
-            {buckets === null && <p className="px-2 text-xs text-muted-foreground sidebar-collapsed:hidden">Can't load buckets</p>}
-            {buckets?.length === 0 && <NavItem to="/buckets" label="All buckets" icon={<ArchiveIcon />} exact rail={rail} onNavigate={onNavigate} />}
-            {buckets?.map((b) => (
-              <NavItem key={b.id} to="/buckets/$bucket" params={{ bucket: b.name }} label={b.name} icon={<ArchiveIcon />} rail={rail} onNavigate={onNavigate} />
-            ))}
-          </NavGroup>
+          {(databases === null || databases.length > 0 || canWrite) && (
+            <NavGroup label="Databases">
+              {databases === null && <p className="px-2 text-xs text-muted-foreground sidebar-collapsed:hidden">Can't load databases</p>}
+              {databases?.length === 0 && (
+                <CreateDatabaseDialog
+                  onCreate={createDb}
+                  {...createSlot("New database", rail)}
+                />
+              )}
+              {databases?.map((d) => (
+                <NavItem key={d.id} to="/db/$db" params={{ db: d.name }} label={d.name} icon={<DatabaseIcon />} rail={rail} onNavigate={onNavigate} />
+              ))}
+            </NavGroup>
+          )}
+          {(buckets === null || buckets.length > 0 || canAdmin) && (
+            <NavGroup label="Buckets" to="/buckets" onNavigate={onNavigate}>
+              {buckets === null && <p className="px-2 text-xs text-muted-foreground sidebar-collapsed:hidden">Can't load buckets</p>}
+              {buckets?.length === 0 && (
+                <CreateBucketDialog
+                  onCreate={createBucket}
+                  {...createSlot("New bucket", rail)}
+                />
+              )}
+              {buckets?.map((b) => (
+                <NavItem key={b.id} to="/buckets/$bucket" params={{ bucket: b.name }} label={b.name} icon={<ArchiveIcon />} rail={rail} onNavigate={onNavigate} />
+              ))}
+            </NavGroup>
+          )}
           {instance.length > 0 && (
             <NavGroup label="Instance">
               {instance.map(({ show: _, ...item }) => (
@@ -202,6 +222,24 @@ function NavGroup({ label, to, onNavigate, children }: { label: string; to?: Lin
   )
 }
 
+const NAV_ITEM =
+  "flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:duration-0 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-faint"
+
+// The first item of an empty group: a quiet button that opens the create dialog.
+function createSlot(label: string, rail: boolean) {
+  return {
+    triggerClassName: cn(
+      NAV_ITEM,
+      "w-full cursor-default text-left text-muted-foreground data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground [&>span]:truncate sidebar-collapsed:[&>span]:sr-only",
+    ),
+    wrapTrigger: (trigger: ReactElement<Record<string, unknown>>) => (
+      <Tooltip content={label} side="right" disabled={!rail}>
+        {trigger}
+      </Tooltip>
+    ),
+  }
+}
+
 function NavItem({ to, params, label, icon, exact, rail, onNavigate }: NavLink & { rail: boolean; onNavigate?: () => void }) {
   return (
     <Tooltip content={label} side="right" disabled={!rail}>
@@ -210,7 +248,7 @@ function NavItem({ to, params, label, icon, exact, rail, onNavigate }: NavLink &
         params={params as never}
         onClick={onNavigate}
         activeOptions={{ exact, includeSearch: false }}
-        className="flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-[13px] text-sidebar-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:duration-0 data-[status=active]:bg-sidebar-accent data-[status=active]:font-[510] data-[status=active]:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-faint data-[status=active]:[&_svg]:text-foreground"
+        className={cn(NAV_ITEM, "text-sidebar-foreground data-[status=active]:bg-sidebar-accent data-[status=active]:font-[510] data-[status=active]:text-sidebar-accent-foreground data-[status=active]:[&_svg]:text-foreground")}
       >
         {icon}
         <span className="truncate sidebar-collapsed:sr-only">{label}</span>
