@@ -10,6 +10,7 @@ The dashboard reads these environment variables at start. The engine's settings 
 | Variable | Default | What it does |
 |---|---|---|
 | `LUMBUNG_DASHBOARD_URL` | `http://localhost:4871` | The address people open, without `/app`. Sign-in cookies, passkeys and the origin check bind to it, so set it to the public address behind a proxy. |
+| `LUMBUNG_DASHBOARD_EXTRA_ORIGINS` | none | Comma-separated origins the dashboard also accepts sign-ins from, like `http://127.0.0.1:4806,http://localhost:4806` to reach it on the server when the public address is down. A request is matched to an origin by its `Host` header, and each origin gets its own sign-in cookie and origin check. Password sign-in works on them. Passkeys only work on `LUMBUNG_DASHBOARD_URL`. |
 | `LUMBUNG_ENGINE_URL` | `http://127.0.0.1:4870` | Where the dashboard reaches the engine's REST API. Under Docker Compose, `http://engine:4870`. |
 | `LUMBUNG_PUBLIC_ENGINE_URL` | none | The engine address shown in connect snippets. When unset, the dashboard's own address, which fits a proxy that serves both under one name. |
 | `LUMBUNG_SERVICE_TOKEN` | none | The engine's service token. When unset, it's read from `LUMBUNG_SERVICE_TOKEN_FILE`. |

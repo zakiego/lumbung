@@ -2,7 +2,7 @@
 import { createServerFn } from "@tanstack/react-start"
 import { getRequest } from "@tanstack/react-start/server"
 import { z } from "zod"
-import { authHeaders, getAuth } from "@/server/auth"
+import { authHeaders, getAuth, passkeysAvailable } from "@/server/auth"
 import { config, engineToken } from "@/server/config"
 import { requireSameOrigin, getViewer } from "@/server/session"
 import { UserError, acceptInvite as accept, createOwner, findInvite, sameSecret, userCount } from "@/server/users"
@@ -16,13 +16,21 @@ export const getSession = createServerFn({ method: "GET" }).handler(async () => 
   const [viewer, users] = await Promise.all([getViewer(), userCount()])
   // The engine URL for connect snippets rides along, so the database overview
   // doesn't need a round trip of its own. Tokens never leave the server.
-  return { viewer, needsSetup: users === 0, engineUrl: viewer ? config().publicEngineUrl : null }
+  // Passkeys only work on the dashboard URL, not on an extra origin.
+  return {
+    viewer,
+    needsSetup: users === 0,
+    engineUrl: viewer ? config().publicEngineUrl : null,
+    passkeys: passkeysAvailable(getRequest()),
+    dashboardUrl: config().publicUrl,
+  }
 })
 
 async function signIn(emailValue: string, passwordValue: string) {
-  const auth = await getAuth()
+  const request = getRequest()
+  const auth = await getAuth(request)
   // The cookie plugin writes the session cookie onto this server function's response.
-  await auth.api.signInEmail({ body: { email: emailValue, password: passwordValue }, headers: authHeaders(getRequest()) })
+  await auth.api.signInEmail({ body: { email: emailValue, password: passwordValue }, headers: authHeaders(request) })
 }
 
 function fail(e: unknown): never {

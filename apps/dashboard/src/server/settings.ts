@@ -16,6 +16,12 @@ export const SETTINGS = [
     description: "The address people open, without `/app`. Sign-in cookies, passkeys and the origin check bind to it, so set it to the public address behind a proxy.",
   },
   {
+    name: "LUMBUNG_DASHBOARD_EXTRA_ORIGINS",
+    default: "",
+    description:
+      "Comma-separated origins the dashboard also accepts sign-ins from, like `http://127.0.0.1:4806,http://localhost:4806` to reach it on the server when the public address is down. A request is matched to an origin by its `Host` header, and each origin gets its own sign-in cookie and origin check. Password sign-in works on them. Passkeys only work on `LUMBUNG_DASHBOARD_URL`.",
+  },
+  {
     name: "LUMBUNG_ENGINE_URL",
     default: "http://127.0.0.1:4870",
     description: "Where the dashboard reaches the engine's REST API. Under Docker Compose, `http://engine:4870`.",

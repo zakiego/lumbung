@@ -36,5 +36,7 @@ services:
     environment:
       <<: *proxy
       LUMBUNG_DASHBOARD_URL: https://lumbung.zakiego.com
+      # Sign in on the Mac mini itself when the tunnel or Cloudflare is down.
+      LUMBUNG_DASHBOARD_EXTRA_ORIGINS: http://127.0.0.1:4806,http://localhost:4806
       LUMBUNG_PUBLIC_ENGINE_URL: https://lumbung.zakiego.com
     logging: *logging

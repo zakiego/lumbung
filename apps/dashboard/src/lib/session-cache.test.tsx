@@ -4,8 +4,8 @@ const getSession = vi.fn()
 vi.mock("@/fns/session", () => ({ getSession: () => getSession() }))
 
 const viewer = { id: "u1", name: "Ana", email: "ana@example.com", role: "owner" as const }
-const signedIn = { viewer, needsSetup: false, engineUrl: "https://engine.example.com" }
-const signedOut = { viewer: null, needsSetup: false, engineUrl: null }
+const signedIn = { viewer, needsSetup: false, engineUrl: "https://engine.example.com", passkeys: true, dashboardUrl: "https://db.example.com" }
+const signedOut = { viewer: null, needsSetup: false, engineUrl: null, passkeys: true, dashboardUrl: "https://db.example.com" }
 
 async function freshCache() {
   vi.resetModules()
