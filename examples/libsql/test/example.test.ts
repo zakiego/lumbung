@@ -3,6 +3,10 @@
 // and rollback, and the scopes and branch they're limited to.
 import { createClient, LibsqlError, type Client } from "@libsql/client"
 import { eq } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/libsql"
+import { migrate } from "drizzle-orm/libsql/migrator"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { afterAll, beforeAll, describe, expect, test } from "vitest"
 
 import { engineBinary, startEngine, type Running } from "../../../packages/client/test/engine.ts"
@@ -198,5 +202,23 @@ describe("drizzle-orm/libsql", () => {
     ])
     expect(inserted[0]!.owner).toBe("citra")
     expect(all).toHaveLength(3)
+  })
+
+  test("migrate() applies drizzle-kit migrations, and a table rebuild keeps child rows", async () => {
+    await api("POST", "/v1/databases", { name: "library" })
+    const lib = connect(engine.url, engine.token, "library", "main")
+    const migrationsFolder = resolve(dirname(fileURLToPath(import.meta.url)), "../drizzle")
+    await migrate(drizzle(lib), { migrationsFolder })
+    // The rebuild dropped and recreated authors. With foreign keys on, that
+    // drop would have cascaded to books.
+    expect(await count(lib, "books")).toBe(1)
+    expect((await lib.execute("SELECT bio FROM authors")).rows[0]!.bio).toBe("")
+    // Running it again applies nothing.
+    await migrate(drizzle(lib), { migrationsFolder })
+    expect(await count(lib, "__drizzle_migrations")).toBe(2)
+    // Foreign keys are back on afterwards.
+    await lib.execute("DELETE FROM authors")
+    expect(await count(lib, "books")).toBe(0)
+    lib.close()
   })
 })
