@@ -272,6 +272,9 @@ func (e *Engine) swapBranchFile(ctx context.Context, tg target, staged string, r
 func (e *Engine) withExclusive(ctx context.Context, tg target, recheck func(target) error, f func(target) error) error {
 	ctx, cancel := context.WithTimeout(ctx, maintenanceTimeout)
 	defer cancel()
+	// The file is about to be replaced or removed, so an interactive
+	// transaction left open on it would only hold the gate up.
+	e.abortTxs(tg.branch.ID)
 	g := e.gates.get(tg.branch.ID)
 	if err := g.exclusive(ctx); err != nil {
 		return apierr.New(apierr.Busy, "timed out waiting for requests on the branch to finish")

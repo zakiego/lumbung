@@ -74,6 +74,7 @@ const (
 	RequestTimeout        = "request_timeout"
 	IdempotencyMismatch   = "idempotency_mismatch"
 	TokenNotFound         = "token_not_found"
+	TransactionAborted    = "transaction_aborted"
 	Busy                  = "busy"
 	Unavailable           = "unavailable"
 	Internal              = "internal"
@@ -117,6 +118,7 @@ var Codes = []CodeInfo{
 	{RequestTimeout, http.StatusRequestTimeout, "The request body took too long to arrive."},
 	{IdempotencyMismatch, http.StatusUnprocessableEntity, "This `Idempotency-Key` was already used for a different request."},
 	{TokenNotFound, http.StatusNotFound, "No live token with that id."},
+	{TransactionAborted, http.StatusConflict, "The open transaction was rolled back: SQLite ended it after an error, or it hit a limit or the transaction timeout. Send ROLLBACK, then start again. Interactive transactions only."},
 	{Busy, http.StatusServiceUnavailable, "The branch stayed locked longer than the busy timeout. Retry."},
 	{Unavailable, http.StatusServiceUnavailable, "The engine can't serve: for example meta.db is newer than this binary."},
 	{Internal, http.StatusInternalServerError, "Something failed inside the engine. The log has details."},

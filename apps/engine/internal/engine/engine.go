@@ -39,6 +39,10 @@ type Engine struct {
 
 	gates gates // per-branch maintenance gates
 
+	txMu     sync.Mutex
+	txs      map[*Tx]struct{} // open interactive transactions
+	txClosed bool             // set when closing: no new interactive transactions
+
 	trashMu sync.Mutex // serializes deleting, restoring and purging databases
 
 	usageMu  sync.Mutex
@@ -87,6 +91,7 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*Engine, er
 		pools:     map[string]*branchPool{},
 		closing:   map[string]chan struct{}{},
 		sizes:     map[string]int64{},
+		txs:       map[*Tx]struct{}{},
 		stop:      make(chan struct{}),
 		done:      make(chan struct{}),
 		freeBytes: storage.FreeBytes,
@@ -120,6 +125,8 @@ func (e *Engine) Close() error {
 func (e *Engine) close() error {
 	close(e.stop)
 	<-e.done
+	// Interactive transactions hold connections; give them back first.
+	e.abortTxs("")
 	e.poolsMu.Lock()
 	pools := e.pools
 	e.pools = map[string]*branchPool{}

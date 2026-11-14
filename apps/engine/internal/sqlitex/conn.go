@@ -47,10 +47,11 @@ type Options struct {
 // Conn is a connection for user SQL. It isn't safe for concurrent use.
 type Conn struct {
 	*sqlite3.Conn
-	vfsName  string
-	readOnly bool
-	trusted  bool
-	ignoreTx bool
+	vfsName    string
+	readOnly   bool
+	trusted    bool
+	ignoreTx   bool
+	savepoints bool
 }
 
 // ErrReadOnlyCreate is returned when a read-only connection is asked to
@@ -169,6 +170,9 @@ func (c *Conn) harden(opts Options) error {
 		if c.ignoreTx && action == sqlite3.AUTH_TRANSACTION {
 			return sqlite3.AUTH_IGNORE
 		}
+		if c.savepoints && action == sqlite3.AUTH_SAVEPOINT {
+			return sqlite3.AUTH_OK
+		}
 		return authorize(action, arg3, arg4, schema, inner)
 	})
 }
@@ -190,6 +194,11 @@ func (c *Conn) pragmaText(sql string) (string, error) {
 // silent no-ops instead of errors, for running a SQL dump inside a
 // transaction the engine opened. SAVEPOINT stays denied.
 func (c *Conn) IgnoreTransactions(on bool) { c.ignoreTx = on }
+
+// AllowSavepoints lets user SQL run SAVEPOINT, RELEASE and ROLLBACK TO, for
+// an interactive transaction the engine opened and keeps open. Inside it a
+// savepoint can't end the engine's transaction. Reset turns it off.
+func (c *Conn) AllowSavepoints(on bool) { c.savepoints = on }
 
 // ReadOnly reports whether the connection was opened read-only.
 func (c *Conn) ReadOnly() bool { return c.readOnly }
@@ -221,6 +230,7 @@ var ErrDirty = errors.New("sqlitex: connection holds temp objects")
 // It fails with ErrDirty if any temp object exists, as a backstop to the
 // authorizer's temp rules.
 func (c *Conn) Reset() error {
+	c.savepoints = false
 	c.SetInterrupt(context.Background())
 	if !c.GetAutocommit() {
 		if err := c.ExecTrusted("ROLLBACK"); err != nil {

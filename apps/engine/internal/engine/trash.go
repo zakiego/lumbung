@@ -65,6 +65,7 @@ func (e *Engine) DeleteDatabase(ctx context.Context, dbRef string) (meta.Databas
 		}
 	}()
 	for _, b := range branches {
+		e.abortTxs(b.ID)
 		g := e.gates.get(b.ID)
 		if err := g.exclusive(ctx2); err != nil {
 			return meta.Database{}, apierr.New(apierr.Busy, "timed out waiting for requests on the database to finish")
