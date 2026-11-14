@@ -14,8 +14,9 @@ import { deleteObject, getBucketPage } from "@/fns/buckets"
 import { formatBytes, number } from "@/lib/format"
 import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
+import { useWs } from "@/components/app/workspace"
 
-export const Route = createFileRoute("/_app/buckets/$bucket/")({
+export const Route = createFileRoute("/_app/w/$ws/buckets/$bucket/")({
   // A prefix always ends at a folder: "a/b" means the folder "a/".
   validateSearch: z.object({
     prefix: z
@@ -30,7 +31,7 @@ export const Route = createFileRoute("/_app/buckets/$bucket/")({
   loaderDeps: ({ search }) => ({ prefix: search.prefix ?? "" }),
   // A new folder is a new page: no state, or a late "Load more", carries over.
   remountDeps: ({ search }) => ({ prefix: search.prefix ?? "" }),
-  loader: ({ params, deps }) => getBucketPage({ data: { bucket: params.bucket, prefix: deps.prefix } }),
+  loader: ({ params, deps }) => getBucketPage({ data: { ws: params.ws, bucket: params.bucket, prefix: deps.prefix } }),
   head: ({ params }) => ({ meta: [{ title: pageTitle(params.bucket, "Buckets") }] }),
   component: BucketPage,
   pendingComponent: () => (
@@ -39,12 +40,13 @@ export const Route = createFileRoute("/_app/buckets/$bucket/")({
     </Frame>
   ),
   errorComponent: ({ error }) => {
+    const ws = useWs()
     const missing = !!(error as { code?: string }).code?.endsWith("not_found") || (error instanceof Error && /no bucket/i.test(error.message))
     return (
       <Frame>
         {missing ? (
           <Empty icon={<ArchiveIcon />} title="This bucket doesn't exist">
-            <Link to="/buckets" className={buttonVariants({ variant: "secondary" })}>
+            <Link to="/w/$ws/buckets" params={{ ws }} className={buttonVariants({ variant: "secondary" })}>
               All buckets
             </Link>
           </Empty>
@@ -67,6 +69,7 @@ function Frame({ children, actions }: { children: React.ReactNode; actions?: Rea
 }
 
 function BucketPage() {
+  const ws = useWs()
   const page = Route.useLoaderData()
   const { viewer } = Route.useRouteContext()
   const search = Route.useSearch()
@@ -94,7 +97,7 @@ function BucketPage() {
   async function loadMore() {
     setLoading(true)
     try {
-      const next = await getBucketPage({ data: { bucket: name, prefix, cursor: more.cursor } })
+      const next = await getBucketPage({ data: { ws, bucket: name, prefix, cursor: more.cursor } })
       setMore((m) => ({ objects: [...m.objects, ...next.objects], prefixes: [...m.prefixes, ...next.prefixes], cursor: next.nextCursor }))
     } catch (e) {
       toast.error({ title: "Couldn't load more", description: errorText(e) })
@@ -105,7 +108,7 @@ function BucketPage() {
 
   // A delete drops the row in place, so pages loaded with "Load more" stay.
   async function remove(key: string) {
-    await deleteObject({ data: { bucket: name, key } })
+    await deleteObject({ data: { ws, bucket: name, key } })
     toast.success(`Deleted ${key.slice(prefix.length)}`)
     setRemoved((r) => new Set(r).add(key))
   }

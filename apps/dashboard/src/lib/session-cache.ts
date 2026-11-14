@@ -19,7 +19,8 @@ function fetchSession(): Promise<Session> {
   const started = generation
   const request = getSession()
     .then((session) => {
-      if (started === generation) cached = session.viewer ? { at: Date.now(), session } : undefined
+      // A session read while the engine was down has no workspaces: don't keep it.
+      if (started === generation) cached = session.viewer && session.workspaces ? { at: Date.now(), session } : undefined
       return session
     })
     .finally(() => {
@@ -44,7 +45,7 @@ export async function loadSession(): Promise<Session> {
 export function primeSession(session: Session) {
   if (typeof window === "undefined" || primed) return
   primed = true
-  if (session.viewer && !cached) cached = { at: Date.now(), session }
+  if (session.viewer && session.workspaces && !cached) cached = { at: Date.now(), session }
 }
 
 export function forgetSession() {

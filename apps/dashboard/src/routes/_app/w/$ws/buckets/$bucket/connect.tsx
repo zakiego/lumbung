@@ -10,9 +10,10 @@ import { getBucketConnect } from "@/fns/buckets"
 import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
 import { S3_REGION, bucketSnippets, s3Endpoint } from "@/lib/snippets"
+import { useWs } from "@/components/app/workspace"
 
-export const Route = createFileRoute("/_app/buckets/$bucket/connect")({
-  loader: ({ params }) => getBucketConnect({ data: { bucket: params.bucket } }),
+export const Route = createFileRoute("/_app/w/$ws/buckets/$bucket/connect")({
+  loader: ({ params }) => getBucketConnect({ data: { ws: params.ws, bucket: params.bucket } }),
   head: ({ params }) => ({ meta: [{ title: pageTitle("Connect", params.bucket) }] }),
   component: ConnectPage,
   pendingComponent: () => (
@@ -21,12 +22,13 @@ export const Route = createFileRoute("/_app/buckets/$bucket/connect")({
     </Frame>
   ),
   errorComponent: ({ error }) => {
+    const ws = useWs()
     const missing = !!(error as { code?: string }).code?.endsWith("not_found") || (error instanceof Error && /no bucket/i.test(error.message))
     return (
       <Frame>
         {missing ? (
           <Empty icon={<ArchiveIcon />} title="This bucket doesn't exist">
-            <Link to="/buckets" className={buttonVariants({ variant: "secondary" })}>
+            <Link to="/w/$ws/buckets" params={{ ws }} className={buttonVariants({ variant: "secondary" })}>
               All buckets
             </Link>
           </Empty>
@@ -48,6 +50,7 @@ function Frame({ children }: { children: React.ReactNode }) {
 }
 
 function ConnectPage() {
+  const ws = useWs()
   const { bucket, engineUrl: url } = Route.useLoaderData()
   const { viewer } = Route.useRouteContext()
   const name = bucket.name
@@ -70,7 +73,7 @@ function ConnectPage() {
         </SettingsSection>
         <SettingsSection title="Access key">
           {can(viewer.role, "admin") ? (
-            <Link to="/tokens" className={buttonVariants({ variant: "secondary", className: "self-start" })}>
+            <Link to="/w/$ws/tokens" params={{ ws }} className={buttonVariants({ variant: "secondary", className: "self-start" })}>
               <KeyRoundIcon aria-hidden="true" />
               Create access key
             </Link>

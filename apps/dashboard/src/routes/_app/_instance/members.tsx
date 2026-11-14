@@ -2,14 +2,14 @@ import { createFileRoute, redirect, useRouter } from "@tanstack/react-router"
 import { InviteDialog, InviteTable, MemberTable } from "@/components/app/members"
 import { PageBody, PageHeader, PageTitle } from "@/components/app/shell"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
-import { toast, withToast } from "@/components/ui/toast"
-import { cancelInvite, changeRole, getMembers, inviteMember, removeUser } from "@/fns/admin"
+import { toast } from "@/components/ui/toast"
+import { cancelInvite, changeAccess, getMembers, inviteMember, removeUser } from "@/fns/admin"
 import { pageTitle } from "@/lib/paths"
-import { ROLE_LABEL, can } from "@/lib/roles"
+import type { MemberAccess } from "@/server/users"
 
-export const Route = createFileRoute("/_app/members")({
+export const Route = createFileRoute("/_app/_instance/members")({
   beforeLoad: ({ context }) => {
-    if (!can(context.viewer.role, "admin")) throw redirect({ to: "/" })
+    if (!context.viewer.owner) throw redirect({ to: "/" })
   },
   loader: () => getMembers(),
   head: () => ({ meta: [{ title: pageTitle("Members") }] }),
@@ -38,32 +38,32 @@ function Frame({ children, actions }: { children: React.ReactNode; actions?: Rea
 }
 
 function MembersPage() {
-  const { members, invites } = Route.useLoaderData()
-  const { viewer } = Route.useRouteContext()
+  const { members, invites, workspaces, deleted } = Route.useLoaderData()
+  const revokedNote = (n: number) => (n > 0 ? `, and revoked ${n} ${n === 1 ? "token" : "tokens"} they made` : "")
+  const { viewer, workspace } = Route.useRouteContext()
   const router = useRouter()
 
-  async function invite(email: string, role: (typeof members)[number]["role"]) {
-    const { url } = await inviteMember({ data: { email, role } })
+  async function invite(email: string, access: MemberAccess) {
+    const { url } = await inviteMember({ data: { email, access } })
     return url
   }
 
   return (
-    <Frame actions={<InviteDialog onInvite={invite} onDone={() => void router.invalidate()} />}>
+    <Frame actions={<InviteDialog workspaces={workspaces} current={workspace?.id} onInvite={invite} onDone={() => void router.invalidate()} />}>
       <div className="flex flex-col gap-10">
         <MemberTable
           members={members}
           me={viewer.id}
-          onRole={async (m, role) => {
-            await withToast(changeRole({ data: { id: m.id, role } }), {
-              loading: "Saving…",
-              success: `${m.name || m.email} is ${ROLE_LABEL[role]} now`,
-              error: "Couldn't change the role",
-            })
+          workspaces={workspaces}
+          deleted={deleted}
+          onAccess={async (m, access) => {
+            const { revoked } = await changeAccess({ data: { id: m.id, access } })
+            toast.success(`Changed access for ${m.name || m.email}${revokedNote(revoked)}`)
             await router.invalidate()
           }}
           onRemove={async (m) => {
-            await removeUser({ data: { id: m.id } })
-            toast.success(`Removed ${m.name || m.email}`)
+            const { revoked } = await removeUser({ data: { id: m.id } })
+            toast.success(`Removed ${m.name || m.email}${revokedNote(revoked)}`)
             await router.invalidate()
           }}
         />
@@ -73,7 +73,10 @@ function MembersPage() {
           </h2>
           <InviteTable
             invites={invites}
-            onResend={(i) => invite(i.email, i.role)}
+            workspaces={workspaces}
+            deleted={deleted}
+            // A workspace deleted since the invite was made is left out of the new one.
+            onResend={(i) => invite(i.email, i.owner ? { owner: true } : { owner: false, grants: i.grants.filter((g) => workspaces.some((w) => w.id === g.workspace)) })}
             onChanged={() => void router.invalidate()}
             onCancel={async (i) => {
               await cancelInvite({ data: { id: i.id } })

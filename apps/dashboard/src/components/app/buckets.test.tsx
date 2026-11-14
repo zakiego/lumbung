@@ -1,11 +1,12 @@
 import type { BucketOut, ObjectOut } from "@lumbung/client"
-import { RouterProvider, createMemoryHistory, createRootRoute, createRouter } from "@tanstack/react-router"
-import { render as rtlRender, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createAgent } from "@ui-sdk/react/agent"
 import { type ReactNode, useState } from "react"
 import { expect, test, vi } from "vitest"
 import { publicObjectURL } from "@/lib/objects"
+import type { WorkspaceInfo } from "@/lib/workspace"
+import { renderWithRouter } from "@/test/router"
 import {
   BucketTable,
   DEFAULT_OBJECT_SORT,
@@ -25,10 +26,11 @@ import {
 
 const noop = async () => {}
 
-// Links need a router; render inside a one-route memory router.
-async function render(ui: ReactNode) {
-  const router = createRouter({ routeTree: createRootRoute({ component: () => <>{ui}</> }), history: createMemoryHistory({ initialEntries: ["/"] }) })
-  const out = rtlRender(<RouterProvider router={router} />)
+const AGENTS: WorkspaceInfo = { id: "ws_bbbbbbbbbbbbbbbbbbbb", name: "agents", default: false, role: "member" }
+
+// Links need a router and the workspace on screen.
+async function render(ui: ReactNode, workspace?: WorkspaceInfo) {
+  const out = await renderWithRouter(ui, workspace)
   await screen.findAllByRole("table").catch(() => screen.findByText(/No objects yet|This folder is empty/))
   return out
 }
@@ -60,6 +62,7 @@ test("bucket table: long names, public badge, many rows", async () => {
   const long = "a" + "-very-long-bucket-name".repeat(2) + "-x"
   await render(<BucketTable buckets={Array.from({ length: 300 }, (_, i) => b(i === 0 ? long : `bucket-${i}`, i))} />)
   readable(long)
+  expect(screen.getByRole("link", { name: long }).getAttribute("href")).toBe(`/w/default/buckets/${long}`)
   expect(screen.getAllByText("Public read").length).toBe(150)
   expect(screen.getAllByText("1,234,567").length).toBe(300)
 })
@@ -74,7 +77,27 @@ test("object table: folders first, names relative to the prefix, long and odd ke
   expect(screen.getByText("../escape")).toBeTruthy()
   expect(screen.getAllByRole("button", { name: /^Delete reports\// })).toHaveLength(5)
   const link = screen.getByRole("link", { name: "Download reports/ünï" }) as HTMLAnchorElement
-  expect(link.getAttribute("href")).toBe("/app/api/objects?bucket=docs&key=reports%2F%C3%BCn%C3%AF")
+  expect(link.getAttribute("href")).toBe("/app/api/objects?ws=default&bucket=docs&key=reports%2F%C3%BCn%C3%AF")
+  const folder = screen.getByRole("link", { name: "2026/" }) as HTMLAnchorElement
+  expect(folder.getAttribute("href")).toBe("/w/default/buckets/docs?prefix=reports%2F2026%2F")
+})
+
+test("object table: downloads, folders and settings name the workspace on screen", async () => {
+  const access = { publicRead: false, s3Endpoint: "https://h/v1/s3", canAdmin: true }
+  await render(<ObjectTable bucket="docs" prefix="" objects={[obj("a.pdf")]} prefixes={["2026/"]} canWrite onDelete={noop} access={access} />, AGENTS)
+  expect(screen.getByRole("link", { name: "Download a.pdf" }).getAttribute("href")).toBe("/app/api/objects?ws=agents&bucket=docs&key=a.pdf")
+  expect(screen.getByRole("link", { name: "2026/" }).getAttribute("href")).toBe("/w/agents/buckets/docs?prefix=2026%2F")
+  fireEvent.click(screen.getByRole("button", { name: "Details of a.pdf" }))
+  const sheet = await screen.findByRole("dialog", { name: "a.pdf" })
+  expect(within(sheet).getByRole("link", { name: "Download" }).getAttribute("href")).toBe("/app/api/objects?ws=agents&bucket=docs&key=a.pdf")
+  expect(within(sheet).getByRole("link", { name: "Bucket settings" }).getAttribute("href")).toBe("/w/agents/buckets/docs/settings")
+})
+
+test("object URL: the workspace, the bucket and the key, each encoded", () => {
+  expect(objectURL("agents", "docs", "a b/c&d=e?.txt")).toBe("/app/api/objects?ws=agents&bucket=docs&key=a+b%2Fc%26d%3De%3F.txt")
+  const q = new URL(objectURL("ws_bbbbbbbbbbbbbbbbbbbb", "docs", "x&ws=default"), "http://h").searchParams
+  expect(q.getAll("ws")).toEqual(["ws_bbbbbbbbbbbbbbbbbbbb"])
+  expect(q.get("key")).toBe("x&ws=default")
 })
 
 test("object table: read-only sees no delete, empty states, 1000 rows", async () => {
@@ -125,17 +148,22 @@ test("uploadFile: small files in one request, large ones in parts, aborted on fa
       }
       return ok({ key: "k", etag: "e" })
     }) as typeof fetch
-  await uploadFile("b", "", new File(["hi"], "small.txt"), fake())
+  const inWorkspace = () => calls.map((c) => new URL(c.url, "http://h").searchParams.get("ws"))
+  await uploadFile("agents", "b", "", new File(["hi"], "small.txt"), fake())
   expect(calls.map((c) => c.method)).toEqual(["PUT"])
+  expect(calls[0]!.url).toBe("/app/api/objects?ws=agents&bucket=b&key=small.txt")
   calls.length = 0
   const big = new File([new Uint8Array(PART_BYTES * 2 + 5)], "big.bin")
-  await uploadFile("b", "dir/", big, fake())
+  await uploadFile("agents", "b", "dir/", big, fake())
   expect(calls.map((c) => c.method)).toEqual(["POST", "PUT", "PUT", "PUT", "POST"])
   expect(calls.slice(1, 4).map((c) => c.size)).toEqual([PART_BYTES, PART_BYTES, 5])
   expect(calls[0]!.url).toContain("key=dir%2Fbig.bin")
+  // Every request of the upload names the workspace, the abort too.
+  expect(inWorkspace()).toEqual(["agents", "agents", "agents", "agents", "agents"])
   calls.length = 0
-  await expect(uploadFile("b", "", big, fake(2))).rejects.toThrow("disk full")
+  await expect(uploadFile("agents", "b", "", big, fake(2))).rejects.toThrow("disk full")
   expect(calls.at(-1)!.method).toBe("DELETE")
+  expect(inWorkspace().every((ws) => ws === "agents")).toBe(true)
 })
 
 test("object details: a row opens its details, with links only on a public bucket", async () => {
@@ -155,7 +183,7 @@ test("object details: a row opens its details, with links only on a public bucke
   expect(within(sheet).getByText("https://db.example.com/v1/s3/docs/trips/%F0%9F%8D%9A%20rice.png")).toBeTruthy()
   expect(within(sheet).getByText("max-age=3600")).toBeTruthy()
   expect(within(sheet).getByText("x".repeat(300))).toBeTruthy()
-  expect(within(sheet).getByRole("link", { name: "Download" }).getAttribute("href")).toBe(objectURL("docs", photo.key))
+  expect(within(sheet).getByRole("link", { name: "Download" }).getAttribute("href")).toBe(objectURL("default", "docs", photo.key))
   expect(within(sheet).getByRole("button", { name: "Delete" })).toBeTruthy()
   unmount()
 

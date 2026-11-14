@@ -4,6 +4,7 @@ import { ClockIcon, LockIcon } from "lucide-react"
 import { Badge } from "@/components/ui/surface"
 import { formatBytes, formatDate, timeLeft } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { useWs } from "./workspace"
 
 type Node = { branch: BranchOut; depth: number }
 
@@ -35,6 +36,7 @@ export function branchTree(branches: BranchOut[]): Node[] {
 }
 
 export function BranchMap({ db, branches, current, defaultBranch }: { db: string; branches: BranchOut[]; current: string; defaultBranch: string }) {
+  const ws = useWs()
   const nodes = branchTree(branches)
   return (
     <div className="relative overflow-hidden rounded-xl border bg-card">
@@ -53,8 +55,8 @@ export function BranchMap({ db, branches, current, defaultBranch }: { db: string
               />
             )}
             <Link
-              to="/db/$db"
-              params={{ db }}
+              to="/w/$ws/db/$db"
+              params={{ ws, db }}
               search={{ branch: b.name === defaultBranch ? undefined : b.name }}
               aria-current={b.name === current ? "true" : undefined}
               className={cn(

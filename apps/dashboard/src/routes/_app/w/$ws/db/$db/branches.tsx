@@ -22,6 +22,7 @@ import { toast, withToast } from "@/components/ui/toast"
 import { createBranch, deleteBranch, diffBranch, promoteBranch, resetBranch, updateBranch } from "@/fns/databases"
 import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
+import { useWs } from "@/components/app/workspace"
 
 type Settled<T> = { ok: true; value: T } | { ok: false; error: string }
 
@@ -42,7 +43,7 @@ function diffTarget(branches: BranchOut[], branch: string, against: string | und
   return others.find((b) => b.default)?.name ?? others[0]?.name
 }
 
-export const Route = createFileRoute("/_app/db/$db/branches")({
+export const Route = createFileRoute("/_app/w/$ws/db/$db/branches")({
   validateSearch: z.object({ against: z.string().min(1).max(100).optional() }),
   loaderDeps: ({ search }) => ({ branch: search.branch, against: search.against }),
   loader: async ({ params, deps, parentMatchPromise }) => {
@@ -51,13 +52,14 @@ export const Route = createFileRoute("/_app/db/$db/branches")({
     const fallback = parent.loaderData?.database.default_branch ?? "main"
     const branch = deps.branch && branches.some((b) => b.name === deps.branch) ? deps.branch : fallback
     const against = diffTarget(branches, branch, deps.against)
-    return { against, diff: against ? settle(diffBranch({ data: { db: params.db, branch, against } })) : null }
+    return { against, diff: against ? settle(diffBranch({ data: { ws: params.ws, db: params.db, branch, against } })) : null }
   },
   head: ({ params }) => ({ meta: [{ title: pageTitle("Branches", params.db) }] }),
   component: BranchesPage,
 })
 
 function BranchesPage() {
+  const ws = useWs()
   const { database, branches, branch } = useDb()
   const { against, diff } = Route.useLoaderData()
   const { viewer } = Route.useRouteContext()
@@ -70,17 +72,17 @@ function BranchesPage() {
 
   async function go(next: string | undefined) {
     await router.invalidate()
-    await navigate({ to: "/db/$db/branches", params: { db }, search: { branch: next && next !== database.default_branch ? next : undefined } })
+    await navigate({ to: "/w/$ws/db/$db/branches", params: { ws, db }, search: { branch: next && next !== database.default_branch ? next : undefined } })
   }
 
   async function create(b: { name: string; from: string; expiresInDays?: number }) {
-    await createBranch({ data: { db, ...b } })
+    await createBranch({ data: { ws, db, ...b } })
     toast.success(`Created ${b.name}`)
     await go(b.name)
   }
 
   async function update(patch: { name?: string; protected?: boolean; expiresInDays?: number }, success: string) {
-    await withToast(updateBranch({ data: { db, branch, ...patch } }), { loading: "Saving…", success, error: "Couldn't save it" })
+    await withToast(updateBranch({ data: { ws, db, branch, ...patch } }), { loading: "Saving…", success, error: "Couldn't save it" })
     await go(patch.name ?? branch)
   }
 
@@ -115,7 +117,7 @@ function BranchesPage() {
                   <PromoteBranch
                     branch={branch}
                     onPromote={async () => {
-                      await promoteBranch({ data: { db, branch } })
+                      await promoteBranch({ data: { ws, db, branch } })
                       toast.success(`${branch} is the default now`)
                       await go(branch)
                     }}
@@ -126,7 +128,7 @@ function BranchesPage() {
                     branch={branch}
                     parent={parent}
                     onReset={async () => {
-                      await resetBranch({ data: { db, branch } })
+                      await resetBranch({ data: { ws, db, branch } })
                       toast.success(`Reset ${branch}`)
                       await go(branch)
                     }}
@@ -137,7 +139,7 @@ function BranchesPage() {
                     <DeleteBranch
                       branch={branch}
                       onDelete={async () => {
-                        await deleteBranch({ data: { db, branch } })
+                        await deleteBranch({ data: { ws, db, branch } })
                         toast.success(`Deleted ${branch}`)
                         await go(undefined)
                       }}

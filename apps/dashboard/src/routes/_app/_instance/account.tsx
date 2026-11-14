@@ -12,7 +12,7 @@ import { authClient, unwrap } from "@/lib/auth-client"
 import { formatDate } from "@/lib/format"
 import { pageTitle } from "@/lib/paths"
 
-export const Route = createFileRoute("/_app/account")({
+export const Route = createFileRoute("/_app/_instance/account")({
   head: () => ({ meta: [{ title: pageTitle("Account") }] }),
   component: AccountPage,
 })

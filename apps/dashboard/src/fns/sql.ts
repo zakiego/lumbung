@@ -4,14 +4,16 @@ import { createServerFn } from "@tanstack/react-start"
 import { z } from "zod"
 import { type Cell, encodeCell } from "@/lib/cells"
 import { can } from "@/lib/roles"
-import { call, engineFor } from "@/server/engine"
-import { requireCan } from "@/server/session"
+import { call } from "@/server/engine"
+import { requireIn } from "@/server/session"
 
 /** Rows sent to the browser per statement. The engine's own cap still applies before this. */
 export const ROW_CAP = 1000
 const MAX_SQL = 1024 * 1024
 
 const ref = z.string().min(1).max(100)
+// The workspace a call acts in, by name or id. Every call names one.
+const ws = z.string().min(1).max(100)
 
 export interface StatementResult {
   columns: string[]
@@ -41,11 +43,11 @@ function shape(r: Result): StatementResult {
 }
 
 export const runSql = createServerFn({ method: "POST" })
-  .validator(z.object({ db: ref, branch: ref, statements: z.array(z.string().min(1).max(MAX_SQL)).min(1).max(200) }))
+  .validator(z.object({ ws, db: ref, branch: ref, statements: z.array(z.string().min(1).max(MAX_SQL)).min(1).max(200) }))
   .handler(async ({ data }): Promise<RunResult> => {
-    const viewer = await requireCan("read")
-    const readOnly = !can(viewer.role, "write")
-    const client = engineFor(viewer).database(data.db, data.branch)
+    const access = await requireIn(data.ws, "read")
+    const readOnly = !can(access.role, "write")
+    const client = access.engine.database(data.db, data.branch)
     const started = performance.now()
     const results =
       data.statements.length === 1
@@ -61,10 +63,10 @@ export interface PlanStep {
 }
 
 export const explainSql = createServerFn({ method: "POST" })
-  .validator(z.object({ db: ref, branch: ref, sql: z.string().min(1).max(MAX_SQL) }))
+  .validator(z.object({ ws, db: ref, branch: ref, sql: z.string().min(1).max(MAX_SQL) }))
   .handler(async ({ data }): Promise<PlanStep[]> => {
-    const viewer = await requireCan("read")
-    const client = engineFor(viewer).database(data.db, data.branch)
+    const access = await requireIn(data.ws, "read")
+    const client = access.engine.database(data.db, data.branch)
     const sql = data.sql.trim().replace(/;+\s*$/, "")
     const r = await call(() => client.query(`EXPLAIN QUERY PLAN ${sql}`, undefined, { readOnly: true }))
     const at = (name: string) => r.columns.indexOf(name)

@@ -9,6 +9,7 @@ import { objectURL, publicObjectURL } from "@/lib/objects"
 import { cn } from "@/lib/utils"
 import { CopyButton } from "./connect"
 import { Confirm } from "./form-dialog"
+import { useWs } from "./workspace"
 
 export type ObjectAccess = { publicRead: boolean; s3Endpoint: string; canAdmin: boolean }
 
@@ -44,6 +45,7 @@ export function ObjectDetails({
   canWrite: boolean
   onDelete: (key: string) => Promise<unknown>
 }) {
+  const ws = useWs()
   const side = useWide() ? "end" : "bottom"
   return (
     <Drawer controller={controller} side={side}>
@@ -66,7 +68,7 @@ export function ObjectDetails({
               </div>
               <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-5 pb-5">
                 {PREVIEW_TYPES.has(o.content_type) && o.size <= PREVIEW_MAX_BYTES && (
-                  <img src={objectURL(bucket, o.key)} alt="" decoding="async" className="h-40 w-full shrink-0 rounded-lg bg-code object-contain outline outline-1 -outline-offset-1 outline-white/10 sm:h-60" />
+                  <img src={objectURL(ws, bucket, o.key)} alt="" decoding="async" className="h-40 w-full shrink-0 rounded-lg bg-code object-contain outline outline-1 -outline-offset-1 outline-white/10 sm:h-60" />
                 )}
                 <PublicLink bucket={bucket} objectKey={o.key} access={access} />
                 <Rows>
@@ -80,7 +82,7 @@ export function ObjectDetails({
                 <Group title="Metadata" entries={o.metadata} />
               </div>
               <div className="flex gap-2 border-t px-5 py-4 pb-[max(16px,env(safe-area-inset-bottom))]">
-                <a href={objectURL(bucket, o.key)} download className={buttonVariants({ variant: "secondary", className: "flex-1" })}>
+                <a href={objectURL(ws, bucket, o.key)} download className={buttonVariants({ variant: "secondary", className: "flex-1" })}>
                   <DownloadIcon aria-hidden="true" />
                   Download
                 </a>
@@ -113,6 +115,7 @@ export function ObjectDetails({
 }
 
 function PublicLink({ bucket, objectKey, access }: { bucket: string; objectKey: string; access?: ObjectAccess }) {
+  const ws = useWs()
   if (!access) return null
   const url = access.publicRead ? publicObjectURL(access.s3Endpoint, bucket, objectKey) : null
   return (
@@ -132,7 +135,7 @@ function PublicLink({ bucket, objectKey, access }: { bucket: string; objectKey: 
           {!access.publicRead && access.canAdmin && (
             <>
               {" "}
-              <Link to="/buckets/$bucket/settings" params={{ bucket }} className="text-foreground underline decoration-faint underline-offset-2 hover:decoration-foreground">
+              <Link to="/w/$ws/buckets/$bucket/settings" params={{ ws, bucket }} className="text-foreground underline decoration-faint underline-offset-2 hover:decoration-foreground">
                 Bucket settings
               </Link>
             </>

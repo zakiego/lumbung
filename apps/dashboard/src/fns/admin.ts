@@ -1,15 +1,20 @@
-// Snapshots, tokens, members, invites, audit and instance info.
+// Snapshots, tokens and the audit log of a workspace, and what belongs to the
+// instance: members, invites and its settings.
 import type { AuditOut, ScheduleOut, SnapshotOut, TokenOut } from "@lumbung/client"
 import { createServerFn } from "@tanstack/react-start"
 import { z } from "zod"
 import { APP_BASE } from "@/lib/paths"
-import { ROLES } from "@/lib/roles"
+import { WORKSPACE_ROLES } from "@/lib/roles"
+import { allWorkspaces } from "@/server/access"
 import { config } from "@/server/config"
 import { allPages, call, engineFor } from "@/server/engine"
-import { requireCan } from "@/server/session"
-import { UserError, createInvite, listInvites, listMembers, removeMember, revokeInvite, setRole } from "@/server/users"
+import { forgetMinted, recordMinted, revokeOutlived } from "@/server/minted"
+import { requireIn, requireOwner } from "@/server/session"
+import { UserError, createInvite, listInvites, listMembers, removeMember, revokeInvite, setAccess } from "@/server/users"
 
 const ref = z.string().min(1).max(100)
+// The workspace a call acts in, by name or id. Every call names one.
+const ws = z.string().min(1).max(100)
 const branchName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "Use lowercase letters, digits and dashes, up to 63 characters.")
 
 function userError<T>(fn: () => Promise<T>): Promise<T> {
@@ -20,10 +25,10 @@ function userError<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export const listSnapshots = createServerFn({ method: "GET" })
-  .validator(z.object({ db: ref, branch: ref, cursor: z.string().max(500).optional() }))
+  .validator(z.object({ ws, db: ref, branch: ref, cursor: z.string().max(500).optional() }))
   .handler(async ({ data }): Promise<{ data: SnapshotOut[]; nextCursor: string; schedule: ScheduleOut | null }> => {
-    const viewer = await requireCan("read")
-    const e = engineFor(viewer)
+    const access = await requireIn(data.ws, "read")
+    const e = access.engine
     return call(async () => {
       const [page, schedule] = await Promise.all([
         e.snapshots.list(data.db, data.branch, { limit: 50, cursor: data.cursor }),
@@ -37,30 +42,31 @@ export const listSnapshots = createServerFn({ method: "GET" })
   })
 
 export const createSnapshot = createServerFn({ method: "POST" })
-  .validator(z.object({ db: ref, branch: ref, label: z.string().trim().max(200).optional() }))
+  .validator(z.object({ ws, db: ref, branch: ref, label: z.string().trim().max(200).optional() }))
   .handler(async ({ data }) => {
-    const viewer = await requireCan("write")
-    return call(() => engineFor(viewer).snapshots.create(data.db, data.branch, { label: data.label || undefined }))
+    const access = await requireIn(data.ws, "write")
+    return call(() => access.engine.snapshots.create(data.db, data.branch, { label: data.label || undefined }))
   })
 
 export const restoreSnapshot = createServerFn({ method: "POST" })
-  .validator(z.object({ db: ref, snapshot: ref, name: branchName }))
+  .validator(z.object({ ws, db: ref, snapshot: ref, name: branchName }))
   .handler(async ({ data }) => {
-    const viewer = await requireCan("write")
-    return call(() => engineFor(viewer).snapshots.restore(data.db, data.snapshot, data.name))
+    const access = await requireIn(data.ws, "write")
+    return call(() => access.engine.snapshots.restore(data.db, data.snapshot, data.name))
   })
 
 export const deleteSnapshot = createServerFn({ method: "POST" })
-  .validator(z.object({ db: ref, snapshot: ref }))
+  .validator(z.object({ ws, db: ref, snapshot: ref }))
   .handler(async ({ data }) => {
-    const viewer = await requireCan("write")
-    await call(() => engineFor(viewer).snapshots.delete(data.db, data.snapshot))
+    const access = await requireIn(data.ws, "write")
+    await call(() => access.engine.snapshots.delete(data.db, data.snapshot))
     return { ok: true }
   })
 
 export const setSchedule = createServerFn({ method: "POST" })
   .validator(
     z.object({
+      ws,
       db: ref,
       branch: ref,
       everyMinutes: z.number().int().min(1).max(525600),
@@ -69,36 +75,38 @@ export const setSchedule = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
-    const viewer = await requireCan("write")
-    return call(() => engineFor(viewer).snapshots.schedule.set(data.db, data.branch, data))
+    const access = await requireIn(data.ws, "write")
+    return call(() => access.engine.snapshots.schedule.set(data.db, data.branch, data))
   })
 
 export const deleteSchedule = createServerFn({ method: "POST" })
-  .validator(z.object({ db: ref, branch: ref }))
+  .validator(z.object({ ws, db: ref, branch: ref }))
   .handler(async ({ data }) => {
-    const viewer = await requireCan("write")
-    await call(() => engineFor(viewer).snapshots.schedule.delete(data.db, data.branch))
+    const access = await requireIn(data.ws, "write")
+    await call(() => access.engine.snapshots.schedule.delete(data.db, data.branch))
     return { ok: true }
   })
 
-export const listTokens = createServerFn({ method: "GET" }).handler(async (): Promise<TokenOut[]> => {
-  const viewer = await requireCan("admin")
-  const e = engineFor(viewer)
-  return call(() => allPages((cursor) => e.tokens.list({ limit: 100, cursor }), 2000))
-})
+export const listTokens = createServerFn({ method: "GET" })
+  .validator(z.object({ ws }))
+  .handler(async ({ data }): Promise<TokenOut[]> => {
+    const { engine } = await requireIn(data.ws, "admin")
+    return call(() => allPages((cursor) => engine.tokens.list({ limit: 100, cursor }), 2000))
+  })
 
-const access = z.enum(["read", "write", "admin"])
+const level = z.enum(["read", "write", "admin"])
 
 export const createToken = createServerFn({ method: "POST" })
   .validator(
     z.object({
+      ws,
       name: z.string().trim().min(1).max(100),
-      access: access.optional(),
+      access: level.optional(),
       database: ref.optional(),
       branch: ref.optional(),
       bucket: ref.optional(),
       grants: z
-        .array(z.object({ access, database: ref.optional(), branch: ref.optional(), bucket: ref.optional() }))
+        .array(z.object({ access: level, database: ref.optional(), branch: ref.optional(), bucket: ref.optional() }))
         .min(1)
         .max(20)
         .optional(),
@@ -107,70 +115,101 @@ export const createToken = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
-    const viewer = await requireCan("admin")
+    const { engine, viewer, workspace } = await requireIn(data.ws, "admin")
     const { name, accessKey, expiresInDays } = data
     // One token for several databases and buckets goes as grants; anything else keeps the plain shape.
-    if (data.grants) return call(() => engineFor(viewer).tokens.create({ name, accessKey, expiresInDays, grants: data.grants ?? [] }))
-    if (!data.access) throw new Error("Pick an access level.")
-    const { access, database, branch, bucket } = data
-    return call(() => engineFor(viewer).tokens.create({ name, accessKey, expiresInDays, access, database, branch, bucket }))
+    // Without a database, a bucket or grants, the token reaches the whole workspace.
+    if (!data.grants && !data.access) throw new Error("Pick an access level.")
+    const { access = "read", database, branch, bucket } = data
+    const created = await call(() =>
+      data.grants ? engine.tokens.create({ name, accessKey, expiresInDays, grants: data.grants }) : engine.tokens.create({ name, accessKey, expiresInDays, access, database, branch, bucket }),
+    )
+    // Remembered, so it can be revoked if its maker stops being an admin here.
+    recordMinted(created.id, workspace.id, viewer.id)
+    return created
   })
 
 export const revokeToken = createServerFn({ method: "POST" })
-  .validator(z.object({ id: ref }))
+  .validator(z.object({ ws, id: ref }))
   .handler(async ({ data }) => {
-    const viewer = await requireCan("admin")
-    await call(() => engineFor(viewer).tokens.revoke(data.id))
+    const access = await requireIn(data.ws, "admin")
+    await call(() => access.engine.tokens.revoke(data.id))
+    forgetMinted(data.id)
     return { ok: true }
   })
 
 export const listAudit = createServerFn({ method: "GET" })
-  .validator(z.object({ cursor: z.string().max(500).optional() }))
+  .validator(z.object({ ws, cursor: z.string().max(500).optional() }))
   .handler(async ({ data }): Promise<{ data: AuditOut[]; nextCursor: string }> => {
-    const viewer = await requireCan("write")
-    return call(() => engineFor(viewer).audit.list({ limit: 50, cursor: data.cursor }))
+    const access = await requireIn(data.ws, "admin")
+    return call(() => access.engine.audit.list({ limit: 50, cursor: data.cursor }))
   })
 
+const grants = z.array(z.object({ workspace: ref, role: z.enum(WORKSPACE_ROLES) })).max(200)
+const memberAccess = z.discriminatedUnion("owner", [z.object({ owner: z.literal(true) }), z.object({ owner: z.literal(false), grants })])
+
+/**
+ * A grant must name a workspace that exists, so a typo can't sit in the table
+ * waiting for one. Listing the workspaces also runs the upgrade from
+ * instance-wide roles first, so it never mistakes someone invited just now
+ * for a member from before workspaces.
+ */
+async function known(access: z.infer<typeof memberAccess>) {
+  const ids = new Set((await call(() => allWorkspaces())).map((w) => w.id))
+  if (access.owner) return
+  for (const g of access.grants) if (!ids.has(g.workspace)) throw new Error("That workspace doesn't exist.")
+}
+
 export const getMembers = createServerFn({ method: "GET" }).handler(async () => {
-  await requireCan("admin")
-  const [members, invites] = await Promise.all([listMembers(), listInvites()])
-  return { members, invites }
+  const viewer = await requireOwner()
+  const e = engineFor(viewer)
+  const [members, invites, workspaces, trashed] = await Promise.all([
+    listMembers(),
+    listInvites(),
+    call(() => allWorkspaces()),
+    // A role in a deleted workspace comes back with it on a restore, so the page shows it.
+    allPages((cursor) => e.workspaces.trash({ limit: 200, cursor })).catch(() => []),
+  ])
+  return { members, invites, workspaces, deleted: trashed.map((w) => ({ id: w.id, name: w.name })) }
 })
 
 export const inviteMember = createServerFn({ method: "POST" })
-  .validator(z.object({ email: z.string().trim().email().max(200), role: z.enum(ROLES) }))
+  .validator(z.object({ email: z.string().trim().email().max(200), access: memberAccess }))
   .handler(async ({ data }) => {
-    const viewer = await requireCan("admin")
-    const { invite, token } = await userError(() => createInvite(viewer.id, data.email, data.role))
+    const viewer = await requireOwner()
+    await known(data.access)
+    const { invite, token } = await userError(() => createInvite(viewer.id, data.email, data.access))
     return { invite, url: `${config().publicUrl}${APP_BASE}/invite/${token}` }
   })
 
 export const cancelInvite = createServerFn({ method: "POST" })
   .validator(z.object({ id: ref }))
   .handler(async ({ data }) => {
-    await requireCan("admin")
+    await requireOwner()
     await revokeInvite(data.id)
     return { ok: true }
   })
 
-export const changeRole = createServerFn({ method: "POST" })
-  .validator(z.object({ id: ref, role: z.enum(ROLES) }))
+export const changeAccess = createServerFn({ method: "POST" })
+  .validator(z.object({ id: ref, access: memberAccess }))
   .handler(async ({ data }) => {
-    const viewer = await requireCan("admin")
-    await userError(() => setRole(viewer.id, data.id, data.role))
-    return { ok: true }
+    const viewer = await requireOwner()
+    await known(data.access)
+    await userError(() => setAccess(viewer.id, data.id, data.access))
+    // Tokens they made where they are no longer an admin stop working with their access.
+    return { ok: true, revoked: await revokeOutlived(viewer).catch(() => 0) }
   })
 
 export const removeUser = createServerFn({ method: "POST" })
   .validator(z.object({ id: ref }))
   .handler(async ({ data }) => {
-    const viewer = await requireCan("admin")
+    const viewer = await requireOwner()
     await userError(() => removeMember(viewer.id, data.id))
-    return { ok: true }
+    return { ok: true, revoked: await revokeOutlived(viewer).catch(() => 0) }
   })
 
 export const getInstance = createServerFn({ method: "GET" }).handler(async () => {
-  await requireCan("admin")
+  await requireOwner()
   const cfg = config()
   type Health = { status: string; version?: string; meta_version?: number }
   let health: Health | null

@@ -1,21 +1,27 @@
-import { createFileRoute, redirect } from "@tanstack/react-router"
+import { createFileRoute, redirect, useRouter } from "@tanstack/react-router"
 import { CircleAlertIcon, CircleCheckIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { CopyButton } from "@/components/app/connect"
 import { SettingsSection } from "@/components/app/db-settings"
 import { PageBody, PageHeader, PageTitle } from "@/components/app/shell"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
+import { DeletedWorkspaces } from "@/components/app/workspace-settings"
 import { StatusText } from "@/components/ui/surface"
+import { toast } from "@/components/ui/toast"
 import { getInstance } from "@/fns/admin"
+import { listDeletedWorkspaces, restoreWorkspace } from "@/fns/workspaces"
 import { pageTitle } from "@/lib/paths"
-import { can } from "@/lib/roles"
+import { forgetSession } from "@/lib/session-cache"
 
-export const Route = createFileRoute("/_app/settings")({
+export const Route = createFileRoute("/_app/_instance/settings")({
   beforeLoad: ({ context }) => {
-    if (!can(context.viewer.role, "admin")) throw redirect({ to: "/" })
+    if (!context.viewer.owner) throw redirect({ to: "/" })
   },
-  loader: () => getInstance(),
-  head: () => ({ meta: [{ title: pageTitle("Settings") }] }),
+  loader: async () => {
+    const [instance, deleted] = await Promise.all([getInstance(), listDeletedWorkspaces().catch(() => null)])
+    return { ...instance, deleted }
+  },
+  head: () => ({ meta: [{ title: pageTitle("Instance settings") }] }),
   component: SettingsPage,
   pendingComponent: () => (
     <Frame>
@@ -33,7 +39,7 @@ function Frame({ children }: { children: ReactNode }) {
   return (
     <>
       <PageHeader>
-        <PageTitle>Settings</PageTitle>
+        <PageTitle>Instance settings</PageTitle>
       </PageHeader>
       <PageBody>
         <div className="max-w-4xl">{children}</div>
@@ -47,6 +53,7 @@ function SettingsPage() {
   const { engineUrl, publicUrl } = data
   const health = data.health
   const healthy = health?.status === "ok"
+  const router = useRouter()
   return (
     <Frame>
       <SettingsSection title="Engine">
@@ -76,6 +83,19 @@ function SettingsPage() {
           </Row>
         </dl>
       </SettingsSection>
+      {data.deleted && data.deleted.length > 0 && (
+        <SettingsSection title="Deleted workspaces">
+          <DeletedWorkspaces
+            workspaces={data.deleted}
+            onRestore={async (w, name) => {
+              const back = await restoreWorkspace({ data: { id: w.id, name } })
+              toast.success(`Restored ${back.name}`)
+              forgetSession()
+              await router.invalidate()
+            }}
+          />
+        </SettingsSection>
+      )}
     </Frame>
   )
 }

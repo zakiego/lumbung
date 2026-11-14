@@ -14,8 +14,9 @@ import { can } from "@/lib/roles"
 import { settle } from "@/lib/settle"
 import { dbSnippets } from "@/lib/snippets"
 import { DEFAULT_WINDOW, WINDOW_LABEL, errorRate, windowSearch } from "@/lib/stats"
+import { useWs } from "@/components/app/workspace"
 
-export const Route = createFileRoute("/_app/db/$db/")({
+export const Route = createFileRoute("/_app/w/$ws/db/$db/")({
   validateSearch: windowSearch,
   loaderDeps: ({ search }) => ({ branch: search.branch, range: search.window ?? DEFAULT_WINDOW }),
   loader: async ({ params, deps, parentMatchPromise, context }) => {
@@ -23,7 +24,7 @@ export const Route = createFileRoute("/_app/db/$db/")({
     const database = parent.loaderData?.database
     const branches = parent.loaderData?.branches ?? []
     const branch = deps.branch && branches.some((b) => b.name === deps.branch) ? deps.branch : (database?.default_branch ?? "main")
-    const ref = { db: params.db, branch }
+    const ref = { ws: params.ws, db: params.db, branch }
     return {
       connect: { engineUrl: context.engineUrl },
       schema: settle(getSchema({ data: ref })),
@@ -38,6 +39,7 @@ export const Route = createFileRoute("/_app/db/$db/")({
 const OVERVIEW_SNIPPETS = new Set(["sdk", "cli", "curl", "mcp"])
 
 function OverviewPage() {
+  const ws = useWs()
   const { database, branches, branch, branchParam } = useDb()
   const { connect, schema, stats, snapshots } = Route.useLoaderData()
   const { range } = Route.useLoaderDeps()
@@ -47,10 +49,10 @@ function OverviewPage() {
   const current = branches.find((b) => b.name === branch)
 
   async function newBranch(b: { name: string; from: string; expiresInDays?: number }) {
-    await createBranch({ data: { db: database.name, ...b } })
+    await createBranch({ data: { ws, db: database.name, ...b } })
     toast.success(`Created ${b.name}`)
     await router.invalidate()
-    await router.navigate({ to: "/db/$db", params: { db: database.name }, search: { branch: b.name } })
+    await router.navigate({ to: "/w/$ws/db/$db", params: { ws, db: database.name }, search: { branch: b.name } })
   }
 
   return (
@@ -101,8 +103,8 @@ function OverviewPage() {
             <CardHeader>
               <CardTitle>Connect</CardTitle>
               <Link
-                to="/db/$db/connect"
-                params={{ db: database.name }}
+                to="/w/$ws/db/$db/connect"
+                params={{ ws, db: database.name }}
                 search={{ branch: branchParam }}
                 className="group/link inline-flex items-center gap-1 rounded-sm text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground hover:duration-0"
               >

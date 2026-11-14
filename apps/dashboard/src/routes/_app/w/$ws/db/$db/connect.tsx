@@ -8,8 +8,9 @@ import { buttonVariants } from "@/components/ui/button"
 import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
 import { dbSnippets, libsqlUrl } from "@/lib/snippets"
+import { useWs } from "@/components/app/workspace"
 
-export const Route = createFileRoute("/_app/db/$db/connect")({
+export const Route = createFileRoute("/_app/w/$ws/db/$db/connect")({
   head: ({ params }) => ({ meta: [{ title: pageTitle("Connect", params.db) }] }),
   component: ConnectPage,
   errorComponent: ({ error }) => (
@@ -20,6 +21,7 @@ export const Route = createFileRoute("/_app/db/$db/connect")({
 })
 
 function ConnectPage() {
+  const ws = useWs()
   const { database, branch, branchParam } = useDb()
   // The session carries the engine URL, so the page needs no request of its own.
   const { viewer, engineUrl: url } = Route.useRouteContext()
@@ -41,7 +43,7 @@ function ConnectPage() {
         </SettingsSection>
         <SettingsSection title="Token" description="Snippets read it from LUMBUNG_TOKEN.">
           {can(viewer.role, "admin") ? (
-            <Link to="/tokens" className={buttonVariants({ variant: "secondary", className: "self-start" })}>
+            <Link to="/w/$ws/tokens" params={{ ws }} className={buttonVariants({ variant: "secondary", className: "self-start" })}>
               <KeyRoundIcon aria-hidden="true" />
               Create token
             </Link>

@@ -7,12 +7,16 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { toast } from "@/components/ui/toast"
 import { createDatabase } from "@/fns/databases"
+import { useWs } from "./workspace"
 
 // Engine names: lowercase letters, digits and dashes, starting with a letter or digit.
 export const NAME_PATTERN = "[a-z0-9][a-z0-9\\-]{0,62}"
 
 type NameDialogProps = {
-  trigger: string
+  /** The trigger's label. Leave it out, with `open` and `onOpenChange`, when something else opens the dialog. */
+  trigger?: string
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   triggerIcon?: ReactNode
   triggerVariant?: "default" | "secondary" | "outline"
   /** Replaces the button look, for a trigger that sits somewhere else, like the sidebar. */
@@ -48,8 +52,20 @@ export function NameDialog({
   pattern = NAME_PATTERN,
   patternHint = "Use lowercase letters, digits and dashes.",
   onSubmit,
+  open: openProp,
+  onOpenChange,
 }: NameDialogProps) {
-  const [open, setOpen] = useState(false)
+  const [openState, setOpenState] = useState(false)
+  const open = openProp ?? openState
+  const setOpen = (next: boolean) => {
+    // Cleared on the way out too: a dialog opened from outside never passes through its own trigger.
+    if (!next) {
+      setName("")
+      setError("")
+    }
+    setOpenState(next)
+    onOpenChange?.(next)
+  }
   const [name, setName] = useState("")
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
@@ -81,12 +97,13 @@ export function NameDialog({
         }
       }}
     >
-      {wrapTrigger(
-        <DialogTrigger className={triggerClassName ?? buttonVariants({ variant: triggerVariant })}>
-          {triggerIcon}
-          <span>{trigger}</span>
-        </DialogTrigger>,
-      )}
+      {trigger !== undefined &&
+        wrapTrigger(
+          <DialogTrigger className={triggerClassName ?? buttonVariants({ variant: triggerVariant })}>
+            {triggerIcon}
+            <span>{trigger}</span>
+          </DialogTrigger>,
+        )}
       <DialogContent>
         <DialogTitle>{title}</DialogTitle>
         {description && <DialogDescription>{description}</DialogDescription>}
@@ -123,11 +140,12 @@ export function NameDialog({
 /** Creates a database and opens it. A failure shows under the dialog's field, so only success gets a toast. */
 export function useCreateDatabase(onDone?: () => void) {
   const router = useRouter()
+  const ws = useWs()
   return async (name: string) => {
-    await createDatabase({ data: { name } })
+    await createDatabase({ data: { ws, name } })
     toast.success(`Created ${name}`)
     await router.invalidate()
-    await router.navigate({ to: "/db/$db", params: { db: name } })
+    await router.navigate({ to: "/w/$ws/db/$db", params: { ws, db: name } })
     onDone?.()
   }
 }

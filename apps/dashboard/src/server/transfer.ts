@@ -2,30 +2,37 @@
 // use plain routes under /app/api. Each checks the session itself. Imports are
 // buffered (capped, one at a time) because the SDK's import takes bytes.
 import { type Client, LumbungError } from "@lumbung/client"
-import { type Permission, can } from "@/lib/roles"
+import type { Permission } from "@/lib/roles"
 import { crossOriginWrite } from "./auth"
-import { engineFor, userMessage } from "./engine"
-import { type Viewer, viewerFromRequest } from "./session"
+import { userMessage } from "./engine"
+import { AccessError, type Viewer, accessTo, viewerFromRequest } from "./session"
 
 export const MAX_IMPORT_BYTES = 512 * 1024 * 1024
 
 export type TransferDeps = {
   viewer: (request: Request) => Promise<Viewer | null>
-  engine: (viewer: Viewer) => Pick<Client, "import" | "download">
+  /** The person's place in the workspace `ws`; throws an AccessError when they have none or it isn't enough. */
+  access: (viewer: Viewer, ws: string, p: Permission) => Promise<{ engine: Pick<Client, "import" | "download"> }>
 }
 
-const defaults: TransferDeps = { viewer: viewerFromRequest, engine: engineFor }
+const defaults: TransferDeps = { viewer: viewerFromRequest, access: accessTo }
 
 function fail(status: number, message: string): Response {
   return Response.json({ error: message }, { status, headers: { "cache-control": "no-store" } })
 }
 
-async function guard(request: Request, p: Permission, deps: TransferDeps): Promise<Viewer | Response> {
+async function guard(request: Request, p: Permission, deps: TransferDeps): Promise<Pick<Client, "import" | "download"> | Response> {
   if (crossOriginWrite(request)) return fail(403, "Invalid origin.")
   const viewer = await deps.viewer(request)
   if (!viewer) return fail(401, "Sign in again.")
-  if (!can(viewer.role, p)) return fail(403, "Your role can't do that.")
-  return viewer
+  const ws = new URL(request.url).searchParams.get("ws") ?? ""
+  if (!ws || ws.length > 100) return fail(400, "Pick a workspace.")
+  try {
+    return (await deps.access(viewer, ws, p)).engine
+  } catch (e) {
+    if (e instanceof AccessError) return fail(e.status, e.message)
+    throw e
+  }
 }
 
 const ref = (v: string | null): v is string => !!v && v.length <= 100
@@ -81,8 +88,8 @@ async function readCapped(request: Request, cap: number, stallMs: number): Promi
 let importing = false
 
 export async function importRoute(request: Request, deps: TransferDeps = defaults, cap = MAX_IMPORT_BYTES, stallMs = IMPORT_STALL_MS): Promise<Response> {
-  const viewer = await guard(request, "write", deps)
-  if (viewer instanceof Response) return viewer
+  const engine = await guard(request, "write", deps)
+  if (engine instanceof Response) return engine
   const q = new URL(request.url).searchParams
   const db = q.get("db")
   const branch = q.get("branch")
@@ -106,7 +113,7 @@ export async function importRoute(request: Request, deps: TransferDeps = default
     const body = read.bytes
     if (body.byteLength === 0) return fail(400, "The file is empty.")
     const data = format === "sql" ? new TextDecoder().decode(body) : body
-    const out = await deps.engine(viewer).import(db, branch, data, { format, mode })
+    const out = await engine.import(db, branch, data, { format, mode })
     return Response.json(out)
   } catch (e) {
     return engineFailure(e)
@@ -116,8 +123,8 @@ export async function importRoute(request: Request, deps: TransferDeps = default
 }
 
 export async function exportRoute(request: Request, deps: TransferDeps = defaults): Promise<Response> {
-  const viewer = await guard(request, "read", deps)
-  if (viewer instanceof Response) return viewer
+  const engine = await guard(request, "read", deps)
+  if (engine instanceof Response) return engine
   const q = new URL(request.url).searchParams
   const db = q.get("db")
   const branch = q.get("branch")
@@ -126,7 +133,7 @@ export async function exportRoute(request: Request, deps: TransferDeps = default
   if (format !== "db" && format !== "sql") return fail(400, "Format must be db or sql.")
   let res: Response
   try {
-    res = await deps.engine(viewer).download(db, branch, format)
+    res = await engine.download(db, branch, format)
   } catch (e) {
     return engineFailure(e)
   }

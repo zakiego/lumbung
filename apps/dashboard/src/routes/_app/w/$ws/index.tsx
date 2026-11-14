@@ -16,22 +16,24 @@ import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
 import { type Settled, settle } from "@/lib/settle"
 import { DEFAULT_WINDOW, WINDOW_LABEL, type WorkspaceStats, errorRate, windowSearch } from "@/lib/stats"
+import { useWs } from "@/components/app/workspace"
 
 const ACTIVITY_ROWS = 6
 
-export const Route = createFileRoute("/_app/")({
+export const Route = createFileRoute("/_app/w/$ws/")({
   validateSearch: windowSearch,
   loaderDeps: ({ search }) => ({ range: search.window ?? DEFAULT_WINDOW }),
-  loader: async ({ deps, context }) => {
-    const databases = await listDatabases()
-    const activity: Promise<Settled<AuditOut[]>> | null = can(context.viewer.role, "write")
-      ? settle(listAudit({ data: {} }).then((r) => r.data.slice(0, ACTIVITY_ROWS)))
+  loader: async ({ deps, context, params }) => {
+    const ws = params.ws
+    const databases = await listDatabases({ data: { ws } })
+    const activity: Promise<Settled<AuditOut[]>> | null = can(context.viewer.role, "admin")
+      ? settle(listAudit({ data: { ws } }).then((r) => r.data.slice(0, ACTIVITY_ROWS)))
       : null
     return {
       databases,
       stats: settle<WorkspaceStats | null>(
         databases.length
-          ? getWorkspaceStats({ data: { window: deps.range, databases: databases.map((d) => ({ name: d.name, branch: d.default_branch })) } })
+          ? getWorkspaceStats({ data: { ws, window: deps.range, databases: databases.map((d) => ({ name: d.name, branch: d.default_branch })) } })
           : Promise.resolve(null),
       ),
       activity,
@@ -71,11 +73,12 @@ function Frame({ children, actions }: { children: React.ReactNode; actions?: Rea
 }
 
 function OverviewPage() {
+  const ws = useWs()
   const { databases, stats, activity } = Route.useLoaderData()
   const { range } = Route.useLoaderDeps()
   const { viewer } = Route.useRouteContext()
   const navigate = useNavigate({ from: Route.fullPath })
-  const canWrite = can(viewer.role, "write")
+  const canWrite = can(viewer.role, "admin")
 
   const create = useCreateDatabase()
 
@@ -150,7 +153,7 @@ function OverviewPage() {
             <Card className="flex min-w-0 flex-col">
               <CardHeader>
                 <CardTitle>Recent activity</CardTitle>
-                <Link to="/audit" className="group/link inline-flex items-center gap-1 rounded-sm text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground hover:duration-0">
+                <Link to="/w/$ws/audit" params={{ ws }} className="group/link inline-flex items-center gap-1 rounded-sm text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground hover:duration-0">
                   View all
                   <span aria-hidden="true" className="transition-transform duration-100 ease-out-quad motion-safe:group-hover/link:translate-x-0.5">
                     →

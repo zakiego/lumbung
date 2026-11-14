@@ -15,12 +15,15 @@ import { deleteBucket, getBucket, updateBucket } from "@/fns/buckets"
 import { number } from "@/lib/format"
 import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
+import { useWs } from "@/components/app/workspace"
+import { MoveForm } from "@/components/app/workspace-settings"
+import { moveBucket } from "@/fns/workspaces"
 
-export const Route = createFileRoute("/_app/buckets/$bucket/settings")({
+export const Route = createFileRoute("/_app/w/$ws/buckets/$bucket/settings")({
   beforeLoad: ({ context, params }) => {
-    if (!can(context.viewer.role, "admin")) throw redirect({ to: "/buckets/$bucket", params })
+    if (!can(context.viewer.role, "admin")) throw redirect({ to: "/w/$ws/buckets/$bucket", params })
   },
-  loader: ({ params }) => getBucket({ data: { bucket: params.bucket } }),
+  loader: ({ params }) => getBucket({ data: { ws: params.ws, bucket: params.bucket } }),
   pendingComponent: () => (
     <Frame>
       <RowsSkeleton />
@@ -45,7 +48,10 @@ function Frame({ children }: { children: React.ReactNode }) {
 }
 
 function SettingsPage() {
+  const ws = useWs()
   const { bucket, s3Endpoint } = Route.useLoaderData()
+  const { viewer, workspace, workspaces } = Route.useRouteContext()
+  const others = (workspaces ?? []).filter((w) => w.id !== workspace.id)
   const router = useRouter()
   const navigate = useNavigate()
   const name = bucket.name
@@ -57,7 +63,7 @@ function SettingsPage() {
           <PublicReadForm
             value={bucket.public_read}
             onChange={async (publicRead) => {
-              await updateBucket({ data: { bucket: name, publicRead } })
+              await updateBucket({ data: { ws, bucket: name, publicRead } })
               toast.success(publicRead ? `${name} is public` : `${name} is private`)
               await router.invalidate()
             }}
@@ -72,12 +78,27 @@ function SettingsPage() {
           <CorsForm
             origins={bucket.cors_origins}
             onSave={async (corsOrigins) => {
-              await updateBucket({ data: { bucket: name, corsOrigins } })
+              await updateBucket({ data: { ws, bucket: name, corsOrigins } })
               toast.success("Saved CORS origins")
               await router.invalidate()
             }}
           />
         </SettingsSection>
+        {viewer.owner && others.length > 0 && (
+          <SettingsSection title="Move">
+            <MoveForm
+              what="bucket"
+              name={name}
+              targets={others}
+              onMove={async (to) => {
+                await moveBucket({ data: { ws, bucket: name, to: to.id } })
+                toast.success(`Moved ${name} to ${to.name}`)
+                await navigate({ to: "/w/$ws/buckets/$bucket", params: { ws: to.name, bucket: name } })
+                await router.invalidate()
+              }}
+            />
+          </SettingsSection>
+        )}
         <SettingsSection
           title="Delete bucket"
           description={
@@ -101,9 +122,9 @@ function SettingsPage() {
             actionLabel="Delete for good"
             agentConfirm={`Deletes the empty bucket ${name} and revokes its tokens`}
             onConfirm={async () => {
-              await deleteBucket({ data: { bucket: name } })
+              await deleteBucket({ data: { ws, bucket: name } })
               toast.success(`Deleted ${name}`)
-              await navigate({ to: "/buckets" })
+              await navigate({ to: "/w/$ws/buckets", params: { ws } })
               await router.invalidate()
             }}
           />

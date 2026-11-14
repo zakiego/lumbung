@@ -8,8 +8,8 @@ import { listBuckets } from "@/fns/buckets"
 import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
 
-export const Route = createFileRoute("/_app/buckets/")({
-  loader: () => listBuckets(),
+export const Route = createFileRoute("/_app/w/$ws/buckets/")({
+  loader: ({ params }) => listBuckets({ data: { ws: params.ws } }),
   head: () => ({ meta: [{ title: pageTitle("Buckets") }] }),
   component: BucketsPage,
   pendingComponent: () => (

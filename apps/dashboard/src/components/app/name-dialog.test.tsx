@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createAgent } from "@ui-sdk/react/agent"
+import { useState } from "react"
 import { expect, test, vi } from "vitest"
-import { CreateDatabaseDialog } from "./name-dialog"
+import { CreateDatabaseDialog, NameDialog } from "./name-dialog"
 
 const agent = createAgent()
 
@@ -83,4 +84,72 @@ test("Escape closes it and focus goes back to the trigger", async () => {
   await user.keyboard("{Escape}")
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   expect(document.activeElement).toBe(trigger)
+})
+
+// Something else opens it, like a menu item: there is no trigger of its own.
+function Outside({ onSubmit }: { onSubmit: (name: string) => Promise<unknown> }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        open from outside
+      </button>
+      <p data-testid="owner-state">{open ? "open" : "closed"}</p>
+      <NameDialog open={open} onOpenChange={setOpen} title="Create workspace" label="Name" submit="Create" pendingSubmit="Creating…" onSubmit={onSubmit} />
+    </>
+  )
+}
+
+test("opened from outside, it has no trigger and is empty again after being dismissed with text in it", async () => {
+  const user = userEvent.setup()
+  const onSubmit = vi.fn(async (_name: string) => {})
+  render(<Outside onSubmit={onSubmit} />)
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["open from outside"])
+  expect(screen.queryByRole("dialog")).toBeNull()
+
+  await user.click(screen.getByRole("button", { name: "open from outside" }))
+  const first = within(await screen.findByRole("dialog", { name: "Create workspace" }))
+  await user.type(first.getByLabelText("Name"), "half-typed")
+  await user.keyboard("{Escape}")
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  expect(screen.getByTestId("owner-state").textContent).toBe("closed")
+  expect(onSubmit).not.toHaveBeenCalled()
+
+  await user.click(screen.getByRole("button", { name: "open from outside" }))
+  const second = within(await screen.findByRole("dialog", { name: "Create workspace" }))
+  expect((second.getByLabelText("Name") as HTMLInputElement).value).toBe("")
+
+  // The Close button clears it the same way.
+  await user.type(second.getByLabelText("Name"), "again")
+  await user.click(second.getByRole("button", { name: "Close" }))
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  await user.click(screen.getByRole("button", { name: "open from outside" }))
+  const third = within(await screen.findByRole("dialog", { name: "Create workspace" }))
+  expect((third.getByLabelText("Name") as HTMLInputElement).value).toBe("")
+})
+
+test("opened from outside, a refusal is gone the next time and a success closes it for its owner too", async () => {
+  const user = userEvent.setup()
+  const onSubmit = vi.fn(async (name: string) => {
+    if (name === "taken") throw new Error("A workspace named taken already exists.")
+  })
+  render(<Outside onSubmit={onSubmit} />)
+  await user.click(screen.getByRole("button", { name: "open from outside" }))
+  const first = within(await screen.findByRole("dialog", { name: "Create workspace" }))
+  await user.type(first.getByLabelText("Name"), "taken")
+  await user.click(first.getByRole("button", { name: "Create" }))
+  expect(await first.findByText("A workspace named taken already exists.")).toBeTruthy()
+  expect(screen.getByTestId("owner-state").textContent).toBe("open")
+  await user.keyboard("{Escape}")
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+  await user.click(screen.getByRole("button", { name: "open from outside" }))
+  const second = within(await screen.findByRole("dialog", { name: "Create workspace" }))
+  expect(second.queryByText("A workspace named taken already exists.")).toBeNull()
+  expect((second.getByLabelText("Name") as HTMLInputElement).value).toBe("")
+  await user.type(second.getByLabelText("Name"), "team-x")
+  await user.click(second.getByRole("button", { name: "Create" }))
+  await waitFor(() => expect(screen.getByTestId("owner-state").textContent).toBe("closed"))
+  expect(onSubmit).toHaveBeenLastCalledWith("team-x")
+  expect(screen.queryByRole("dialog")).toBeNull()
 })

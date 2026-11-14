@@ -8,7 +8,7 @@ import { DatabaseTable } from "./database-table"
 test("databases: a 63 character name, errors, no traffic, a database that didn't report", async () => {
   await renderWithRouter(<DatabaseTable databases={worst.databases(3)} usage={worst.usage} />)
   const link = screen.getByRole("link", { name: worst.LONG_DB })
-  expect(link.getAttribute("href")).toBe(`/db/${worst.LONG_DB}`)
+  expect(link.getAttribute("href")).toBe(`/w/default/db/${worst.LONG_DB}`)
   expect(screen.getByText("1 error")).toBeTruthy()
   expect(screen.getByText("1,284,000")).toBeTruthy()
   expect(screen.getByText("5.00 GB")).toBeTruthy()
@@ -23,6 +23,13 @@ test("databases: stats that failed for every database, and 500 rows", async () =
   unmount()
   const many = await renderWithRouter(<DatabaseTable databases={worst.databases(500)} usage={undefined} />)
   expect(many.container.querySelectorAll("tbody tr")).toHaveLength(500)
+})
+
+test("databases: links go to the workspace on screen", async () => {
+  const agents = { id: "ws_bbbbbbbbbbbbbbbbbbbb", name: "agents", default: false, role: "readonly" as const }
+  await renderWithRouter(<DatabaseTable databases={worst.databases(3)} usage={worst.usage} />, agents)
+  expect(screen.getByRole("link", { name: "shop" }).getAttribute("href")).toBe("/w/agents/db/shop")
+  expect(screen.getAllByRole("link").every((a) => a.getAttribute("href")!.startsWith("/w/agents/db/"))).toBe(true)
 })
 
 test("activity: database names instead of ids, token actors, failures and the empty state", () => {

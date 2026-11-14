@@ -41,16 +41,34 @@ export const tokenNames = {
   buckets: { bk1: LONG_BUCKET },
 }
 
+// Workspace names go up to 63 characters, like database names.
+export const LONG_WORKSPACE = "customer-loyalty-and-rewards-agents-production-eu-west-1-team-x"
+
+export const workspaces = [
+  { id: "ws_aaaaaaaaaaaaaaaaaaaa", name: "default" },
+  { id: "ws_bbbbbbbbbbbbbbbbbbbb", name: LONG_WORKSPACE },
+  { id: "ws_cccccccccccccccccccc", name: "x" },
+]
+
+// Every workspace at a different role, plus one in a workspace that is gone.
+export const MANY_ROLES: Member["grants"] = [
+  { workspace: "ws_aaaaaaaaaaaaaaaaaaaa", role: "admin" },
+  { workspace: "ws_bbbbbbbbbbbbbbbbbbbb", role: "member" },
+  { workspace: "ws_gonegonegonegonegone", role: "admin" },
+  { workspace: "ws_cccccccccccccccccccc", role: "readonly" },
+]
+export const MANY_ROLES_SUMMARY = `default · Admin, ${LONG_WORKSPACE} · Member, x · Read-only`
+
 export function members(n: number): Member[] {
   const base: Member[] = [
-    { id: "me", name: "Aleksandra Wiśniewska-Kowalczyk", email: "aleksandra@example.com", role: "owner", createdAt: at },
-    { id: "m1", name: "", email: LONG_EMAIL, role: "member", createdAt: at },
-    { id: "m2", name: "Jo", email: "jo@x.io", role: "readonly", createdAt: at },
+    { id: "me", name: "Aleksandra Wiśniewska-Kowalczyk", email: "aleksandra@example.com", owner: true, grants: [], createdAt: at },
+    { id: "m1", name: "", email: LONG_EMAIL, owner: false, grants: MANY_ROLES, createdAt: at },
+    { id: "m2", name: "Jo", email: "jo@x.io", owner: false, grants: [], createdAt: at },
   ]
   return Array.from({ length: n }, (_, i) => ({ ...base[i % base.length]!, id: i === 0 ? "me" : `m${i}` }))
 }
 
-export const invites: Invite[] = [{ id: "i1", email: LONG_EMAIL, role: "member", createdAt: at, expiresAt: "2026-11-21T08:00:00Z" }]
+export const invites: Invite[] = [{ id: "i1", email: LONG_EMAIL, owner: false, grants: MANY_ROLES, createdAt: at, expiresAt: "2026-11-21T08:00:00Z" }]
 
 export function audit(n: number): AuditOut[] {
   const base: AuditOut[] = [

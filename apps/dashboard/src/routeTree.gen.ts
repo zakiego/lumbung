@@ -13,10 +13,8 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
-import { Route as AppAccountRouteImport } from './routes/_app/account'
+import { Route as AppInstanceRouteImport } from './routes/_app/_instance'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
-import { Route as AppMembersRouteImport } from './routes/_app/members'
-import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppTokensRouteImport } from './routes/_app/tokens'
 import { Route as AppTrashRouteImport } from './routes/_app/trash'
 import { Route as ApiExportRouteImport } from './routes/api/export'
@@ -24,20 +22,32 @@ import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ApiImportRouteImport } from './routes/api/import'
 import { Route as ApiObjectsRouteImport } from './routes/api/objects'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
-import { Route as AppBucketsIndexRouteImport } from './routes/_app/buckets/index'
-import { Route as AppDbDbRouteRouteImport } from './routes/_app/db/$db/route'
+import { Route as AppInstanceAccountRouteImport } from './routes/_app/_instance/account'
+import { Route as AppInstanceMembersRouteImport } from './routes/_app/_instance/members'
+import { Route as AppInstanceSettingsRouteImport } from './routes/_app/_instance/settings'
+import { Route as AppBucketsIndexRouteImport } from './routes/_app/buckets.index'
+import { Route as AppBucketsSplatRouteImport } from './routes/_app/buckets.$'
+import { Route as AppDbSplatRouteImport } from './routes/_app/db.$'
+import { Route as AppWWsRouteRouteImport } from './routes/_app/w/$ws/route'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as AppBucketsBucketIndexRouteImport } from './routes/_app/buckets/$bucket/index'
-import { Route as AppBucketsBucketConnectRouteImport } from './routes/_app/buckets/$bucket/connect'
-import { Route as AppBucketsBucketSettingsRouteImport } from './routes/_app/buckets/$bucket/settings'
-import { Route as AppDbDbIndexRouteImport } from './routes/_app/db/$db/index'
-import { Route as AppDbDbBranchesRouteImport } from './routes/_app/db/$db/branches'
-import { Route as AppDbDbConnectRouteImport } from './routes/_app/db/$db/connect'
-import { Route as AppDbDbDataRouteImport } from './routes/_app/db/$db/data'
-import { Route as AppDbDbSchemaRouteImport } from './routes/_app/db/$db/schema'
-import { Route as AppDbDbSettingsRouteImport } from './routes/_app/db/$db/settings'
-import { Route as AppDbDbSnapshotsRouteImport } from './routes/_app/db/$db/snapshots'
-import { Route as AppDbDbSqlRouteImport } from './routes/_app/db/$db/sql'
+import { Route as AppWWsIndexRouteImport } from './routes/_app/w/$ws/index'
+import { Route as AppWWsAuditRouteImport } from './routes/_app/w/$ws/audit'
+import { Route as AppWWsSettingsRouteImport } from './routes/_app/w/$ws/settings'
+import { Route as AppWWsTokensRouteImport } from './routes/_app/w/$ws/tokens'
+import { Route as AppWWsTrashRouteImport } from './routes/_app/w/$ws/trash'
+import { Route as AppWWsBucketsIndexRouteImport } from './routes/_app/w/$ws/buckets/index'
+import { Route as AppWWsDbDbRouteRouteImport } from './routes/_app/w/$ws/db/$db/route'
+import { Route as AppWWsBucketsBucketIndexRouteImport } from './routes/_app/w/$ws/buckets/$bucket/index'
+import { Route as AppWWsBucketsBucketConnectRouteImport } from './routes/_app/w/$ws/buckets/$bucket/connect'
+import { Route as AppWWsBucketsBucketSettingsRouteImport } from './routes/_app/w/$ws/buckets/$bucket/settings'
+import { Route as AppWWsDbDbIndexRouteImport } from './routes/_app/w/$ws/db/$db/index'
+import { Route as AppWWsDbDbBranchesRouteImport } from './routes/_app/w/$ws/db/$db/branches'
+import { Route as AppWWsDbDbConnectRouteImport } from './routes/_app/w/$ws/db/$db/connect'
+import { Route as AppWWsDbDbDataRouteImport } from './routes/_app/w/$ws/db/$db/data'
+import { Route as AppWWsDbDbSchemaRouteImport } from './routes/_app/w/$ws/db/$db/schema'
+import { Route as AppWWsDbDbSettingsRouteImport } from './routes/_app/w/$ws/db/$db/settings'
+import { Route as AppWWsDbDbSnapshotsRouteImport } from './routes/_app/w/$ws/db/$db/snapshots'
+import { Route as AppWWsDbDbSqlRouteImport } from './routes/_app/w/$ws/db/$db/sql'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -58,24 +68,13 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAccountRoute = AppAccountRouteImport.update({
-  id: '/account',
-  path: '/account',
+const AppInstanceRoute = AppInstanceRouteImport.update({
+  id: '/_instance',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAuditRoute = AppAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppMembersRoute = AppMembersRouteImport.update({
-  id: '/members',
-  path: '/members',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppSettingsRoute = AppSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
 const AppTokensRoute = AppTokensRouteImport.update({
@@ -113,14 +112,39 @@ const InviteTokenRoute = InviteTokenRouteImport.update({
   path: '/invite/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppInstanceAccountRoute = AppInstanceAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => AppInstanceRoute,
+} as any)
+const AppInstanceMembersRoute = AppInstanceMembersRouteImport.update({
+  id: '/members',
+  path: '/members',
+  getParentRoute: () => AppInstanceRoute,
+} as any)
+const AppInstanceSettingsRoute = AppInstanceSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppInstanceRoute,
+} as any)
 const AppBucketsIndexRoute = AppBucketsIndexRouteImport.update({
   id: '/buckets/',
   path: '/buckets/',
   getParentRoute: () => AppRoute,
 } as any)
-const AppDbDbRouteRoute = AppDbDbRouteRouteImport.update({
-  id: '/db/$db',
-  path: '/db/$db',
+const AppBucketsSplatRoute = AppBucketsSplatRouteImport.update({
+  id: '/buckets/$',
+  path: '/buckets/$',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDbSplatRoute = AppDbSplatRouteImport.update({
+  id: '/db/$',
+  path: '/db/$',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppWWsRouteRoute = AppWWsRouteRouteImport.update({
+  id: '/w/$ws',
+  path: '/w/$ws',
   getParentRoute: () => AppRoute,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
@@ -128,71 +152,105 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppBucketsBucketIndexRoute = AppBucketsBucketIndexRouteImport.update({
-  id: '/buckets/$bucket/',
-  path: '/buckets/$bucket/',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppBucketsBucketConnectRoute = AppBucketsBucketConnectRouteImport.update({
-  id: '/buckets/$bucket/connect',
-  path: '/buckets/$bucket/connect',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppBucketsBucketSettingsRoute =
-  AppBucketsBucketSettingsRouteImport.update({
-    id: '/buckets/$bucket/settings',
-    path: '/buckets/$bucket/settings',
-    getParentRoute: () => AppRoute,
-  } as any)
-const AppDbDbIndexRoute = AppDbDbIndexRouteImport.update({
+const AppWWsIndexRoute = AppWWsIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => AppDbDbRouteRoute,
+  getParentRoute: () => AppWWsRouteRoute,
 } as any)
-const AppDbDbBranchesRoute = AppDbDbBranchesRouteImport.update({
-  id: '/branches',
-  path: '/branches',
-  getParentRoute: () => AppDbDbRouteRoute,
+const AppWWsAuditRoute = AppWWsAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => AppWWsRouteRoute,
 } as any)
-const AppDbDbConnectRoute = AppDbDbConnectRouteImport.update({
-  id: '/connect',
-  path: '/connect',
-  getParentRoute: () => AppDbDbRouteRoute,
-} as any)
-const AppDbDbDataRoute = AppDbDbDataRouteImport.update({
-  id: '/data',
-  path: '/data',
-  getParentRoute: () => AppDbDbRouteRoute,
-} as any)
-const AppDbDbSchemaRoute = AppDbDbSchemaRouteImport.update({
-  id: '/schema',
-  path: '/schema',
-  getParentRoute: () => AppDbDbRouteRoute,
-} as any)
-const AppDbDbSettingsRoute = AppDbDbSettingsRouteImport.update({
+const AppWWsSettingsRoute = AppWWsSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => AppDbDbRouteRoute,
+  getParentRoute: () => AppWWsRouteRoute,
 } as any)
-const AppDbDbSnapshotsRoute = AppDbDbSnapshotsRouteImport.update({
+const AppWWsTokensRoute = AppWWsTokensRouteImport.update({
+  id: '/tokens',
+  path: '/tokens',
+  getParentRoute: () => AppWWsRouteRoute,
+} as any)
+const AppWWsTrashRoute = AppWWsTrashRouteImport.update({
+  id: '/trash',
+  path: '/trash',
+  getParentRoute: () => AppWWsRouteRoute,
+} as any)
+const AppWWsBucketsIndexRoute = AppWWsBucketsIndexRouteImport.update({
+  id: '/buckets/',
+  path: '/buckets/',
+  getParentRoute: () => AppWWsRouteRoute,
+} as any)
+const AppWWsDbDbRouteRoute = AppWWsDbDbRouteRouteImport.update({
+  id: '/db/$db',
+  path: '/db/$db',
+  getParentRoute: () => AppWWsRouteRoute,
+} as any)
+const AppWWsBucketsBucketIndexRoute =
+  AppWWsBucketsBucketIndexRouteImport.update({
+    id: '/buckets/$bucket/',
+    path: '/buckets/$bucket/',
+    getParentRoute: () => AppWWsRouteRoute,
+  } as any)
+const AppWWsBucketsBucketConnectRoute =
+  AppWWsBucketsBucketConnectRouteImport.update({
+    id: '/buckets/$bucket/connect',
+    path: '/buckets/$bucket/connect',
+    getParentRoute: () => AppWWsRouteRoute,
+  } as any)
+const AppWWsBucketsBucketSettingsRoute =
+  AppWWsBucketsBucketSettingsRouteImport.update({
+    id: '/buckets/$bucket/settings',
+    path: '/buckets/$bucket/settings',
+    getParentRoute: () => AppWWsRouteRoute,
+  } as any)
+const AppWWsDbDbIndexRoute = AppWWsDbDbIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppWWsDbDbRouteRoute,
+} as any)
+const AppWWsDbDbBranchesRoute = AppWWsDbDbBranchesRouteImport.update({
+  id: '/branches',
+  path: '/branches',
+  getParentRoute: () => AppWWsDbDbRouteRoute,
+} as any)
+const AppWWsDbDbConnectRoute = AppWWsDbDbConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
+  getParentRoute: () => AppWWsDbDbRouteRoute,
+} as any)
+const AppWWsDbDbDataRoute = AppWWsDbDbDataRouteImport.update({
+  id: '/data',
+  path: '/data',
+  getParentRoute: () => AppWWsDbDbRouteRoute,
+} as any)
+const AppWWsDbDbSchemaRoute = AppWWsDbDbSchemaRouteImport.update({
+  id: '/schema',
+  path: '/schema',
+  getParentRoute: () => AppWWsDbDbRouteRoute,
+} as any)
+const AppWWsDbDbSettingsRoute = AppWWsDbDbSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppWWsDbDbRouteRoute,
+} as any)
+const AppWWsDbDbSnapshotsRoute = AppWWsDbDbSnapshotsRouteImport.update({
   id: '/snapshots',
   path: '/snapshots',
-  getParentRoute: () => AppDbDbRouteRoute,
+  getParentRoute: () => AppWWsDbDbRouteRoute,
 } as any)
-const AppDbDbSqlRoute = AppDbDbSqlRouteImport.update({
+const AppWWsDbDbSqlRoute = AppWWsDbDbSqlRouteImport.update({
   id: '/sql',
   path: '/sql',
-  getParentRoute: () => AppDbDbRouteRoute,
+  getParentRoute: () => AppWWsDbDbRouteRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/login': typeof LoginRoute
   '/setup': typeof SetupRoute
-  '/account': typeof AppAccountRoute
   '/audit': typeof AppAuditRoute
-  '/members': typeof AppMembersRoute
-  '/settings': typeof AppSettingsRoute
   '/tokens': typeof AppTokensRoute
   '/trash': typeof AppTrashRoute
   '/api/export': typeof ApiExportRoute
@@ -200,28 +258,38 @@ export interface FileRoutesByFullPath {
   '/api/import': typeof ApiImportRoute
   '/api/objects': typeof ApiObjectsRoute
   '/invite/$token': typeof InviteTokenRoute
-  '/db/$db': typeof AppDbDbRouteRouteWithChildren
+  '/w/$ws': typeof AppWWsRouteRouteWithChildren
+  '/account': typeof AppInstanceAccountRoute
+  '/members': typeof AppInstanceMembersRoute
+  '/settings': typeof AppInstanceSettingsRoute
+  '/buckets/$': typeof AppBucketsSplatRoute
+  '/db/$': typeof AppDbSplatRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/buckets/': typeof AppBucketsIndexRoute
-  '/buckets/$bucket/connect': typeof AppBucketsBucketConnectRoute
-  '/buckets/$bucket/settings': typeof AppBucketsBucketSettingsRoute
-  '/db/$db/branches': typeof AppDbDbBranchesRoute
-  '/db/$db/connect': typeof AppDbDbConnectRoute
-  '/db/$db/data': typeof AppDbDbDataRoute
-  '/db/$db/schema': typeof AppDbDbSchemaRoute
-  '/db/$db/settings': typeof AppDbDbSettingsRoute
-  '/db/$db/snapshots': typeof AppDbDbSnapshotsRoute
-  '/db/$db/sql': typeof AppDbDbSqlRoute
-  '/buckets/$bucket/': typeof AppBucketsBucketIndexRoute
-  '/db/$db/': typeof AppDbDbIndexRoute
+  '/w/$ws/audit': typeof AppWWsAuditRoute
+  '/w/$ws/settings': typeof AppWWsSettingsRoute
+  '/w/$ws/tokens': typeof AppWWsTokensRoute
+  '/w/$ws/trash': typeof AppWWsTrashRoute
+  '/w/$ws/': typeof AppWWsIndexRoute
+  '/w/$ws/db/$db': typeof AppWWsDbDbRouteRouteWithChildren
+  '/w/$ws/buckets/': typeof AppWWsBucketsIndexRoute
+  '/w/$ws/buckets/$bucket/connect': typeof AppWWsBucketsBucketConnectRoute
+  '/w/$ws/buckets/$bucket/settings': typeof AppWWsBucketsBucketSettingsRoute
+  '/w/$ws/db/$db/branches': typeof AppWWsDbDbBranchesRoute
+  '/w/$ws/db/$db/connect': typeof AppWWsDbDbConnectRoute
+  '/w/$ws/db/$db/data': typeof AppWWsDbDbDataRoute
+  '/w/$ws/db/$db/schema': typeof AppWWsDbDbSchemaRoute
+  '/w/$ws/db/$db/settings': typeof AppWWsDbDbSettingsRoute
+  '/w/$ws/db/$db/snapshots': typeof AppWWsDbDbSnapshotsRoute
+  '/w/$ws/db/$db/sql': typeof AppWWsDbDbSqlRoute
+  '/w/$ws/buckets/$bucket/': typeof AppWWsBucketsBucketIndexRoute
+  '/w/$ws/db/$db/': typeof AppWWsDbDbIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/setup': typeof SetupRoute
-  '/account': typeof AppAccountRoute
+  '/': typeof AppIndexRoute
   '/audit': typeof AppAuditRoute
-  '/members': typeof AppMembersRoute
-  '/settings': typeof AppSettingsRoute
   '/tokens': typeof AppTokensRoute
   '/trash': typeof AppTrashRoute
   '/api/export': typeof ApiExportRoute
@@ -229,30 +297,38 @@ export interface FileRoutesByTo {
   '/api/import': typeof ApiImportRoute
   '/api/objects': typeof ApiObjectsRoute
   '/invite/$token': typeof InviteTokenRoute
-  '/': typeof AppIndexRoute
+  '/account': typeof AppInstanceAccountRoute
+  '/members': typeof AppInstanceMembersRoute
+  '/settings': typeof AppInstanceSettingsRoute
+  '/buckets/$': typeof AppBucketsSplatRoute
+  '/db/$': typeof AppDbSplatRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/buckets': typeof AppBucketsIndexRoute
-  '/buckets/$bucket/connect': typeof AppBucketsBucketConnectRoute
-  '/buckets/$bucket/settings': typeof AppBucketsBucketSettingsRoute
-  '/db/$db/branches': typeof AppDbDbBranchesRoute
-  '/db/$db/connect': typeof AppDbDbConnectRoute
-  '/db/$db/data': typeof AppDbDbDataRoute
-  '/db/$db/schema': typeof AppDbDbSchemaRoute
-  '/db/$db/settings': typeof AppDbDbSettingsRoute
-  '/db/$db/snapshots': typeof AppDbDbSnapshotsRoute
-  '/db/$db/sql': typeof AppDbDbSqlRoute
-  '/buckets/$bucket': typeof AppBucketsBucketIndexRoute
-  '/db/$db': typeof AppDbDbIndexRoute
+  '/w/$ws/audit': typeof AppWWsAuditRoute
+  '/w/$ws/settings': typeof AppWWsSettingsRoute
+  '/w/$ws/tokens': typeof AppWWsTokensRoute
+  '/w/$ws/trash': typeof AppWWsTrashRoute
+  '/w/$ws': typeof AppWWsIndexRoute
+  '/w/$ws/buckets': typeof AppWWsBucketsIndexRoute
+  '/w/$ws/buckets/$bucket/connect': typeof AppWWsBucketsBucketConnectRoute
+  '/w/$ws/buckets/$bucket/settings': typeof AppWWsBucketsBucketSettingsRoute
+  '/w/$ws/db/$db/branches': typeof AppWWsDbDbBranchesRoute
+  '/w/$ws/db/$db/connect': typeof AppWWsDbDbConnectRoute
+  '/w/$ws/db/$db/data': typeof AppWWsDbDbDataRoute
+  '/w/$ws/db/$db/schema': typeof AppWWsDbDbSchemaRoute
+  '/w/$ws/db/$db/settings': typeof AppWWsDbDbSettingsRoute
+  '/w/$ws/db/$db/snapshots': typeof AppWWsDbDbSnapshotsRoute
+  '/w/$ws/db/$db/sql': typeof AppWWsDbDbSqlRoute
+  '/w/$ws/buckets/$bucket': typeof AppWWsBucketsBucketIndexRoute
+  '/w/$ws/db/$db': typeof AppWWsDbDbIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
   '/setup': typeof SetupRoute
-  '/_app/account': typeof AppAccountRoute
+  '/_app/_instance': typeof AppInstanceRouteWithChildren
   '/_app/audit': typeof AppAuditRoute
-  '/_app/members': typeof AppMembersRoute
-  '/_app/settings': typeof AppSettingsRoute
   '/_app/tokens': typeof AppTokensRoute
   '/_app/trash': typeof AppTrashRoute
   '/api/export': typeof ApiExportRoute
@@ -261,20 +337,32 @@ export interface FileRoutesById {
   '/api/objects': typeof ApiObjectsRoute
   '/invite/$token': typeof InviteTokenRoute
   '/_app/': typeof AppIndexRoute
-  '/_app/db/$db': typeof AppDbDbRouteRouteWithChildren
+  '/_app/w/$ws': typeof AppWWsRouteRouteWithChildren
+  '/_app/_instance/account': typeof AppInstanceAccountRoute
+  '/_app/_instance/members': typeof AppInstanceMembersRoute
+  '/_app/_instance/settings': typeof AppInstanceSettingsRoute
+  '/_app/buckets/$': typeof AppBucketsSplatRoute
+  '/_app/db/$': typeof AppDbSplatRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/_app/buckets/': typeof AppBucketsIndexRoute
-  '/_app/buckets/$bucket/connect': typeof AppBucketsBucketConnectRoute
-  '/_app/buckets/$bucket/settings': typeof AppBucketsBucketSettingsRoute
-  '/_app/db/$db/branches': typeof AppDbDbBranchesRoute
-  '/_app/db/$db/connect': typeof AppDbDbConnectRoute
-  '/_app/db/$db/data': typeof AppDbDbDataRoute
-  '/_app/db/$db/schema': typeof AppDbDbSchemaRoute
-  '/_app/db/$db/settings': typeof AppDbDbSettingsRoute
-  '/_app/db/$db/snapshots': typeof AppDbDbSnapshotsRoute
-  '/_app/db/$db/sql': typeof AppDbDbSqlRoute
-  '/_app/buckets/$bucket/': typeof AppBucketsBucketIndexRoute
-  '/_app/db/$db/': typeof AppDbDbIndexRoute
+  '/_app/w/$ws/audit': typeof AppWWsAuditRoute
+  '/_app/w/$ws/settings': typeof AppWWsSettingsRoute
+  '/_app/w/$ws/tokens': typeof AppWWsTokensRoute
+  '/_app/w/$ws/trash': typeof AppWWsTrashRoute
+  '/_app/w/$ws/': typeof AppWWsIndexRoute
+  '/_app/w/$ws/db/$db': typeof AppWWsDbDbRouteRouteWithChildren
+  '/_app/w/$ws/buckets/': typeof AppWWsBucketsIndexRoute
+  '/_app/w/$ws/buckets/$bucket/connect': typeof AppWWsBucketsBucketConnectRoute
+  '/_app/w/$ws/buckets/$bucket/settings': typeof AppWWsBucketsBucketSettingsRoute
+  '/_app/w/$ws/db/$db/branches': typeof AppWWsDbDbBranchesRoute
+  '/_app/w/$ws/db/$db/connect': typeof AppWWsDbDbConnectRoute
+  '/_app/w/$ws/db/$db/data': typeof AppWWsDbDbDataRoute
+  '/_app/w/$ws/db/$db/schema': typeof AppWWsDbDbSchemaRoute
+  '/_app/w/$ws/db/$db/settings': typeof AppWWsDbDbSettingsRoute
+  '/_app/w/$ws/db/$db/snapshots': typeof AppWWsDbDbSnapshotsRoute
+  '/_app/w/$ws/db/$db/sql': typeof AppWWsDbDbSqlRoute
+  '/_app/w/$ws/buckets/$bucket/': typeof AppWWsBucketsBucketIndexRoute
+  '/_app/w/$ws/db/$db/': typeof AppWWsDbDbIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -282,10 +370,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/setup'
-    | '/account'
     | '/audit'
-    | '/members'
-    | '/settings'
     | '/tokens'
     | '/trash'
     | '/api/export'
@@ -293,28 +378,38 @@ export interface FileRouteTypes {
     | '/api/import'
     | '/api/objects'
     | '/invite/$token'
-    | '/db/$db'
+    | '/w/$ws'
+    | '/account'
+    | '/members'
+    | '/settings'
+    | '/buckets/$'
+    | '/db/$'
     | '/api/auth/$'
     | '/buckets/'
-    | '/buckets/$bucket/connect'
-    | '/buckets/$bucket/settings'
-    | '/db/$db/branches'
-    | '/db/$db/connect'
-    | '/db/$db/data'
-    | '/db/$db/schema'
-    | '/db/$db/settings'
-    | '/db/$db/snapshots'
-    | '/db/$db/sql'
-    | '/buckets/$bucket/'
-    | '/db/$db/'
+    | '/w/$ws/audit'
+    | '/w/$ws/settings'
+    | '/w/$ws/tokens'
+    | '/w/$ws/trash'
+    | '/w/$ws/'
+    | '/w/$ws/db/$db'
+    | '/w/$ws/buckets/'
+    | '/w/$ws/buckets/$bucket/connect'
+    | '/w/$ws/buckets/$bucket/settings'
+    | '/w/$ws/db/$db/branches'
+    | '/w/$ws/db/$db/connect'
+    | '/w/$ws/db/$db/data'
+    | '/w/$ws/db/$db/schema'
+    | '/w/$ws/db/$db/settings'
+    | '/w/$ws/db/$db/snapshots'
+    | '/w/$ws/db/$db/sql'
+    | '/w/$ws/buckets/$bucket/'
+    | '/w/$ws/db/$db/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
     | '/setup'
-    | '/account'
+    | '/'
     | '/audit'
-    | '/members'
-    | '/settings'
     | '/tokens'
     | '/trash'
     | '/api/export'
@@ -322,29 +417,37 @@ export interface FileRouteTypes {
     | '/api/import'
     | '/api/objects'
     | '/invite/$token'
-    | '/'
+    | '/account'
+    | '/members'
+    | '/settings'
+    | '/buckets/$'
+    | '/db/$'
     | '/api/auth/$'
     | '/buckets'
-    | '/buckets/$bucket/connect'
-    | '/buckets/$bucket/settings'
-    | '/db/$db/branches'
-    | '/db/$db/connect'
-    | '/db/$db/data'
-    | '/db/$db/schema'
-    | '/db/$db/settings'
-    | '/db/$db/snapshots'
-    | '/db/$db/sql'
-    | '/buckets/$bucket'
-    | '/db/$db'
+    | '/w/$ws/audit'
+    | '/w/$ws/settings'
+    | '/w/$ws/tokens'
+    | '/w/$ws/trash'
+    | '/w/$ws'
+    | '/w/$ws/buckets'
+    | '/w/$ws/buckets/$bucket/connect'
+    | '/w/$ws/buckets/$bucket/settings'
+    | '/w/$ws/db/$db/branches'
+    | '/w/$ws/db/$db/connect'
+    | '/w/$ws/db/$db/data'
+    | '/w/$ws/db/$db/schema'
+    | '/w/$ws/db/$db/settings'
+    | '/w/$ws/db/$db/snapshots'
+    | '/w/$ws/db/$db/sql'
+    | '/w/$ws/buckets/$bucket'
+    | '/w/$ws/db/$db'
   id:
     | '__root__'
     | '/_app'
     | '/login'
     | '/setup'
-    | '/_app/account'
+    | '/_app/_instance'
     | '/_app/audit'
-    | '/_app/members'
-    | '/_app/settings'
     | '/_app/tokens'
     | '/_app/trash'
     | '/api/export'
@@ -353,20 +456,32 @@ export interface FileRouteTypes {
     | '/api/objects'
     | '/invite/$token'
     | '/_app/'
-    | '/_app/db/$db'
+    | '/_app/w/$ws'
+    | '/_app/_instance/account'
+    | '/_app/_instance/members'
+    | '/_app/_instance/settings'
+    | '/_app/buckets/$'
+    | '/_app/db/$'
     | '/api/auth/$'
     | '/_app/buckets/'
-    | '/_app/buckets/$bucket/connect'
-    | '/_app/buckets/$bucket/settings'
-    | '/_app/db/$db/branches'
-    | '/_app/db/$db/connect'
-    | '/_app/db/$db/data'
-    | '/_app/db/$db/schema'
-    | '/_app/db/$db/settings'
-    | '/_app/db/$db/snapshots'
-    | '/_app/db/$db/sql'
-    | '/_app/buckets/$bucket/'
-    | '/_app/db/$db/'
+    | '/_app/w/$ws/audit'
+    | '/_app/w/$ws/settings'
+    | '/_app/w/$ws/tokens'
+    | '/_app/w/$ws/trash'
+    | '/_app/w/$ws/'
+    | '/_app/w/$ws/db/$db'
+    | '/_app/w/$ws/buckets/'
+    | '/_app/w/$ws/buckets/$bucket/connect'
+    | '/_app/w/$ws/buckets/$bucket/settings'
+    | '/_app/w/$ws/db/$db/branches'
+    | '/_app/w/$ws/db/$db/connect'
+    | '/_app/w/$ws/db/$db/data'
+    | '/_app/w/$ws/db/$db/schema'
+    | '/_app/w/$ws/db/$db/settings'
+    | '/_app/w/$ws/db/$db/snapshots'
+    | '/_app/w/$ws/db/$db/sql'
+    | '/_app/w/$ws/buckets/$bucket/'
+    | '/_app/w/$ws/db/$db/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -411,11 +526,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/account': {
-      id: '/_app/account'
-      path: '/account'
-      fullPath: '/account'
-      preLoaderRoute: typeof AppAccountRouteImport
+    '/_app/_instance': {
+      id: '/_app/_instance'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppInstanceRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/audit': {
@@ -423,20 +538,6 @@ declare module '@tanstack/react-router' {
       path: '/audit'
       fullPath: '/audit'
       preLoaderRoute: typeof AppAuditRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/members': {
-      id: '/_app/members'
-      path: '/members'
-      fullPath: '/members'
-      preLoaderRoute: typeof AppMembersRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/settings': {
-      id: '/_app/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/tokens': {
@@ -488,6 +589,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InviteTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/_instance/account': {
+      id: '/_app/_instance/account'
+      path: '/account'
+      fullPath: '/account'
+      preLoaderRoute: typeof AppInstanceAccountRouteImport
+      parentRoute: typeof AppInstanceRoute
+    }
+    '/_app/_instance/members': {
+      id: '/_app/_instance/members'
+      path: '/members'
+      fullPath: '/members'
+      preLoaderRoute: typeof AppInstanceMembersRouteImport
+      parentRoute: typeof AppInstanceRoute
+    }
+    '/_app/_instance/settings': {
+      id: '/_app/_instance/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppInstanceSettingsRouteImport
+      parentRoute: typeof AppInstanceRoute
+    }
     '/_app/buckets/': {
       id: '/_app/buckets/'
       path: '/buckets'
@@ -495,11 +617,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBucketsIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/db/$db': {
-      id: '/_app/db/$db'
-      path: '/db/$db'
-      fullPath: '/db/$db'
-      preLoaderRoute: typeof AppDbDbRouteRouteImport
+    '/_app/buckets/$': {
+      id: '/_app/buckets/$'
+      path: '/buckets/$'
+      fullPath: '/buckets/$'
+      preLoaderRoute: typeof AppBucketsSplatRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/db/$': {
+      id: '/_app/db/$'
+      path: '/db/$'
+      fullPath: '/db/$'
+      preLoaderRoute: typeof AppDbSplatRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/w/$ws': {
+      id: '/_app/w/$ws'
+      path: '/w/$ws'
+      fullPath: '/w/$ws'
+      preLoaderRoute: typeof AppWWsRouteRouteImport
       parentRoute: typeof AppRoute
     }
     '/api/auth/$': {
@@ -509,140 +645,229 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/buckets/$bucket/': {
-      id: '/_app/buckets/$bucket/'
-      path: '/buckets/$bucket'
-      fullPath: '/buckets/$bucket/'
-      preLoaderRoute: typeof AppBucketsBucketIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/buckets/$bucket/connect': {
-      id: '/_app/buckets/$bucket/connect'
-      path: '/buckets/$bucket/connect'
-      fullPath: '/buckets/$bucket/connect'
-      preLoaderRoute: typeof AppBucketsBucketConnectRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/buckets/$bucket/settings': {
-      id: '/_app/buckets/$bucket/settings'
-      path: '/buckets/$bucket/settings'
-      fullPath: '/buckets/$bucket/settings'
-      preLoaderRoute: typeof AppBucketsBucketSettingsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/db/$db/': {
-      id: '/_app/db/$db/'
+    '/_app/w/$ws/': {
+      id: '/_app/w/$ws/'
       path: '/'
-      fullPath: '/db/$db/'
-      preLoaderRoute: typeof AppDbDbIndexRouteImport
-      parentRoute: typeof AppDbDbRouteRoute
+      fullPath: '/w/$ws/'
+      preLoaderRoute: typeof AppWWsIndexRouteImport
+      parentRoute: typeof AppWWsRouteRoute
     }
-    '/_app/db/$db/branches': {
-      id: '/_app/db/$db/branches'
-      path: '/branches'
-      fullPath: '/db/$db/branches'
-      preLoaderRoute: typeof AppDbDbBranchesRouteImport
-      parentRoute: typeof AppDbDbRouteRoute
+    '/_app/w/$ws/audit': {
+      id: '/_app/w/$ws/audit'
+      path: '/audit'
+      fullPath: '/w/$ws/audit'
+      preLoaderRoute: typeof AppWWsAuditRouteImport
+      parentRoute: typeof AppWWsRouteRoute
     }
-    '/_app/db/$db/connect': {
-      id: '/_app/db/$db/connect'
-      path: '/connect'
-      fullPath: '/db/$db/connect'
-      preLoaderRoute: typeof AppDbDbConnectRouteImport
-      parentRoute: typeof AppDbDbRouteRoute
-    }
-    '/_app/db/$db/data': {
-      id: '/_app/db/$db/data'
-      path: '/data'
-      fullPath: '/db/$db/data'
-      preLoaderRoute: typeof AppDbDbDataRouteImport
-      parentRoute: typeof AppDbDbRouteRoute
-    }
-    '/_app/db/$db/schema': {
-      id: '/_app/db/$db/schema'
-      path: '/schema'
-      fullPath: '/db/$db/schema'
-      preLoaderRoute: typeof AppDbDbSchemaRouteImport
-      parentRoute: typeof AppDbDbRouteRoute
-    }
-    '/_app/db/$db/settings': {
-      id: '/_app/db/$db/settings'
+    '/_app/w/$ws/settings': {
+      id: '/_app/w/$ws/settings'
       path: '/settings'
-      fullPath: '/db/$db/settings'
-      preLoaderRoute: typeof AppDbDbSettingsRouteImport
-      parentRoute: typeof AppDbDbRouteRoute
+      fullPath: '/w/$ws/settings'
+      preLoaderRoute: typeof AppWWsSettingsRouteImport
+      parentRoute: typeof AppWWsRouteRoute
     }
-    '/_app/db/$db/snapshots': {
-      id: '/_app/db/$db/snapshots'
+    '/_app/w/$ws/tokens': {
+      id: '/_app/w/$ws/tokens'
+      path: '/tokens'
+      fullPath: '/w/$ws/tokens'
+      preLoaderRoute: typeof AppWWsTokensRouteImport
+      parentRoute: typeof AppWWsRouteRoute
+    }
+    '/_app/w/$ws/trash': {
+      id: '/_app/w/$ws/trash'
+      path: '/trash'
+      fullPath: '/w/$ws/trash'
+      preLoaderRoute: typeof AppWWsTrashRouteImport
+      parentRoute: typeof AppWWsRouteRoute
+    }
+    '/_app/w/$ws/buckets/': {
+      id: '/_app/w/$ws/buckets/'
+      path: '/buckets'
+      fullPath: '/w/$ws/buckets/'
+      preLoaderRoute: typeof AppWWsBucketsIndexRouteImport
+      parentRoute: typeof AppWWsRouteRoute
+    }
+    '/_app/w/$ws/db/$db': {
+      id: '/_app/w/$ws/db/$db'
+      path: '/db/$db'
+      fullPath: '/w/$ws/db/$db'
+      preLoaderRoute: typeof AppWWsDbDbRouteRouteImport
+      parentRoute: typeof AppWWsRouteRoute
+    }
+    '/_app/w/$ws/buckets/$bucket/': {
+      id: '/_app/w/$ws/buckets/$bucket/'
+      path: '/buckets/$bucket'
+      fullPath: '/w/$ws/buckets/$bucket/'
+      preLoaderRoute: typeof AppWWsBucketsBucketIndexRouteImport
+      parentRoute: typeof AppWWsRouteRoute
+    }
+    '/_app/w/$ws/buckets/$bucket/connect': {
+      id: '/_app/w/$ws/buckets/$bucket/connect'
+      path: '/buckets/$bucket/connect'
+      fullPath: '/w/$ws/buckets/$bucket/connect'
+      preLoaderRoute: typeof AppWWsBucketsBucketConnectRouteImport
+      parentRoute: typeof AppWWsRouteRoute
+    }
+    '/_app/w/$ws/buckets/$bucket/settings': {
+      id: '/_app/w/$ws/buckets/$bucket/settings'
+      path: '/buckets/$bucket/settings'
+      fullPath: '/w/$ws/buckets/$bucket/settings'
+      preLoaderRoute: typeof AppWWsBucketsBucketSettingsRouteImport
+      parentRoute: typeof AppWWsRouteRoute
+    }
+    '/_app/w/$ws/db/$db/': {
+      id: '/_app/w/$ws/db/$db/'
+      path: '/'
+      fullPath: '/w/$ws/db/$db/'
+      preLoaderRoute: typeof AppWWsDbDbIndexRouteImport
+      parentRoute: typeof AppWWsDbDbRouteRoute
+    }
+    '/_app/w/$ws/db/$db/branches': {
+      id: '/_app/w/$ws/db/$db/branches'
+      path: '/branches'
+      fullPath: '/w/$ws/db/$db/branches'
+      preLoaderRoute: typeof AppWWsDbDbBranchesRouteImport
+      parentRoute: typeof AppWWsDbDbRouteRoute
+    }
+    '/_app/w/$ws/db/$db/connect': {
+      id: '/_app/w/$ws/db/$db/connect'
+      path: '/connect'
+      fullPath: '/w/$ws/db/$db/connect'
+      preLoaderRoute: typeof AppWWsDbDbConnectRouteImport
+      parentRoute: typeof AppWWsDbDbRouteRoute
+    }
+    '/_app/w/$ws/db/$db/data': {
+      id: '/_app/w/$ws/db/$db/data'
+      path: '/data'
+      fullPath: '/w/$ws/db/$db/data'
+      preLoaderRoute: typeof AppWWsDbDbDataRouteImport
+      parentRoute: typeof AppWWsDbDbRouteRoute
+    }
+    '/_app/w/$ws/db/$db/schema': {
+      id: '/_app/w/$ws/db/$db/schema'
+      path: '/schema'
+      fullPath: '/w/$ws/db/$db/schema'
+      preLoaderRoute: typeof AppWWsDbDbSchemaRouteImport
+      parentRoute: typeof AppWWsDbDbRouteRoute
+    }
+    '/_app/w/$ws/db/$db/settings': {
+      id: '/_app/w/$ws/db/$db/settings'
+      path: '/settings'
+      fullPath: '/w/$ws/db/$db/settings'
+      preLoaderRoute: typeof AppWWsDbDbSettingsRouteImport
+      parentRoute: typeof AppWWsDbDbRouteRoute
+    }
+    '/_app/w/$ws/db/$db/snapshots': {
+      id: '/_app/w/$ws/db/$db/snapshots'
       path: '/snapshots'
-      fullPath: '/db/$db/snapshots'
-      preLoaderRoute: typeof AppDbDbSnapshotsRouteImport
-      parentRoute: typeof AppDbDbRouteRoute
+      fullPath: '/w/$ws/db/$db/snapshots'
+      preLoaderRoute: typeof AppWWsDbDbSnapshotsRouteImport
+      parentRoute: typeof AppWWsDbDbRouteRoute
     }
-    '/_app/db/$db/sql': {
-      id: '/_app/db/$db/sql'
+    '/_app/w/$ws/db/$db/sql': {
+      id: '/_app/w/$ws/db/$db/sql'
       path: '/sql'
-      fullPath: '/db/$db/sql'
-      preLoaderRoute: typeof AppDbDbSqlRouteImport
-      parentRoute: typeof AppDbDbRouteRoute
+      fullPath: '/w/$ws/db/$db/sql'
+      preLoaderRoute: typeof AppWWsDbDbSqlRouteImport
+      parentRoute: typeof AppWWsDbDbRouteRoute
     }
   }
 }
 
-interface AppDbDbRouteRouteChildren {
-  AppDbDbBranchesRoute: typeof AppDbDbBranchesRoute
-  AppDbDbConnectRoute: typeof AppDbDbConnectRoute
-  AppDbDbDataRoute: typeof AppDbDbDataRoute
-  AppDbDbSchemaRoute: typeof AppDbDbSchemaRoute
-  AppDbDbSettingsRoute: typeof AppDbDbSettingsRoute
-  AppDbDbSnapshotsRoute: typeof AppDbDbSnapshotsRoute
-  AppDbDbSqlRoute: typeof AppDbDbSqlRoute
-  AppDbDbIndexRoute: typeof AppDbDbIndexRoute
+interface AppInstanceRouteChildren {
+  AppInstanceAccountRoute: typeof AppInstanceAccountRoute
+  AppInstanceMembersRoute: typeof AppInstanceMembersRoute
+  AppInstanceSettingsRoute: typeof AppInstanceSettingsRoute
 }
 
-const AppDbDbRouteRouteChildren: AppDbDbRouteRouteChildren = {
-  AppDbDbBranchesRoute: AppDbDbBranchesRoute,
-  AppDbDbConnectRoute: AppDbDbConnectRoute,
-  AppDbDbDataRoute: AppDbDbDataRoute,
-  AppDbDbSchemaRoute: AppDbDbSchemaRoute,
-  AppDbDbSettingsRoute: AppDbDbSettingsRoute,
-  AppDbDbSnapshotsRoute: AppDbDbSnapshotsRoute,
-  AppDbDbSqlRoute: AppDbDbSqlRoute,
-  AppDbDbIndexRoute: AppDbDbIndexRoute,
+const AppInstanceRouteChildren: AppInstanceRouteChildren = {
+  AppInstanceAccountRoute: AppInstanceAccountRoute,
+  AppInstanceMembersRoute: AppInstanceMembersRoute,
+  AppInstanceSettingsRoute: AppInstanceSettingsRoute,
 }
 
-const AppDbDbRouteRouteWithChildren = AppDbDbRouteRoute._addFileChildren(
-  AppDbDbRouteRouteChildren,
+const AppInstanceRouteWithChildren = AppInstanceRoute._addFileChildren(
+  AppInstanceRouteChildren,
+)
+
+interface AppWWsDbDbRouteRouteChildren {
+  AppWWsDbDbBranchesRoute: typeof AppWWsDbDbBranchesRoute
+  AppWWsDbDbConnectRoute: typeof AppWWsDbDbConnectRoute
+  AppWWsDbDbDataRoute: typeof AppWWsDbDbDataRoute
+  AppWWsDbDbSchemaRoute: typeof AppWWsDbDbSchemaRoute
+  AppWWsDbDbSettingsRoute: typeof AppWWsDbDbSettingsRoute
+  AppWWsDbDbSnapshotsRoute: typeof AppWWsDbDbSnapshotsRoute
+  AppWWsDbDbSqlRoute: typeof AppWWsDbDbSqlRoute
+  AppWWsDbDbIndexRoute: typeof AppWWsDbDbIndexRoute
+}
+
+const AppWWsDbDbRouteRouteChildren: AppWWsDbDbRouteRouteChildren = {
+  AppWWsDbDbBranchesRoute: AppWWsDbDbBranchesRoute,
+  AppWWsDbDbConnectRoute: AppWWsDbDbConnectRoute,
+  AppWWsDbDbDataRoute: AppWWsDbDbDataRoute,
+  AppWWsDbDbSchemaRoute: AppWWsDbDbSchemaRoute,
+  AppWWsDbDbSettingsRoute: AppWWsDbDbSettingsRoute,
+  AppWWsDbDbSnapshotsRoute: AppWWsDbDbSnapshotsRoute,
+  AppWWsDbDbSqlRoute: AppWWsDbDbSqlRoute,
+  AppWWsDbDbIndexRoute: AppWWsDbDbIndexRoute,
+}
+
+const AppWWsDbDbRouteRouteWithChildren = AppWWsDbDbRouteRoute._addFileChildren(
+  AppWWsDbDbRouteRouteChildren,
+)
+
+interface AppWWsRouteRouteChildren {
+  AppWWsAuditRoute: typeof AppWWsAuditRoute
+  AppWWsSettingsRoute: typeof AppWWsSettingsRoute
+  AppWWsTokensRoute: typeof AppWWsTokensRoute
+  AppWWsTrashRoute: typeof AppWWsTrashRoute
+  AppWWsIndexRoute: typeof AppWWsIndexRoute
+  AppWWsDbDbRouteRoute: typeof AppWWsDbDbRouteRouteWithChildren
+  AppWWsBucketsIndexRoute: typeof AppWWsBucketsIndexRoute
+  AppWWsBucketsBucketConnectRoute: typeof AppWWsBucketsBucketConnectRoute
+  AppWWsBucketsBucketSettingsRoute: typeof AppWWsBucketsBucketSettingsRoute
+  AppWWsBucketsBucketIndexRoute: typeof AppWWsBucketsBucketIndexRoute
+}
+
+const AppWWsRouteRouteChildren: AppWWsRouteRouteChildren = {
+  AppWWsAuditRoute: AppWWsAuditRoute,
+  AppWWsSettingsRoute: AppWWsSettingsRoute,
+  AppWWsTokensRoute: AppWWsTokensRoute,
+  AppWWsTrashRoute: AppWWsTrashRoute,
+  AppWWsIndexRoute: AppWWsIndexRoute,
+  AppWWsDbDbRouteRoute: AppWWsDbDbRouteRouteWithChildren,
+  AppWWsBucketsIndexRoute: AppWWsBucketsIndexRoute,
+  AppWWsBucketsBucketConnectRoute: AppWWsBucketsBucketConnectRoute,
+  AppWWsBucketsBucketSettingsRoute: AppWWsBucketsBucketSettingsRoute,
+  AppWWsBucketsBucketIndexRoute: AppWWsBucketsBucketIndexRoute,
+}
+
+const AppWWsRouteRouteWithChildren = AppWWsRouteRoute._addFileChildren(
+  AppWWsRouteRouteChildren,
 )
 
 interface AppRouteChildren {
-  AppAccountRoute: typeof AppAccountRoute
+  AppInstanceRoute: typeof AppInstanceRouteWithChildren
   AppAuditRoute: typeof AppAuditRoute
-  AppMembersRoute: typeof AppMembersRoute
-  AppSettingsRoute: typeof AppSettingsRoute
   AppTokensRoute: typeof AppTokensRoute
   AppTrashRoute: typeof AppTrashRoute
   AppIndexRoute: typeof AppIndexRoute
-  AppDbDbRouteRoute: typeof AppDbDbRouteRouteWithChildren
+  AppWWsRouteRoute: typeof AppWWsRouteRouteWithChildren
+  AppBucketsSplatRoute: typeof AppBucketsSplatRoute
+  AppDbSplatRoute: typeof AppDbSplatRoute
   AppBucketsIndexRoute: typeof AppBucketsIndexRoute
-  AppBucketsBucketConnectRoute: typeof AppBucketsBucketConnectRoute
-  AppBucketsBucketSettingsRoute: typeof AppBucketsBucketSettingsRoute
-  AppBucketsBucketIndexRoute: typeof AppBucketsBucketIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppAccountRoute: AppAccountRoute,
+  AppInstanceRoute: AppInstanceRouteWithChildren,
   AppAuditRoute: AppAuditRoute,
-  AppMembersRoute: AppMembersRoute,
-  AppSettingsRoute: AppSettingsRoute,
   AppTokensRoute: AppTokensRoute,
   AppTrashRoute: AppTrashRoute,
   AppIndexRoute: AppIndexRoute,
-  AppDbDbRouteRoute: AppDbDbRouteRouteWithChildren,
+  AppWWsRouteRoute: AppWWsRouteRouteWithChildren,
+  AppBucketsSplatRoute: AppBucketsSplatRoute,
+  AppDbSplatRoute: AppDbSplatRoute,
   AppBucketsIndexRoute: AppBucketsIndexRoute,
-  AppBucketsBucketConnectRoute: AppBucketsBucketConnectRoute,
-  AppBucketsBucketSettingsRoute: AppBucketsBucketSettingsRoute,
-  AppBucketsBucketIndexRoute: AppBucketsBucketIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

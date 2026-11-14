@@ -15,6 +15,13 @@ function readable(text: string) {
   expect(el.closest("[title]")?.getAttribute("title")).toBe(text)
 }
 
+// The same for text made of several elements, like a summary with names in mono.
+function titled(text: string) {
+  const el = [...document.querySelectorAll<HTMLElement>(`[title="${text}"]`)].find((e) => e.textContent === text)
+  expect(el, text).toBeTruthy()
+  expect(el!.className).toContain("truncate")
+}
+
 test("tokens: long names, a deleted database, empty and 500 rows", async () => {
   const { unmount } = render(<TokenTable tokens={worst.tokens(3)} names={worst.tokenNames} onRevoke={noop} />)
   readable(worst.LONG_TOKEN)
@@ -45,20 +52,46 @@ test("tokens: long names, a deleted database, empty and 500 rows", async () => {
 })
 
 test("members: a missing name falls back to the email, and you can't act on yourself", () => {
-  render(<MemberTable members={worst.members(3)} me="me" onRole={noop} onRemove={noop} />)
+  render(<MemberTable members={worst.members(3)} me="me" workspaces={worst.workspaces} onAccess={noop} onRemove={noop} />)
   expect(screen.getAllByText(worst.LONG_EMAIL)).toHaveLength(2)
   readable(worst.LONG_EMAIL)
   expect(screen.queryByRole("button", { name: /^Remove Aleksandra/ })).toBeNull()
-  expect(screen.queryByRole("combobox", { name: /Aleksandra/ })).toBeNull()
-  expect(screen.getByRole("combobox", { name: `Role for ${worst.LONG_EMAIL}` })).toBeTruthy()
+  expect(screen.queryByRole("button", { name: /Aleksandra/ })).toBeNull()
+  expect(screen.queryByRole("combobox")).toBeNull()
+  expect(screen.getByRole("button", { name: `Change access for ${worst.LONG_EMAIL}` })).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Change access for Jo" })).toBeTruthy()
   expect(screen.getByRole("button", { name: "Remove Jo" })).toBeTruthy()
 })
 
-test("invites: long email and the empty state", () => {
-  const { unmount } = render(<InviteTable invites={worst.invites} onResend={async () => ""} onCancel={noop} onChanged={() => {}} />)
-  readable(worst.LONG_EMAIL)
+test("members: a role in every workspace, a 63 character workspace name, no workspace at all, and 500 rows", () => {
+  const { unmount } = render(<MemberTable members={worst.members(3)} me="me" workspaces={worst.workspaces} onAccess={noop} onRemove={noop} />)
+  const cells = [...document.querySelectorAll("tbody tr")].map((r) => r.querySelectorAll("td")[1]!)
+  expect(cells.map((c) => c.textContent)).toEqual(["Owner", worst.MANY_ROLES_SUMMARY, "No workspace"])
+  // The summary is one truncated line, read in full through its title. The role in a workspace that is gone isn't in it.
+  for (const c of cells) expect(c.firstElementChild?.getAttribute("title")).toBe(c.textContent)
+  titled(worst.MANY_ROLES_SUMMARY)
+  expect(worst.MANY_ROLES_SUMMARY).not.toContain("ws_")
+  expect([...cells[1]!.querySelectorAll(".font-mono")].map((m) => m.textContent)).toEqual(["default", worst.LONG_WORKSPACE, "x"])
+  // On a narrow screen the email wraps and the summary sits under it.
+  const email = screen.getAllByText(worst.LONG_EMAIL).find((e) => e.getAttribute("title") === worst.LONG_EMAIL && e.className.includes("text-xs"))!
+  expect(email.className).toContain("[overflow-wrap:anywhere]")
+  expect(email.nextElementSibling?.textContent).toBe(worst.MANY_ROLES_SUMMARY)
+  expect(email.nextElementSibling?.className).toContain("sm:hidden")
   unmount()
-  render(<InviteTable invites={[]} onResend={async () => ""} onCancel={noop} onChanged={() => {}} />)
+  const many = render(<MemberTable members={worst.members(500)} me="me" workspaces={worst.workspaces} onAccess={noop} onRemove={noop} />)
+  expect(many.container.querySelectorAll("tbody tr")).toHaveLength(500)
+  expect(screen.getAllByRole("button", { name: /^Change access for / })).toHaveLength(499)
+})
+
+test("invites: long email, long access and the empty state", () => {
+  const { unmount } = render(<InviteTable invites={worst.invites} workspaces={worst.workspaces} onResend={async () => ""} onCancel={noop} onChanged={() => {}} />)
+  readable(worst.LONG_EMAIL)
+  titled(worst.MANY_ROLES_SUMMARY)
+  unmount()
+  const owner = render(<InviteTable invites={[{ ...worst.invites[0]!, owner: true, grants: [] }]} workspaces={worst.workspaces} onResend={async () => ""} onCancel={noop} onChanged={() => {}} />)
+  readable("Owner")
+  owner.unmount()
+  render(<InviteTable invites={[]} workspaces={worst.workspaces} onResend={async () => ""} onCancel={noop} onChanged={() => {}} />)
   expect(screen.getByText("No open invites")).toBeTruthy()
 })
 

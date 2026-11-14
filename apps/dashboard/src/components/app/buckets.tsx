@@ -15,17 +15,19 @@ import { cn } from "@/lib/utils"
 import { Confirm, errorText } from "./form-dialog"
 import { NameDialog, type TriggerSlot } from "./name-dialog"
 import { type ObjectAccess, ObjectDetails } from "./object-details"
+import { useWs } from "./workspace"
 
 export const BUCKET_PATTERN = "[a-z0-9][a-z0-9\\-]{1,61}[a-z0-9]"
 
 /** Creates a bucket and opens it. A failure shows under the dialog's field, so only success gets a toast. */
 export function useCreateBucket(onDone?: () => void) {
+  const ws = useWs()
   const router = useRouter()
   return async (name: string) => {
-    await createBucket({ data: { name } })
+    await createBucket({ data: { ws, name } })
     toast.success(`Created ${name}`)
     await router.invalidate()
-    await router.navigate({ to: "/buckets/$bucket", params: { bucket: name } })
+    await router.navigate({ to: "/w/$ws/buckets/$bucket", params: { ws, bucket: name } })
     onDone?.()
   }
 }
@@ -50,6 +52,7 @@ export function CreateBucketDialog({ onCreate, variant, ...slot }: { onCreate: (
 }
 
 export function BucketTable({ buckets }: { buckets: BucketOut[] }) {
+  const ws = useWs()
   return (
     <Table>
       <thead>
@@ -65,7 +68,7 @@ export function BucketTable({ buckets }: { buckets: BucketOut[] }) {
           <TableRow key={b.id} className="relative">
             <TableCell className="max-w-0 w-1/2">
               <TruncatedTip text={b.name}>
-                <Link to="/buckets/$bucket" params={{ bucket: b.name }} className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0">
+                <Link to="/w/$ws/buckets/$bucket" params={{ ws, bucket: b.name }} className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0">
                   <ArchiveIcon aria-hidden="true" className="size-4 shrink-0 text-faint" />
                   <span data-truncate className="truncate">
                     {b.name}
@@ -121,9 +124,9 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
  * A large file goes up as a multipart upload, one part per request, so no
  * request runs long.
  */
-export async function uploadFile(bucket: string, prefix: string, file: File, f: typeof fetch = fetch): Promise<{ key: string; etag: string }> {
+export async function uploadFile(ws: string, bucket: string, prefix: string, file: File, f: typeof fetch = fetch): Promise<{ key: string; etag: string }> {
   const key = prefix + file.name
-  const url = objectURL(bucket, key)
+  const url = objectURL(ws, bucket, key)
   const type = file.type || "application/octet-stream"
   // A key with a "." or ".." segment can't travel in an S3 path, so it goes
   // up in one piece through the key-in-query route.
@@ -149,6 +152,7 @@ export async function uploadFile(bucket: string, prefix: string, file: File, f: 
 }
 
 export function UploadButton({ bucket, prefix, onDone }: { bucket: string; prefix: string; onDone: () => Promise<unknown> }) {
+  const ws = useWs()
   const input = useRef<HTMLInputElement>(null)
   const [left, setLeft] = useState(0)
 
@@ -159,7 +163,7 @@ export function UploadButton({ bucket, prefix, onDone }: { bucket: string; prefi
     let uploaded = ""
     for (const f of files) {
       try {
-        await uploadFile(bucket, prefix, f)
+        await uploadFile(ws, bucket, prefix, f)
         ok++
         uploaded = f.name
       } catch (e) {
@@ -347,6 +351,7 @@ export function ObjectTable({
   onSortChange?: (sort: ObjectSort) => void
   footer?: ReactNode
 }) {
+  const ws = useWs()
   const [details] = useState(() => createDrawerController<ObjectOut>())
   // A key equal to the folder itself is a folder marker some S3 tools make:
   // it has no name of its own here, so it isn't listed.
@@ -381,8 +386,8 @@ export function ObjectTable({
                 <TableCell className="max-w-0 w-1/2">
                   <TruncatedTip text={r.prefix.slice(prefix.length)}>
                     <Link
-                      to="/buckets/$bucket"
-                      params={{ bucket }}
+                      to="/w/$ws/buckets/$bucket"
+                      params={{ ws, bucket }}
                       search={{ prefix: r.prefix, ...sortSearch(sort) }}
                       className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0"
                     >
@@ -420,7 +425,7 @@ export function ObjectTable({
                 <TableCell className="w-0 whitespace-nowrap text-right">
                   <div className="relative flex justify-end gap-1">
                     <a
-                      href={objectURL(bucket, r.object.key)}
+                      href={objectURL(ws, bucket, r.object.key)}
                       download
                       aria-label={`Download ${r.object.key}`}
                       className={buttonVariants({ variant: "ghost", size: "icon-sm" })}

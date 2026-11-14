@@ -4,7 +4,7 @@ import { createServerFn } from "@tanstack/react-start"
 import { z } from "zod"
 import { type Cell, type RowKey, encodeKey, encodePreview } from "@/lib/cells"
 import { can } from "@/lib/roles"
-import { call, engineFor } from "@/server/engine"
+import { call } from "@/server/engine"
 import {
   CELL_EDIT_MAX,
   FILTER_OPS,
@@ -20,12 +20,14 @@ import {
   updateSql,
   viewColumnsSql,
 } from "@/server/grid"
-import { type Viewer, requireCan } from "@/server/session"
+import { type Access, requireIn } from "@/server/session"
 
 const ref = z.string().min(1).max(100)
+// The workspace a call acts in, by name or id. Every call names one.
+const ws = z.string().min(1).max(100)
 const objectName = z.string().min(1).max(1000)
 const columnName = z.string().max(1000)
-const target = { db: ref, branch: ref, table: objectName }
+const target = { ws, db: ref, branch: ref, table: objectName }
 
 const keyValue = z.discriminatedUnion("t", [
   z.object({ t: z.literal("null") }),
@@ -58,8 +60,8 @@ export interface BrowseResult {
   error: string | null
 }
 
-function branchClient(viewer: Viewer, db: string, branch: string): Client {
-  return engineFor(viewer).database(db, branch)
+function branchClient(access: Access, db: string, branch: string): Client {
+  return access.engine.database(db, branch)
 }
 
 async function loadTable(client: Client, schema: Schema, name: string): Promise<GridTable | null> {
@@ -73,8 +75,8 @@ async function loadTable(client: Client, schema: Schema, name: string): Promise<
 }
 
 /** The table named in the request, checked against the branch's schema. */
-async function tableFor(viewer: Viewer, client: Client, d: { db: string; branch: string; table: string }): Promise<GridTable> {
-  const schema = await engineFor(viewer).branches.schema(d.db, d.branch)
+async function tableFor(access: Access, client: Client, d: { db: string; branch: string; table: string }): Promise<GridTable> {
+  const schema = await access.engine.branches.schema(d.db, d.branch)
   const t = await loadTable(client, schema, d.table)
   if (!t) throw new Error(`No table or view named ${d.table} on ${d.branch}.`)
   return t
@@ -86,6 +88,7 @@ const filter = z.object({ column: columnName, op: z.enum(FILTER_OPS), value: z.s
 export const browseTable = createServerFn({ method: "POST" })
   .validator(
     z.object({
+      ws,
       db: ref,
       branch: ref,
       table: objectName.optional(),
@@ -95,10 +98,10 @@ export const browseTable = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }): Promise<BrowseResult> => {
-    const viewer = await requireCan("read")
-    const canWrite = can(viewer.role, "write")
-    const client = branchClient(viewer, data.db, data.branch)
-    const schema = await call(() => engineFor(viewer).branches.schema(data.db, data.branch))
+    const access = await requireIn(data.ws, "read")
+    const canWrite = can(access.role, "write")
+    const client = branchClient(access, data.db, data.branch)
+    const schema = await call(() => access.engine.branches.schema(data.db, data.branch))
     const objects = listObjects(schema)
     const empty = { objects, rows: [], total: 0, page: data.page, pageSize: PAGE_SIZE, error: null }
     const name = data.table ?? objects[0]?.name
@@ -137,9 +140,9 @@ export const browseTable = createServerFn({ method: "POST" })
 export const updateCell = createServerFn({ method: "POST" })
   .validator(z.object({ ...target, key: rowKey, column: columnName, value: z.string().max(CELL_EDIT_MAX).nullable() }))
   .handler(async ({ data }) => {
-    const viewer = await requireCan("write")
-    const client = branchClient(viewer, data.db, data.branch)
-    const t = await call(() => tableFor(viewer, client, data))
+    const access = await requireIn(data.ws, "write")
+    const client = branchClient(access, data.db, data.branch)
+    const t = await call(() => tableFor(access, client, data))
     const q = updateSql(t, data.key, data.column, data.value)
     const r = await call(() => client.query(q.sql, q.args))
     if (r.rowsAffected !== 1) throw new Error("That row changed or is gone. Reload and try again.")
@@ -149,9 +152,9 @@ export const updateCell = createServerFn({ method: "POST" })
 export const insertRow = createServerFn({ method: "POST" })
   .validator(z.object({ ...target, values: z.record(columnName, z.string().max(CELL_EDIT_MAX).nullable()) }))
   .handler(async ({ data }) => {
-    const viewer = await requireCan("write")
-    const client = branchClient(viewer, data.db, data.branch)
-    const t = await call(() => tableFor(viewer, client, data))
+    const access = await requireIn(data.ws, "write")
+    const client = branchClient(access, data.db, data.branch)
+    const t = await call(() => tableFor(access, client, data))
     const q = insertSql(t, data.values)
     await call(() => client.query(q.sql, q.args))
     return { ok: true }
@@ -160,9 +163,9 @@ export const insertRow = createServerFn({ method: "POST" })
 export const deleteRows = createServerFn({ method: "POST" })
   .validator(z.object({ ...target, keys: z.array(rowKey).min(1).max(500) }))
   .handler(async ({ data }) => {
-    const viewer = await requireCan("write")
-    const client = branchClient(viewer, data.db, data.branch)
-    const t = await call(() => tableFor(viewer, client, data))
+    const access = await requireIn(data.ws, "write")
+    const client = branchClient(access, data.db, data.branch)
+    const t = await call(() => tableFor(access, client, data))
     const results = await call(() => client.batch(data.keys.map((k) => deleteSql(t, k))))
     return { deleted: results.reduce((n, r) => n + r.rowsAffected, 0) }
   })
@@ -172,9 +175,9 @@ export type FullCell = { t: "null" } | { t: "int" | "real" | "text"; v: string }
 export const getCell = createServerFn({ method: "POST" })
   .validator(z.object({ ...target, key: rowKey, column: columnName }))
   .handler(async ({ data }): Promise<FullCell> => {
-    const viewer = await requireCan("read")
-    const client = branchClient(viewer, data.db, data.branch)
-    const t = await call(() => tableFor(viewer, client, data))
+    const access = await requireIn(data.ws, "read")
+    const client = branchClient(access, data.db, data.branch)
+    const t = await call(() => tableFor(access, client, data))
     const q = cellSql(t, data.key, data.column)
     const r = await call(() => client.query(q.sql, q.args, { readOnly: true }))
     const row = r.values[0]

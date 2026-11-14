@@ -7,6 +7,7 @@ import { browseTable, deleteRows, getCell, insertRow, updateCell } from "@/fns/d
 import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
 import { FILTER_OPS, FILTER_VALUE_MAX } from "@/server/grid"
+import { useWs } from "@/components/app/workspace"
 
 // A bad value in a shared link drops that one param instead of failing the page.
 const search = z.object({
@@ -21,7 +22,7 @@ const search = z.object({
     .catch(undefined),
 })
 
-export const Route = createFileRoute("/_app/db/$db/data")({
+export const Route = createFileRoute("/_app/w/$ws/db/$db/data")({
   validateSearch: search,
   loaderDeps: ({ search: s }) => ({ branch: s.branch, table: s.table, page: s.page ?? 1, sort: s.sort, dir: s.dir, where: s.where ?? [] }),
   loader: async ({ params, deps, parentMatchPromise }) => {
@@ -31,6 +32,7 @@ export const Route = createFileRoute("/_app/db/$db/data")({
     const branch = deps.branch && branches.some((b) => b.name === deps.branch) ? deps.branch : (database?.default_branch ?? "main")
     const result = await browseTable({
       data: {
+        ws: params.ws,
         db: params.db,
         branch,
         table: deps.table,
@@ -56,6 +58,7 @@ export const Route = createFileRoute("/_app/db/$db/data")({
 })
 
 function DataPage() {
+  const ws = useWs()
   const { db } = Route.useParams()
   const { branch, result } = Route.useLoaderData()
   const s = Route.useSearch()
@@ -89,17 +92,17 @@ function DataPage() {
 
   const target = { db, branch, table: table ?? "" }
   const actions: DataActions = {
-    loadCell: (key, column) => getCell({ data: { ...target, key, column } }),
+    loadCell: (key, column) => getCell({ data: { ws, ...target, key, column } }),
     updateCell: async (key, column, value) => {
-      await updateCell({ data: { ...target, key, column, value } })
+      await updateCell({ data: { ws, ...target, key, column, value } })
       await router.invalidate()
     },
     insertRow: async (values) => {
-      await insertRow({ data: { ...target, values } })
+      await insertRow({ data: { ws, ...target, values } })
       await router.invalidate()
     },
     deleteRows: async (keys) => {
-      await deleteRows({ data: { ...target, keys } })
+      await deleteRows({ data: { ws, ...target, keys } })
       await router.invalidate()
     },
   }
