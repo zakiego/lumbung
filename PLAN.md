@@ -313,7 +313,7 @@ Work top to bottom. Each one ends green in CI, with its docs pages written.
 | 10 | Deploy | Section 12, live at the public hostname, backup and restore tested |
 | 11 | libSQL protocol | `@libsql/client` and Drizzle's libsql driver work unchanged against a branch, including interactive transactions |
 
-Object storage continues with milestones 12 to 17 in section 16.9.
+Object storage continues with milestones 12 to 17 in section 16.9, workspaces with 18 to 22 in section 17.11.
 
 Later, not scheduled: MCP OAuth for Claude on the web, publishing the CLI, the open-source checklist (license, security policy, contribution guide), read replicas.
 
@@ -427,3 +427,125 @@ Limits (section 6.3 style, all settings): object size, bucket size, total object
 | 17 | Dashboard | 16.8 screens, `break-ui` on the browser, end-to-end script walks a bucket |
 
 Each ends with a cold review by a fresh subagent and every HIGH and MEDIUM finding fixed before the next starts.
+
+## 17. Workspaces
+
+Added after milestone 17. A workspace is a space that owns databases, buckets and tokens, so an app or an agent can make what it needs and reach only its own. ADR 0008 records the model, the token scopes, addressing, quotas, deletion, the dashboard member model and the upgrade path, with what was weighed for each.
+
+Where this section and an earlier one disagree, this one wins. The earlier text is corrected in the milestone that changes the behavior: section 1 (one instance is still one team; workspaces separate its apps and agents), 6.3, 6.8, 6.9, 7, 8, 9, 10, 16.1, 16.3 and 16.4 (creating and deleting databases and buckets no longer needs an instance admin).
+
+### 17.1 Model
+
+- A workspace has an id (`ws_...`), a name (the database name pattern, unique on the instance) and limits. Every database and bucket belongs to exactly one workspace. So does every token below the instance.
+- Database names are unique among one workspace's live databases, bucket names among one workspace's buckets. Two workspaces can each have a database called `notes`, and a create never fails because of a name in another workspace.
+- Every instance has one default workspace. The migration makes it on an upgrade and the engine makes it on a fresh start. It can be renamed, not deleted.
+- Files on disk are unchanged (section 5): they are named by ids, which stay unique on the instance.
+
+### 17.2 Tokens
+
+Scopes: `instance`, `workspace`, `database`, `bucket`, `grants`.
+
+| Scope | Reaches |
+|---|---|
+| `workspace` | Everything in one workspace, now and later. read: list and read. write: also change data (SQL, objects, branches, snapshots). admin: also create, rename, delete and restore databases and buckets, bucket settings, the workspace's tokens and audit log |
+| `database`, `bucket`, `grants` | As in 6.8 and 16.4, inside one workspace. Every grant names something in the token's own workspace |
+| `instance` | No workspace of its own. Workspaces and their limits, instance tokens, the instance audit log, moving a database or bucket between workspaces, and any workspace's contents at its level |
+
+- A workspace admin can't change its workspace's limits, rename or delete it, or see, list or make other workspaces.
+- Minting and managing: a token can only be made, listed or revoked by a principal in the same workspace that is an admin of everything it reaches. A workspace admin covers every token of its workspace. Only an instance admin covers an instance token.
+- `POST /v1/tokens` without a target makes a workspace token in the request's workspace. Instance tokens are made at `POST /v1/instance/tokens`.
+- `LUMBUNG_MAX_TOKENS_PER_WORKSPACE` caps live tokens in one workspace.
+
+### 17.3 Addressing
+
+- Short URLs resolve in the caller's workspace: `/v1/databases/...`, `/v1/trash`, `/v1/buckets/...`, `/v1/tokens`, `/v1/audit`, `/v1/s3/...`, `/libsql/...`, `/mcp`. A workspace-bound token's workspace is its own. A caller with no workspace of its own (an instance token, an anonymous request) acts in the default workspace.
+- Qualified URLs put `/v1/workspaces/{ws}` in front of the same paths, for every door: `/v1/workspaces/{ws}/databases/...`, `/v1/workspaces/{ws}/s3/<bucket>/<key>`, `/v1/workspaces/{ws}/libsql/{db}/{branch}/`, `/v1/workspaces/{ws}/mcp`. `{ws}` is a name or an id.
+- A workspace-bound token using a qualified URL for any workspace but its own gets `workspace_not_found`, the same answer as a workspace that doesn't exist. On the S3 API that is `NoSuchBucket`, or `AccessDenied` where no bucket is named.
+- `{db}` and `{bucket}` still accept a name or an id. An id from another workspace is not found.
+- OpenAPI lists each operation once, at its short path, and states the qualified form as a rule.
+
+### 17.4 REST
+
+```
+GET                  /v1/workspace                          (the request's workspace: limits and usage)
+GET  POST            /v1/workspaces                         (a workspace token sees only its own; POST is instance admin)
+GET  PATCH  DELETE   /v1/workspaces/{ws}                    (PATCH and DELETE are instance admin)
+POST                 /v1/workspaces/{ws}/restore            (undo a delete)
+POST                 /v1/databases/{db}/move                (instance admin: to another workspace)
+POST                 /v1/buckets/{bucket}/move              (instance admin)
+GET  POST            /v1/instance/tokens                    (instance admin)
+DELETE               /v1/instance/tokens/{token_id}
+GET                  /v1/instance/audit                     (every workspace and instance actions)
+```
+
+- Creating, renaming, deleting and restoring a database, the trash list, creating and deleting a bucket and reading the audit log take a workspace admin (they took an instance admin).
+- `GET /v1/audit` is the request's workspace. Every audit entry records its workspace, and `LUMBUNG_AUDIT_MAX_ROWS` applies per workspace.
+- Database, bucket and token bodies gain `workspace_id`. A token's `scope` may be `workspace`.
+- The database list and `GET /v1/databases/{db}` give a token limited to some branches the same limited view: counts, size, default branch and last activity cover only the branches it reaches.
+- Moving revokes every token that reached the moved database or bucket.
+
+### 17.5 Limits and quotas
+
+Per workspace: `max_databases` (counting the trash), `max_buckets`, `max_database_bytes` (branch files of live databases), `max_object_bytes` (objects plus multipart parts in progress). 0 means no limit of its own; the instance limits of 6.3 and 16.6 always apply on top. Counts are checked in the inserting transaction, bytes are reserved before a write.
+
+Settings: `LUMBUNG_MAX_WORKSPACES`, `LUMBUNG_MAX_TOKENS_PER_WORKSPACE`, and the limits a new workspace gets when the request doesn't say: `LUMBUNG_WORKSPACE_MAX_DATABASES`, `LUMBUNG_WORKSPACE_MAX_BUCKETS`, `LUMBUNG_WORKSPACE_MAX_DATABASE_BYTES`, `LUMBUNG_WORKSPACE_MAX_OBJECT_BYTES`. The default workspace starts with no limits of its own. Errors: `workspace_not_found`, `workspace_quota_exceeded`, and `limit_reached` for counts.
+
+### 17.6 Deleting, restoring, moving
+
+- Deleting a workspace moves it to the trash for `LUMBUNG_TRASH_RETENTION`. At once its tokens stop authenticating, its databases and buckets stop resolving (public links and presigned URLs included), open connections and libSQL streams close, and scheduled snapshots and branch expiry pause.
+- Restoring brings everything back, tokens included. The name is free while it is in the trash, so a restore may need a new one.
+- After retention the engine purges it: databases, snapshots, objects, uploads, tokens. Audit entries stay.
+- The default workspace can't be deleted.
+
+### 17.7 Doors
+
+- libSQL and S3: unchanged URLs for a workspace token. S3 `CreateBucket` and `DeleteBucket` take a workspace admin, `ListBuckets` lists the request's workspace, and a copy source is resolved in the same workspace.
+- MCP: `create_database` and `create_bucket` take a workspace admin. New tools: `get_workspace` (limits and usage), `delete_database`, `restore_database`, `delete_bucket`, `delete_snapshot`, `restore_snapshot`. The server instructions name the workspace the token is in.
+- SDK (0.2.0, breaking): `createClient({ workspace })` adds the prefix, `client.workspace()` and `client.workspaces` (list, create, get, update, delete, restore), `move` on a database and a bucket, instance tokens. Creating a token without a target makes a workspace token.
+- CLI: `workspace list|create|show|update|delete|restore`, `--workspace` (and `LUMBUNG_WORKSPACE`, saved in the profile), `db move`, `bucket move`, `token create --instance`.
+
+### 17.8 Dashboard
+
+- The service token stays the dashboard's one engine credential. It calls qualified URLs and sends `X-Lumbung-Actor-Access: read|write|admin` for a user who isn't an owner. The engine then narrows the request to a workspace principal at that level, so the engine enforces the role. Only the service token is narrowed, and only downwards.
+- Roles: an instance `owner` sees and manages every workspace, the members and the instance. Everyone else has a role per workspace (admin, member, read-only) and sees only the workspaces they have a role in. Invites carry workspaces and roles. On upgrade, members and read-only users get that role in the default workspace.
+- The workspace is in the URL: `/app/w/{workspace}/...`. Old URLs redirect to the default workspace. A switcher sits at the top of the sidebar, with create for owners.
+- Screens: workspace switcher and create, workspace settings (name, limits, usage, delete with a typed confirmation, trash and restore for owners), members with a role per workspace, tokens for the workspace (a whole-workspace reach next to databases and buckets), audit for the workspace and for the instance, moving a database or bucket (owners).
+
+### 17.9 Isolation (the part that must not be wrong)
+
+Each row is a named test through the real handlers, for every door it applies to (REST, libSQL, S3, MCP). Sections 6.2 and 16.5 keep their tests as they are.
+
+| Attack | Expected |
+|---|---|
+| A workspace token of A reads, lists, queries, writes, branches, snapshots, restores or deletes a database of B, by name or by id | not found, the same answer as one that doesn't exist |
+| A workspace token of A reads, lists, heads, writes, deletes, copies from, presigns or uploads parts in a bucket of B, by name or by id | not found (`NoSuchBucket`), the same as one that doesn't exist |
+| Any list with A's token (databases, trash, buckets, tokens, audit, workspaces, S3 `ListBuckets`, MCP lists) | nothing of B |
+| A creates a database or bucket with a name B already uses | created; `name_taken` only for a name in A |
+| A's admin mints a token with a grant in B, lists or revokes a token of B, or makes an instance token | not found or denied, B's tokens never listed |
+| A's token on a qualified URL naming B, or a workspace that doesn't exist | the same `workspace_not_found` for both, on every door |
+| A database, branch, bucket or grants token inside A on anything else in A, or anything in B | denied or not found, as in 6.8 and 16.5 |
+| read on any write; write on creating, renaming or deleting a database or bucket, tokens, audit; admin on limits, renaming or deleting the workspace, creating a workspace, moving, the instance endpoints | denied |
+| Creating past `max_databases` or `max_buckets`, writing past `max_database_bytes` or `max_object_bytes` | refused, nothing partial kept, other workspaces unaffected |
+| A deleted workspace: its tokens, its access keys, its presigned URLs, its public links | unauthorized or denied, the same as a token or bucket that doesn't exist; all back after restore |
+| A moved database or bucket: tokens that reached it, and the old workspace's tokens | revoked; not found |
+| S3 copy with a source in B; a multipart upload id from B used in A; a libSQL baton from B's stream used by A | `NoSuchBucket`, `NoSuchUpload`, invalid baton |
+| Anonymous read of a public bucket of B through a short URL; of a private or missing bucket through a qualified URL | denied, private, missing and other-workspace look the same |
+| `X-Lumbung-Actor-Access` sent with a token that isn't the service token, or asking for more than the token has | ignored; never more than the token's own level |
+
+The two fuzz tests gain a second workspace and fail if a request with one workspace's token reads or changes anything of the other.
+
+### 17.10 Upgrade
+
+Migration 6, forward-only: the default workspace, `workspace_id` on `databases`, `buckets` and `tokens` (rebuilt, with `token_grants` carried across), per-workspace name indexes, `workspace_id` on audit rows. Existing database, bucket and grants tokens land in the default workspace. Instance tokens stay instance tokens. A test starts from a version 5 `meta.db` with every kind of token, a grants token included, and checks each afterwards. The steps for our instance are in `ops/README.md`.
+
+### 17.11 Milestones
+
+| # | Milestone | Done when |
+|---|---|---|
+| 18 | Workspace core | Migration 6 with the upgrade test, workspaces in meta, engine and auth, the `workspace` scope, short-URL resolution on every door, the workspace and instance endpoints, per-workspace audit, the limited database view, isolation rows for REST, libSQL, S3 and MCP, generated files current, concept docs |
+| 19 | Limits, deletion, addressing | 17.5 quotas, 17.6 trash, restore, purge and move, qualified URLs on every door, the service token's narrowed access, the new MCP tools, backup and restore drill, the rest of 17.9, fuzz tests with two workspaces |
+| 20 | SDK, CLI, docs | 17.7 SDK 0.2.0 and CLI with tests against a real engine, examples, guides and the AI agents guide, the proof script for REST, libSQL, S3 and MCP |
+| 21 | Dashboard | 17.8, reviewed per `/zaki-design-ui`, end-to-end script walks two workspaces |
+| 22 | Upgrade notes | `ops/README.md` steps for our instance, restore drill run against a local upgraded copy |
+
+Each ends with a cold security review by a fresh subagent and every HIGH and MEDIUM finding fixed before the next starts.
