@@ -11,6 +11,7 @@ import {
   ScrollTextIcon,
   SearchIcon,
   SettingsIcon,
+  Trash2Icon,
   UserIcon,
   UsersIcon,
 } from "lucide-react"
@@ -108,6 +109,7 @@ function SidebarBody({
     { show: can(viewer.role, "admin"), to: "/tokens", label: "Tokens", icon: <KeyRoundIcon /> },
     { show: can(viewer.role, "admin"), to: "/members", label: "Members", icon: <UsersIcon /> },
     { show: can(viewer.role, "write"), to: "/audit", label: "Audit log", icon: <ScrollTextIcon /> },
+    { show: true, to: "/trash", label: "Trash", icon: <Trash2Icon /> },
     { show: can(viewer.role, "admin"), to: "/settings", label: "Settings", icon: <SettingsIcon /> },
   ]
   const instance = all.filter((item) => item.show)
