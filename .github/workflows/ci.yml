@@ -111,3 +111,24 @@ jobs:
       - run: pnpm check:links
       # Every code sample in the docs runs against a live engine.
       - run: pnpm docs:test
+
+  # PLAN 13: boot the engine and the built dashboard, then walk the main flow
+  # once (setup, database, branch, diff, promote, snapshot, restore, token,
+  # SDK, MCP).
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/engine/go.mod
+          cache-dependency-path: apps/engine/go.sum
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The script talks to the engine through the SDK's built output.
+      - run: pnpm --filter @lumbung/client build
+      - run: pnpm e2e
