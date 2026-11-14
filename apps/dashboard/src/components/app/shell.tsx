@@ -3,10 +3,12 @@ import { Link, type LinkProps, useRouter } from "@tanstack/react-router"
 import {
   DatabaseIcon,
   KeyRoundIcon,
+  LayoutGridIcon,
   LogOutIcon,
   MenuIcon,
   PanelLeftIcon,
   ScrollTextIcon,
+  SearchIcon,
   SettingsIcon,
   UserIcon,
   UsersIcon,
@@ -14,6 +16,7 @@ import {
 import { createContext, type ReactNode, use, useEffect, useState } from "react"
 import { Avatar } from "@/components/ui/avatar"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { DialogShortcut, DialogTrigger, createDialogController } from "@/components/ui/dialog"
 import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger, createDrawerController } from "@/components/ui/drawer"
 import { ScrollArea, Separator } from "@/components/ui/layout"
 import { Menu, MenuContent, MenuGroup, MenuGroupLabel, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu"
@@ -25,10 +28,12 @@ import { forgetSession } from "@/lib/session-cache"
 import { type Theme, applyTheme, readSidebarCollapsed, readTheme, setSidebarCollapsed } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 import type { Viewer } from "@/server/session"
+import { CommandPalette } from "./command-palette"
 import { Mark } from "./mark"
 
 type ShellState = {
   drawer: ReturnType<typeof createDrawerController<unknown, unknown>>
+  palette: ReturnType<typeof createDialogController<unknown, unknown>>
   collapsed: boolean
   toggleCollapsed: () => void
 }
@@ -43,6 +48,8 @@ function useShell(): ShellState {
 
 export function AppShell({ viewer, databases, children }: { viewer: Viewer; databases: DatabaseOut[] | null; children: ReactNode }) {
   const [drawer] = useState(() => createDrawerController<unknown, unknown>())
+  const [palette] = useState(() => createDialogController<unknown, unknown>())
+  const router = useRouter()
   const [collapsed, setCollapsed] = useState(false)
   useEffect(() => setCollapsed(readSidebarCollapsed()), [])
   const toggleCollapsed = () => {
@@ -50,7 +57,7 @@ export function AppShell({ viewer, databases, children }: { viewer: Viewer; data
     setCollapsed(!collapsed)
   }
   return (
-    <ShellContext value={{ drawer, collapsed, toggleCollapsed }}>
+    <ShellContext value={{ drawer, palette, collapsed, toggleCollapsed }}>
       <div className="flex min-h-svh">
         <aside
           data-sidebar-rail=""
@@ -66,6 +73,7 @@ export function AppShell({ viewer, databases, children }: { viewer: Viewer; data
         </Drawer>
         <div className="flex min-w-0 flex-1 flex-col">{children}</div>
       </div>
+      <CommandPalette controller={palette} viewer={viewer} databases={databases} navigate={(to, params) => router.navigate({ to, params } as never)} />
     </ShellContext>
   )
 }
@@ -91,8 +99,12 @@ function SidebarBody({ viewer, databases, rail = false, onNavigate }: { viewer: 
           <span className="truncate text-[13px] font-[590] sidebar-collapsed:sr-only">Lumbung</span>
         </Link>
       </div>
+      {!onNavigate && <SearchTrigger rail={rail} />}
       <ScrollArea className="min-h-0 flex-1" viewportClassName="px-2 pb-4">
         <nav aria-label="Main" className="flex flex-col gap-5">
+          <div className="flex flex-col gap-0.5">
+            <NavItem to="/" label="Overview" icon={<LayoutGridIcon />} exact rail={rail} onNavigate={onNavigate} />
+          </div>
           <NavGroup label="Databases">
             {databases === null && <p className="px-2 text-xs text-muted-foreground sidebar-collapsed:hidden">Can't load databases</p>}
             {databases?.length === 0 && <p className="px-2 text-xs text-muted-foreground sidebar-collapsed:hidden">None yet</p>}
@@ -113,6 +125,26 @@ function SidebarBody({ viewer, databases, rail = false, onNavigate }: { viewer: 
         <UserMenu viewer={viewer} />
       </div>
     </>
+  )
+}
+
+function SearchTrigger({ rail }: { rail: boolean }) {
+  const { palette } = useShell()
+  return (
+    <div className="shrink-0 px-2 pb-3">
+      <Tooltip content="Search" side="right" disabled={!rail}>
+        <DialogTrigger
+          controller={palette}
+          shortcut="mod+k"
+          aria-label={rail ? "Search" : undefined}
+          className="flex h-8 w-full min-w-0 cursor-default items-center gap-2 rounded-md border bg-background px-2 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground hover:duration-0 sidebar-collapsed:justify-center sidebar-collapsed:px-0 [&_svg]:size-4 [&_svg]:shrink-0 dark:bg-secondary"
+        >
+          <SearchIcon aria-hidden="true" className="text-faint" />
+          <span className="flex-1 truncate text-left sidebar-collapsed:sr-only">Search…</span>
+          <DialogShortcut className="text-xs text-muted-foreground sidebar-collapsed:hidden" />
+        </DialogTrigger>
+      </Tooltip>
+    </div>
   )
 }
 
@@ -146,6 +178,8 @@ function UserMenu({ viewer }: { viewer: Viewer }) {
   const router = useRouter()
   const [theme, setTheme] = useState<Theme>("system")
   useEffect(() => setTheme(readTheme()), [])
+  // The palette can change the theme too, so re-read it whenever the menu opens.
+  const syncTheme = (open: boolean) => open && setTheme(readTheme())
 
   async function signOut() {
     let message = ""
@@ -164,7 +198,7 @@ function UserMenu({ viewer }: { viewer: Viewer }) {
   }
 
   return (
-    <Menu>
+    <Menu onOpenChange={syncTheme}>
       <MenuTrigger className="flex w-full min-w-0 cursor-default items-center gap-2 rounded-md p-1 text-left transition-colors duration-150 hover:bg-sidebar-accent hover:duration-0 data-open:bg-sidebar-accent">
         <Avatar name={viewer.name || viewer.email} />
         <span className="grid min-w-0 leading-tight sidebar-collapsed:sr-only">
@@ -205,7 +239,7 @@ function UserMenu({ viewer }: { viewer: Viewer }) {
 }
 
 export function PageHeader({ children, actions }: { children: ReactNode; actions?: ReactNode }) {
-  const { drawer, collapsed, toggleCollapsed } = useShell()
+  const { drawer, palette, collapsed, toggleCollapsed } = useShell()
   return (
     <header className="sticky top-0 z-20 flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 bg-background/85 pt-[env(safe-area-inset-top)] pr-[max(1rem,env(safe-area-inset-right))] pl-[max(1rem,env(safe-area-inset-left))] backdrop-blur-md md:px-6">
       <DrawerTrigger controller={drawer} aria-label="Open navigation" className={buttonVariants({ variant: "ghost", size: "icon-sm", className: "-ml-1.5 md:hidden" })}>
@@ -216,6 +250,9 @@ export function PageHeader({ children, actions }: { children: ReactNode; actions
       </Button>
       <Separator orientation="vertical" className="mr-1 hidden md:block" />
       <div className="flex min-w-0 flex-1 items-center gap-2">{children}</div>
+      <DialogTrigger controller={palette} aria-label="Search" className={buttonVariants({ variant: "ghost", size: "icon-sm", className: "md:hidden" })}>
+        <SearchIcon aria-hidden="true" />
+      </DialogTrigger>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </header>
   )
