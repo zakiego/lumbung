@@ -45,8 +45,11 @@ func (s *Store) CountBranches(ctx context.Context, dbID string) (int, error) {
 
 // NewBranch is what CreateBranch records.
 type NewBranch struct {
-	ID               string
-	DatabaseID       string
+	ID         string
+	DatabaseID string
+	// WorkspaceID is the workspace the caller resolved the database in. The
+	// branch is only recorded if the database is still live there.
+	WorkspaceID      string
 	Name             string
 	ParentID         string // empty when made from a snapshot of a deleted branch
 	SourceSnapshotID string
@@ -60,15 +63,23 @@ func (s *Store) CreateBranch(ctx context.Context, nb NewBranch) (Branch, error) 
 		return Branch{}, apierr.Newf(apierr.InvalidName, "invalid branch name %q", nb.Name)
 	}
 	ts := now()
-	_, err := s.db.ExecContext(ctx,
+	// The copy that made the file took a while. The row only goes in if the
+	// database is still live in the workspace the caller found it in, checked
+	// in the same statement: a workspace deleted, or a database moved or
+	// deleted, meanwhile gets no new branch.
+	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO branches (id, database_id, name, parent_id, source_snapshot_id, protected, expires_at, created_at, updated_at)
-		 VALUES (?, ?, ?, nullif(?, ''), nullif(?, ''), ?, ?, ?, ?)`,
-		nb.ID, nb.DatabaseID, nb.Name, nb.ParentID, nb.SourceSnapshotID, nb.Protected, fmtTime(nb.ExpiresAt), ts, ts)
+		 SELECT ?, ?, ?, nullif(?, ''), nullif(?, ''), ?, ?, ?, ?
+		 WHERE EXISTS (`+databaseLiveIn+`)`,
+		nb.ID, nb.DatabaseID, nb.Name, nb.ParentID, nb.SourceSnapshotID, nb.Protected, fmtTime(nb.ExpiresAt), ts, ts, nb.DatabaseID, nb.WorkspaceID)
 	if isUnique(err) {
 		return Branch{}, apierr.Newf(apierr.NameTaken, "a branch named %q already exists", nb.Name)
 	}
 	if err != nil {
 		return Branch{}, fmt.Errorf("meta: insert branch: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return Branch{}, apierr.Newf(apierr.DatabaseNotFound, "no database %q", nb.DatabaseID)
 	}
 	return s.GetBranch(ctx, nb.DatabaseID, nb.ID)
 }

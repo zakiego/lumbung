@@ -16,12 +16,16 @@ The engine serves MCP over streamable HTTP at `/mcp`, with the same bearer token
 | `create_database` | no | no | Create a database in this token's workspace, with an empty default branch named main. Needs an admin token for the whole workspace. Names: lowercase letters, digits and hyphens. |
 | `create_snapshot` | no | no | Take a snapshot of a branch. Restoring one later makes a new branch; it never overwrites. |
 | `delete_branch` | no | yes | Delete a branch and its data. Protected branches and the default branch can't be deleted. This can't be undone. |
+| `delete_bucket` | no | yes | Delete a bucket. It must be empty: delete its objects first. This can't be undone. Needs an admin token for the whole workspace. |
+| `delete_database` | no | yes | Move a database to the trash. Its branches stop answering at once and its name is free to reuse. It can be brought back with restore_database until the trash retention passes (7 days by default), then it is removed for good. Needs an admin token for the whole workspace. |
 | `delete_object` | no | yes | Delete an object. This can't be undone. Deleting a key that doesn't exist succeeds. |
+| `delete_snapshot` | no | yes | Delete a snapshot. Branches made from it keep working. This can't be undone. Needs admin access to the whole database. |
 | `diff_branches` | yes | no | Compare the schema (tables, columns, indexes, views, triggers) of a branch against another branch. Data isn't compared. |
 | `execute` | no | yes | Run one SQL statement that changes data or schema (INSERT, UPDATE, DELETE, CREATE, ALTER, DROP) in its own transaction. Needs a write token. Prefer testing schema changes on a branch first. Rows from RETURNING are shown up to 1000 rows and about 64 KB. |
 | `get_database` | yes | no | Get one database: its id, default branch, branch count and size. |
 | `get_object` | yes | no | Read an object. Text comes back as text, up to about 64 KB from offset; for binary content only the metadata comes back (use presign_object for a download URL). |
 | `get_schema` | yes | no | Get a branch's schema: tables with their columns, indexes, views and triggers, with the CREATE statements. Pass table to get one table with its indexes and triggers. A schema over about 64 KB comes back as names only. |
+| `get_workspace` | yes | no | Show the workspace this token works in: its name, its limits (most databases, buckets and bytes; 0 means no limit of its own) and what it holds now. Use it before creating databases or buckets to see how much room is left. |
 | `list_branches` | yes | no | List a database's branches, marking the default and protected ones. |
 | `list_buckets` | yes | no | List the buckets this token can see, with object counts and sizes. |
 | `list_databases` | yes | no | List the databases this token can see, with their default branch and size. |
@@ -31,6 +35,8 @@ The engine serves MCP over streamable HTTP at `/mcp`, with the same bearer token
 | `put_object` | no | yes | Write an object from text or base64, at most 1 MB. Replaces an object with the same key. Needs a write token. |
 | `query` | yes | no | Run one read-only SQL statement (SELECT, PRAGMA table_info, ...) on a read-only connection. Returns at most max_rows rows (default 100) and about 64 KB; truncated results say so. |
 | `reset_branch` | no | yes | Throw away a branch's changes by copying its parent again. Not allowed on protected branches or the default branch. |
+| `restore_database` | no | no | Bring a database back from the trash with its branches and snapshots. If another database took its name meanwhile, pass a new name. Needs an admin token for the whole workspace. |
+| `restore_snapshot` | no | no | Restore a snapshot into a new branch. It never overwrites a branch: check the new one, then use it or promote it. Needs write access to the whole database. |
 
 ## create_branch
 
@@ -78,6 +84,22 @@ Delete a branch and its data. Protected branches and the default branch can't be
 | `branch` (required) | string | branch name or id to delete |
 | `database` (required) | string | database name or id |
 
+## delete_bucket
+
+Delete a bucket. It must be empty: delete its objects first. This can't be undone. Needs an admin token for the whole workspace.
+
+| Input | Type | Description |
+|---|---|---|
+| `bucket` (required) | string | bucket name |
+
+## delete_database
+
+Move a database to the trash. Its branches stop answering at once and its name is free to reuse. It can be brought back with restore_database until the trash retention passes (7 days by default), then it is removed for good. Needs an admin token for the whole workspace.
+
+| Input | Type | Description |
+|---|---|---|
+| `database` (required) | string | database name or id |
+
 ## delete_object
 
 Delete an object. This can't be undone. Deleting a key that doesn't exist succeeds.
@@ -86,6 +108,15 @@ Delete an object. This can't be undone. Deleting a key that doesn't exist succee
 |---|---|---|
 | `bucket` (required) | string | bucket name |
 | `key` (required) | string | object key |
+
+## delete_snapshot
+
+Delete a snapshot. Branches made from it keep working. This can't be undone. Needs admin access to the whole database.
+
+| Input | Type | Description |
+|---|---|---|
+| `database` (required) | string | database name or id |
+| `snapshot` (required) | string | snapshot id, from list_snapshots |
 
 ## diff_branches
 
@@ -135,6 +166,12 @@ Get a branch's schema: tables with their columns, indexes, views and triggers, w
 | `branch` | string | branch name or id; defaults to the default branch |
 | `database` (required) | string | database name or id |
 | `table` | string | only this table, with its indexes and triggers |
+
+## get_workspace
+
+Show the workspace this token works in: its name, its limits (most databases, buckets and bytes; 0 means no limit of its own) and what it holds now. Use it before creating databases or buckets to see how much room is left.
+
+No inputs.
 
 ## list_branches
 
@@ -220,4 +257,23 @@ Throw away a branch's changes by copying its parent again. Not allowed on protec
 |---|---|---|
 | `branch` (required) | string | branch name or id to reset |
 | `database` (required) | string | database name or id |
+
+## restore_database
+
+Bring a database back from the trash with its branches and snapshots. If another database took its name meanwhile, pass a new name. Needs an admin token for the whole workspace.
+
+| Input | Type | Description |
+|---|---|---|
+| `database` (required) | string | name or id of the database in the trash |
+| `name` | string | restore it under this name instead of the old one |
+
+## restore_snapshot
+
+Restore a snapshot into a new branch. It never overwrites a branch: check the new one, then use it or promote it. Needs write access to the whole database.
+
+| Input | Type | Description |
+|---|---|---|
+| `database` (required) | string | database name or id |
+| `name` (required) | string | name for the new branch |
+| `snapshot` (required) | string | snapshot id, from list_snapshots |
 

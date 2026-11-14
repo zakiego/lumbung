@@ -11,6 +11,7 @@ export type {
   Result,
   Statement,
   StoredObject,
+  WorkspaceLimits,
 } from "./client.ts"
 export { LumbungError } from "./errors.ts"
 export { decodeValue, encodeValue } from "./values.ts"

@@ -2,7 +2,9 @@ package api_test
 
 import (
 	"bytes"
+	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -120,6 +122,72 @@ func TestPerTokenRateLimit(t *testing.T) {
 		e.ok(e.do(e.admin, "GET", pDBs, "/v1/databases", nil), 200)
 	}
 	golden(t, "rate-limited", e.fails(e.do(e.admin, "GET", pDBs, "/v1/databases", nil), 429, "rate_limited"))
+}
+
+// The dashboard uses one token for everyone, so the service token's requests
+// are counted per person it names: one person can't use up what the others
+// need. Any other token is one bucket, whatever header it sends.
+func TestServiceTokenRateLimitIsPerActor(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) { c.RateLimit = 1; c.RateBurst = 3 })
+	as := func(token, actor string) resp {
+		if actor == "" {
+			return e.do(token, "GET", pDBs, "/v1/databases", nil)
+		}
+		return e.do(token, "GET", pDBs, "/v1/databases", nil, "X-Lumbung-Actor", actor)
+	}
+	for i := 0; i < 3; i++ {
+		e.ok(as(e.admin, "dashboard:noisy@example.com"), 200)
+	}
+	e.fails(as(e.admin, "dashboard:noisy@example.com"), 429, "rate_limited")
+	// Someone else, and the dashboard's own requests with nobody behind them, still get through.
+	e.ok(as(e.admin, "dashboard:quiet@example.com"), 200)
+	e.ok(as(e.admin, ""), 200)
+	e.fails(as(e.admin, "dashboard:noisy@example.com"), 429, "rate_limited")
+
+	// MCP and the S3 API count the same way.
+	mcp := func(actor string) int {
+		req, _ := http.NewRequest("POST", e.http.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+		req.Header.Set("Authorization", "Bearer "+e.admin)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("X-Lumbung-Actor", actor)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if code := mcp("dashboard:noisy@example.com"); code != 429 {
+		t.Fatalf("MCP for the noisy actor: %d, want 429", code)
+	}
+	if code := mcp("dashboard:third@example.com"); code == 429 {
+		t.Fatal("MCP for another actor is rate limited")
+	}
+	s3 := func(actor string) int {
+		req, _ := http.NewRequest("GET", e.http.URL+"/v1/s3/", nil)
+		req.Header.Set("Authorization", "Bearer "+e.admin)
+		req.Header.Set("X-Lumbung-Actor", actor)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if code := s3("dashboard:noisy@example.com"); code != 503 {
+		t.Fatalf("S3 for the noisy actor: %d, want 503 SlowDown", code)
+	}
+	if code := s3("dashboard:fourth@example.com"); code != 200 {
+		t.Fatalf("S3 for another actor: %d, want 200", code)
+	}
+
+	// A token that isn't the service token can't open more buckets with the header.
+	other, _ := e.token(map[string]any{"name": "other", "access": "admin"})
+	for i := 0; i < 3; i++ {
+		e.ok(as(other, "name-"+strconv.Itoa(i)), 200)
+	}
+	e.fails(as(other, "another-name"), 429, "rate_limited")
 }
 
 func TestDatabasesAndQueries(t *testing.T) {

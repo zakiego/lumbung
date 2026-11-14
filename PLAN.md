@@ -460,7 +460,7 @@ Scopes: `instance`, `workspace`, `database`, `bucket`, `grants`.
 ### 17.3 Addressing
 
 - Short URLs resolve in the caller's workspace: `/v1/databases/...`, `/v1/trash`, `/v1/buckets/...`, `/v1/tokens`, `/v1/audit`, `/v1/s3/...`, `/libsql/...`, `/mcp`. A workspace-bound token's workspace is its own. A caller with no workspace of its own (an instance token, an anonymous request) acts in the default workspace.
-- Qualified URLs put `/v1/workspaces/{ws}` in front of the same paths, for every door: `/v1/workspaces/{ws}/databases/...`, `/v1/workspaces/{ws}/s3/<bucket>/<key>`, `/v1/workspaces/{ws}/libsql/{db}/{branch}/`, `/v1/workspaces/{ws}/mcp`. `{ws}` is a name or an id.
+- Qualified URLs put `/v1/workspaces/{ws}` in front of the same paths (and of `/v1/workspace`), for every door: `/v1/workspaces/{ws}/databases/...`, `/v1/workspaces/{ws}/s3/<bucket>/<key>`, `/v1/workspaces/{ws}/libsql/{db}/{branch}/`, `/v1/workspaces/{ws}/mcp`. `{ws}` is a name or an id.
 - A workspace-bound token using a qualified URL for any workspace but its own gets `workspace_not_found`, the same answer as a workspace that doesn't exist. On the S3 API that is `NoSuchBucket`, or `AccessDenied` where no bucket is named.
 - `{db}` and `{bucket}` still accept a name or an id. An id from another workspace is not found.
 - OpenAPI lists each operation once, at its short path, and states the qualified form as a rule.
@@ -485,7 +485,8 @@ GET                  /v1/instance/audit                     (every workspace and
 - A qualified URL never redirects to a short one: a path with empty, `.` or `..` segments is not found.
 - Database, bucket and token bodies gain `workspace_id`. A token's `scope` may be `workspace`.
 - The database list gives a token limited to some branches a limited view: counts, size, default branch and last activity cover only the branches it reaches. `GET /v1/databases/{db}` still refuses such a token, as before. MCP `list_databases` follows the same rule.
-- Moving revokes every token that reached the moved database or bucket.
+- Moving revokes every token that reached the moved database or bucket, and is refused when the name is taken in the target or one of the target's limits would be passed. `{db}` and `{bucket}` resolve in the request's workspace, like everywhere else.
+- `GET /v1/workspaces?trashed=true` lists the trash, for an instance admin.
 
 ### 17.5 Limits and quotas
 
@@ -496,6 +497,7 @@ Settings: `LUMBUNG_MAX_WORKSPACES`, `LUMBUNG_MAX_TOKENS_PER_WORKSPACE`, and the 
 ### 17.6 Deleting, restoring, moving
 
 - Deleting a workspace moves it to the trash for `LUMBUNG_TRASH_RETENTION`. At once its tokens stop authenticating, its databases and buckets stop resolving (public links and presigned URLs included), open connections and libSQL streams close, and scheduled snapshots and branch expiry pause.
+- What is in flight doesn't land afterwards. A branch copy, a download or a snapshot that waited on the delete looks its database up again and finds nothing. A write to a bucket checks, under the lock a delete and a move take, that the bucket is still in the workspace it was resolved in, right before it commits. The same holds for a move.
 - Restoring brings everything back, tokens included. The name is free while it is in the trash, so a restore may need a new one.
 - After retention the engine purges it: databases, snapshots, objects, uploads, tokens. Audit entries stay.
 - The default workspace can't be deleted.
@@ -509,10 +511,17 @@ Settings: `LUMBUNG_MAX_WORKSPACES`, `LUMBUNG_MAX_TOKENS_PER_WORKSPACE`, and the 
 
 ### 17.8 Dashboard
 
-- The service token stays the dashboard's one engine credential. It calls qualified URLs and sends `X-Lumbung-Actor-Access: read|write|admin` for a user who isn't an owner. The engine then narrows the request to a workspace principal at that level, so the engine enforces the role. Only the service token is narrowed, and only downwards.
+- The service token stays the dashboard's one engine credential. It calls qualified URLs and sends `X-Lumbung-Actor-Access: read|write|admin` for a user who isn't an owner. The engine then narrows the request to a workspace principal at that level, so the engine enforces the role. Only the service token is narrowed, and only downwards. The header needs a qualified URL: on a short URL it is refused, so a missing prefix can never apply a user's level in the default workspace. An empty or repeated header is refused too. A libSQL stream belongs to the user and level that opened it.
 - Roles: an instance `owner` sees and manages every workspace, the members and the instance. Everyone else has a role per workspace (admin, member, read-only) and sees only the workspaces they have a role in. Invites carry workspaces and roles. On upgrade, members and read-only users get that role in the default workspace.
 - The workspace is in the URL: `/app/w/{workspace}/...`. Old URLs redirect to the default workspace. A switcher sits at the top of the sidebar, with create for owners.
-- Screens: workspace switcher and create, workspace settings (name, limits, usage, delete with a typed confirmation, trash and restore for owners), members with a role per workspace, tokens for the workspace (a whole-workspace reach next to databases and buckets), audit for the workspace and for the instance, moving a database or bucket (owners).
+- Screens: workspace switcher and create, workspace settings (name, usage against limits, limits, delete with a typed confirmation), deleted workspaces with restore under the instance's settings, members with a role per workspace, tokens for the workspace (a whole-workspace reach next to databases and buckets) and for the instance, audit for the workspace and for the instance, moving a database or bucket (owners).
+- What a role may do follows the engine's levels (17.2), so the dashboard and the engine never disagree: read-only is `read`, member is `write`, admin is `admin`. Creating, renaming, deleting and restoring a database, the trash and the audit log therefore take an admin of the workspace (a member could do the first and the last before workspaces). Workspaces, their limits, moves, members, invites and the instance's settings, tokens and log take an owner.
+- Roles live in the dashboard's own database (`workspace_member`), keyed by workspace id. The session carries the workspaces a person may use, each with their role. A workspace they have no role in is not found, by name and by id, on every server function and on the routes that move files (object upload and download, database import and download), which all name the workspace.
+- A token made through the dashboard doesn't outlive what its maker may do. The dashboard records who made each token. When someone is removed, stops being an admin of a workspace, or stops being an owner (for an instance token), the tokens they made there are revoked. A restore of a workspace runs the same check, since it brings tokens back.
+- The engine counts the service token's requests per `X-Lumbung-Actor`, on REST, MCP and the S3 API, so one signed-in person can't use up the rate limit of everyone else. Any other token is counted as one, whatever header it sends.
+- A role in a deleted workspace stays, so a restore gives it back, and Members shows it marked as deleted.
+- Pages outside a workspace (members, instance settings, account) keep the sidebar of the workspace last opened, remembered in a cookie that only picks among the workspaces the person may use.
+- Upgrade: the first time the dashboard lists workspaces after the upgrade, every member and read-only user, and every open invite, gets that role in the default workspace. It runs once, before any invite or access change can be made.
 
 ### 17.9 Isolation (the part that must not be wrong)
 
@@ -535,7 +544,7 @@ Each row is a named test through the real handlers, for every door it applies to
 | Anonymous read of a public bucket of B through a short URL; of a private or missing bucket through a qualified URL | denied, private, missing and other-workspace look the same |
 | `X-Lumbung-Actor-Access` sent with a token that isn't the service token, or asking for more than the token has | ignored; never more than the token's own level |
 
-The two fuzz tests gain a second workspace and fail if a request with one workspace's token reads or changes anything of the other.
+`FuzzQueryPath` gains a victim database in a second workspace. A third fuzz test, `FuzzWorkspaceRequests`, sends random methods, paths, bodies and headers with one workspace's tokens through every door and fails if a response holds another workspace's data or anything in another workspace changes. CI runs it for a bounded time.
 
 ### 17.10 Upgrade
 

@@ -45,6 +45,8 @@ type ScrollAreaProps = {
   fade?: boolean
   /** Draw no scrollbar, for rows where the fade already says there's more. */
   bare?: boolean
+  /** When the scrollbar shows. `auto` keeps it up while there is more to scroll, for a short list that would otherwise look complete. */
+  type?: "hover" | "auto"
 }
 
 const bar =
@@ -54,10 +56,10 @@ const bar =
 // sideways row still moves the page.
 const overscroll = { x: "overscroll-x-contain", y: "overscroll-y-contain", both: "overscroll-contain" }
 
-export function ScrollArea({ className, viewportClassName, children, axis = "y", label, fade, bare }: ScrollAreaProps) {
+export function ScrollArea({ className, viewportClassName, children, axis = "y", label, fade, bare, type = "hover" }: ScrollAreaProps) {
   return (
-    <ScrollAreaPart type="hover" data-fade-x={fade ? "" : undefined} className={cn("relative overflow-hidden", className)}>
-      <ScrollAreaViewport aria-label={label} className={cn("size-full [scrollbar-width:none]", overscroll[axis], viewportClassName)}>
+    <ScrollAreaPart type={type} data-fade-x={fade ? "" : undefined} className={cn("relative overflow-hidden", className)}>
+      <ScrollAreaViewport role={label ? "region" : undefined} aria-label={label} className={cn("size-full [scrollbar-width:none]", overscroll[axis], viewportClassName)}>
         <ScrollAreaContent className={axis === "y" ? undefined : "w-max min-w-full"}>{children}</ScrollAreaContent>
       </ScrollAreaViewport>
       {!bare && axis !== "x" && (

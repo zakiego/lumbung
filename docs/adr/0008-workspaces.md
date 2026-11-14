@@ -81,6 +81,8 @@ Considered: only allowing an empty workspace to be deleted, like a bucket. Rejec
 
 ### Moving between workspaces
 
+What is in flight when a workspace is deleted, or something is moved out of one, must not land afterwards. The delete and the move hold each branch alone, as deleting a database already did, and a request that waited looks its database up again in the workspace it found it in. Object writes have no gate to wait on, so each one checks that its bucket is still in that workspace right before it commits, under the lock the delete and the move take. That is why every write to a bucket takes the workspace next to the bucket id.
+
 An instance admin can move a database or a bucket to another workspace. The live instance needs this to give an existing agent its own workspace. The move fails if the name is taken there or a limit would be passed. Every token that reached the moved thing is revoked, whole, as when something a grant names is deleted: a token bound to the old workspace can't hold a grant across the boundary.
 
 ### Audit
@@ -95,9 +97,13 @@ The dashboard keeps one engine credential, the service token, and uses qualified
 
 Members get a role per workspace. An instance `owner` sees and manages every workspace, the members and the instance. Everyone else is a plain user whose access is a list of (workspace, role) with roles admin, member and read-only; a workspace they have no role in doesn't exist for them. Invites carry the workspaces and roles to grant. On upgrade, each existing member and read-only user gets that role in the default workspace.
 
+A role is one of the engine's three levels under another name: read-only is `read`, member is `write`, admin is `admin`. So what a role may do in the dashboard is what a workspace token of that level may do, and the two can't drift apart. One consequence is deliberate: creating, renaming and deleting a database and reading the audit log took a member before workspaces and take an admin of the workspace now. Considered: a dashboard-only permission table that kept a member's old reach. Rejected: the dashboard would then have to ask the engine for more than the member's level, and the engine could no longer hold the role by itself.
+
+Roles are kept in the dashboard's database, by workspace id, next to the users they belong to. The engine knows workspaces and tokens, not people. Managing members stays with owners: a workspace admin can't invite or change anyone's access.
+
 Considered: keeping instance-wide roles and showing every workspace to everyone. Rejected: "who may see which" would then stop at the engine's door, and the dashboard would be the one place a workspace boundary didn't apply.
 
-The engine enforces the role, not only the dashboard. With the service token, the dashboard sends `X-Lumbung-Actor-Access: read|write|admin` and the engine narrows the principal to a workspace principal at that level for the request's workspace. A server function that forgets a role check then still can't pass the member's level. Only the service token is narrowed this way, and the header can only lower what the request may do.
+The engine enforces the role, not only the dashboard. With the service token, the dashboard sends `X-Lumbung-Actor-Access: read|write|admin` and the engine narrows the principal to a workspace principal at that level for the request's workspace. A server function that forgets a role check then still can't pass the member's level. Only the service token is narrowed this way, and the header can only lower what the request may do. It needs a qualified URL, so a request that forgot the workspace is refused instead of applying a user's level in the default workspace, and an empty header is refused instead of meaning "no limit". A libSQL stream is tied to the user and level that opened it, not only to the token, since every dashboard user shares one.
 
 The workspace is part of the dashboard URL (`/app/w/{workspace}/...`), so links can be shared and two tabs can show two workspaces.
 

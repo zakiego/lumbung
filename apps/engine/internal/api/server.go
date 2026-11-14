@@ -113,7 +113,7 @@ func Config() huma.Config {
 	cfg := huma.DefaultConfig("Lumbung API", "1")
 	cfg.Info.Description = "Self-hosted SQLite databases with branches. Every request needs `Authorization: Bearer <token>`. Errors are `application/problem+json` with a stable `code`.\n\n" +
 		"Databases, buckets and tokens live in workspaces. A request acts in the workspace of its token; an instance token, which belongs to none, acts in the default workspace. " +
-		"To name a workspace, put `/v1/workspaces/{workspace}` in front of a path under `/v1/databases`, `/v1/trash`, `/v1/buckets`, `/v1/tokens`, `/v1/audit` or `/v1/s3` " +
+		"To name a workspace, put `/v1/workspaces/{workspace}` in front of a path under `/v1/databases`, `/v1/trash`, `/v1/buckets`, `/v1/tokens`, `/v1/audit`, `/v1/workspace` or `/v1/s3` " +
 		"(for example `/v1/workspaces/acme/databases`), or of `/libsql` and `/mcp`. A token that belongs to a workspace can only name its own; any other gets `workspace_not_found`."
 	cfg.OpenAPIPath = "/v1/openapi"
 	cfg.DocsPath = ""
@@ -153,6 +153,13 @@ func stampRequestID(ctx huma.Context, _ string, v any) (any, error) {
 // workspace is checked after authentication, in act.
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// X-Lumbung-Actor-Access names one level. An empty or repeated one
+		// is a caller's bug, and treating it as absent would run the request
+		// with the service token's full access, so it is refused outright.
+		if vals, ok := r.Header[actorAccessHeader]; ok && (len(vals) != 1 || strings.TrimSpace(vals[0]) == "") {
+			writeProblemHTTP(w, apierr.New(apierr.BadRequest, actorAccessHeader+" must be read, write or admin"), newRequestID())
+			return
+		}
 		raw := r.URL.EscapedPath()
 		sel, rest, qualified := splitQualified(raw)
 		if !qualified {
@@ -234,7 +241,7 @@ func splitQualified(escaped string) (sel, rest string, ok bool) {
 	}
 	head, _, _ := strings.Cut(tail, "/")
 	switch head {
-	case "databases", "trash", "buckets", "tokens", "audit", "s3":
+	case "databases", "trash", "buckets", "tokens", "audit", "s3", "workspace":
 		return ref, "/v1/" + tail, true
 	case "libsql", "mcp":
 		return ref, "/" + tail, true
@@ -440,6 +447,34 @@ func (s *Server) act(ctx context.Context, p auth.Principal, sel string) (auth.Pr
 	return acting, nil
 }
 
+// actorAccessHeader carries the level of the dashboard user the service
+// token acts for (PLAN 17.8).
+const actorAccessHeader = "X-Lumbung-Actor-Access"
+
+// narrowed lowers the service token's principal to the level its
+// X-Lumbung-Actor-Access header names, in the workspace the request acts
+// in, so the engine enforces a dashboard user's role and not only the
+// dashboard. The header is ignored on every other token: it can only take
+// reach away, and only the service token is trusted to say who it acts for.
+//
+// The request must name its workspace (a qualified URL). On a short URL the
+// service token acts in the default workspace, and a user's level in some
+// other workspace must never be applied there because a prefix was left
+// off.
+func narrowed(p auth.Principal, level string, namesWorkspace bool) (auth.Principal, error) {
+	if level == "" || !p.Service {
+		return p, nil
+	}
+	if !namesWorkspace {
+		return auth.Principal{}, apierr.New(apierr.BadRequest, actorAccessHeader+" needs a URL that names the workspace: /v1/workspaces/{workspace}/...")
+	}
+	q, ok := p.Narrow(level)
+	if !ok {
+		return auth.Principal{}, apierr.New(apierr.BadRequest, actorAccessHeader+" must be read, write or admin")
+	}
+	return q, nil
+}
+
 // requestWorkspace finds the workspace a request names or implies.
 func (s *Server) requestWorkspace(ctx context.Context, bound bool, own, sel string) (meta.Workspace, error) {
 	switch {
@@ -471,6 +506,17 @@ func (s *Server) touch(ctx context.Context, tokenID string) {
 	if err := s.store.TouchToken(ctx, tokenID, now); err != nil {
 		s.log.Error("record token use", "err", err)
 	}
+}
+
+// rateKey is what a principal's requests are counted under: its token. The
+// service token is one token for everyone who uses the dashboard, so its
+// requests are counted per person it names. One person, in one workspace,
+// then can't use up what the others need.
+func rateKey(p auth.Principal) string {
+	if p.Service && p.Actor != "" {
+		return p.TokenID + "\x00" + p.Actor
+	}
+	return p.TokenID
 }
 
 var actorRe = regexp.MustCompile(`^[^\x00-\x1f\x7f]{1,200}$`)
@@ -507,16 +553,19 @@ func (s *Server) middleware(ctx huma.Context, next func(huma.Context)) {
 		writeProblem(ctx, ae, id)
 		return
 	}
-	if ok, wait := s.perToken.Allow(p.TokenID); !ok {
+	if a := ctx.Header("X-Lumbung-Actor"); a != "" && p.Service && actorRe.MatchString(a) {
+		p.Actor = a
+	}
+	if ok, wait := s.perToken.Allow(rateKey(p)); !ok {
 		ctx.SetHeader("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 		writeProblem(ctx, apierr.New(apierr.RateLimited, "too many requests for this token"), id)
 		return
 	}
-	if a := ctx.Header("X-Lumbung-Actor"); a != "" && p.Service && actorRe.MatchString(a) {
-		p.Actor = a
-	}
 	// Every operation runs as a principal acting in exactly one workspace.
 	p, err = s.act(ctx.Context(), p, selFrom(ctx.Context()))
+	if err == nil {
+		p, err = narrowed(p, ctx.Header(actorAccessHeader), selFrom(ctx.Context()) != "")
+	}
 	if err != nil {
 		ae := apierr.As(err)
 		if ae.Code == apierr.Internal {

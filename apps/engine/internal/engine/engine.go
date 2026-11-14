@@ -324,6 +324,7 @@ func (e *Engine) tick(now time.Time) {
 	}
 	e.runSchedules(ctx, now)
 	e.purgeTrash(ctx, now)
+	e.purgeWorkspaces(ctx, now)
 	e.objectHousekeeping(ctx, now)
 }
 
@@ -413,6 +414,20 @@ func (e *Engine) forgetLocked(branchID string) {
 	}
 	delete(e.sizes, branchID)
 	delete(e.owner, branchID)
+}
+
+// forgetWorkspace drops every branch size counted for a workspace: when it
+// goes to the trash, and again when it is purged, so nothing recorded late
+// stays counted against the instance.
+func (e *Engine) forgetWorkspace(ws string) {
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	for id, owner := range e.owner {
+		if owner == ws {
+			e.forgetLocked(id)
+		}
+	}
+	delete(e.wsTotal, ws)
 }
 
 // WorkspaceBytes is the space the branches of a workspace's live databases

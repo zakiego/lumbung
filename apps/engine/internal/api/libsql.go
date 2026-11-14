@@ -130,9 +130,9 @@ func (s *Server) libsqlHandler(cursor bool) http.Handler {
 
 		var st *libsqlStream
 		if baton == nil {
-			st, ae = s.libsql.open(p.TokenID, b.ID, s.eng.Config())
+			st, ae = s.libsql.open(p.TokenID, streamOwner(p), b.ID, s.eng.Config())
 		} else {
-			st, ae = s.libsql.lookup(*baton, p.TokenID, b.ID)
+			st, ae = s.libsql.lookup(*baton, streamOwner(p), b.ID)
 		}
 		if ae != nil {
 			writeHranaHTTP(w, ae)
@@ -669,7 +669,10 @@ type libsqlStreams struct {
 // request, which serializes the stream's requests.
 type libsqlStream struct {
 	id, tokenID, branchID string
-	reg                   *libsqlStreams
+	// owner is who opened the stream (streamOwner). Only the same caller,
+	// acting in the same workspace at the same level, may continue it.
+	owner string
+	reg   *libsqlStreams
 
 	mu         sync.Mutex
 	secret     string
@@ -691,7 +694,7 @@ func randomHex(n int) string {
 }
 
 // open makes a stream under the caps and returns it locked.
-func (r *libsqlStreams) open(tokenID, branchID string, cfg config.Config) (*libsqlStream, *apierr.Error) {
+func (r *libsqlStreams) open(tokenID, owner, branchID string, cfg config.Config) (*libsqlStream, *apierr.Error) {
 	maxAll, maxToken, idle := cfg.LibSQLMaxStreams, cfg.LibSQLStreamsPerToken, cfg.LibSQLStreamIdle
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -704,13 +707,23 @@ func (r *libsqlStreams) open(tokenID, branchID string, cfg config.Config) (*libs
 	if r.perToken[tokenID] >= maxToken {
 		return nil, apierr.Newf(apierr.TooManyStreams, "this token has %d open libSQL streams, the most allowed", maxToken)
 	}
-	st := &libsqlStream{id: randomHex(16), tokenID: tokenID, branchID: branchID, reg: r, sqls: map[int32]string{}}
+	st := &libsqlStream{id: randomHex(16), tokenID: tokenID, owner: owner, branchID: branchID, reg: r, sqls: map[int32]string{}}
 	st.mu.Lock()
 	st.idleAt = time.Now().Add(idle)
 	st.timer = time.AfterFunc(idle, st.expire)
 	r.m[st.id] = st
 	r.perToken[tokenID]++
 	return st, nil
+}
+
+// streamOwner names who a stream belongs to. For an ordinary token it is
+// the token. The dashboard's service token acts for many users, each
+// narrowed to their own level in one workspace (PLAN 17.8), so the
+// workspace, level and user are part of it too: a transaction a user began
+// with write access can't be continued by a request narrowed to read, or
+// by another user, even with the baton.
+func streamOwner(p auth.Principal) string {
+	return strings.Join([]string{p.TokenID, p.Scope, p.WorkspaceID, p.Access, p.Actor}, "\x00")
 }
 
 func badBaton() *apierr.Error {
@@ -720,7 +733,7 @@ func badBaton() *apierr.Error {
 // lookup finds the stream a baton names and returns it locked. A baton that
 // is stale, made for another token or branch, or for a closed stream is
 // refused the same way.
-func (r *libsqlStreams) lookup(baton, tokenID, branchID string) (*libsqlStream, *apierr.Error) {
+func (r *libsqlStreams) lookup(baton, owner, branchID string) (*libsqlStream, *apierr.Error) {
 	id, secret, ok := strings.Cut(baton, ".")
 	if !ok {
 		return nil, badBaton()
@@ -728,7 +741,7 @@ func (r *libsqlStreams) lookup(baton, tokenID, branchID string) (*libsqlStream, 
 	r.mu.Lock()
 	st := r.m[id]
 	r.mu.Unlock()
-	if st == nil || st.tokenID != tokenID || st.branchID != branchID {
+	if st == nil || subtle.ConstantTimeCompare([]byte(st.owner), []byte(owner)) != 1 || st.branchID != branchID {
 		return nil, badBaton()
 	}
 	st.mu.Lock()

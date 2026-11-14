@@ -1,7 +1,9 @@
 // Session, first-run setup and invite acceptance.
 import { createServerFn } from "@tanstack/react-start"
-import { getRequest } from "@tanstack/react-start/server"
+import { getCookie, getRequest } from "@tanstack/react-start/server"
 import { z } from "zod"
+import { LAST_WORKSPACE_COOKIE } from "@/lib/workspace"
+import { visibleWorkspaces } from "@/server/access"
 import { authHeaders, getAuth, passkeysAvailable } from "@/server/auth"
 import { config, engineToken } from "@/server/config"
 import { requireSameOrigin, getViewer } from "@/server/session"
@@ -14,11 +16,18 @@ const token = z.string().min(10).max(200)
 
 export const getSession = createServerFn({ method: "GET" }).handler(async () => {
   const [viewer, users] = await Promise.all([getViewer(), userCount()])
-  // The engine URL for connect snippets rides along, so the database overview
-  // doesn't need a round trip of its own. Tokens never leave the server.
-  // Passkeys only work on the dashboard URL, not on an extra origin.
+  // The workspaces the person may use ride along, each with their role in
+  // it, so the router knows where they can go without asking again. Null
+  // when the engine didn't answer. Every server function still checks.
+  const workspaces = viewer ? await visibleWorkspaces(viewer).catch(() => null) : []
+  // The engine URL for connect snippets rides along too, so the database
+  // overview doesn't need a round trip of its own. Tokens never leave the
+  // server. Passkeys only work on the dashboard URL, not on an extra origin.
   return {
     viewer,
+    workspaces,
+    // The workspace the browser last had open, for pages outside one.
+    lastWorkspace: viewer ? (getCookie(LAST_WORKSPACE_COOKIE) ?? null) : null,
     needsSetup: users === 0,
     engineUrl: viewer ? config().publicEngineUrl : null,
     passkeys: passkeysAvailable(getRequest()),
@@ -58,7 +67,8 @@ export const getInvite = createServerFn({ method: "GET" })
   .validator(z.object({ token }))
   .handler(async ({ data }) => {
     const invite = await findInvite(data.token)
-    return invite ? { email: invite.email, role: invite.role } : null
+    // Only whether it makes an owner: workspace names aren't for someone who hasn't joined yet.
+    return invite ? { email: invite.email, owner: invite.owner } : null
   })
 
 export const acceptInvite = createServerFn({ method: "POST" })

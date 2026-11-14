@@ -298,6 +298,11 @@ export interface Index {
   unique: boolean;
 }
 
+export interface MoveIn {
+  /** The workspace to move it to, by name or id. */
+  workspace: string;
+}
+
 export interface ObjectListBody {
   data: ObjectOut[];
   /** Pass as cursor for the next page; empty on the last page. */
@@ -384,6 +389,11 @@ export interface RestoreDatabaseInBody {
 export interface RestoreSnapshotInBody {
   /** Name of the new branch the snapshot is restored into. */
   name: string;
+}
+
+export interface RestoreWorkspaceInBody {
+  /** Restore under this name instead of the old one. */
+  name?: string;
 }
 
 export interface ResultOut {

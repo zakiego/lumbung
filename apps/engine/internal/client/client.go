@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,13 +25,53 @@ type Client struct {
 	HTTP  *http.Client
 	// UserAgent identifies the CLI.
 	UserAgent string
+	// Workspace is the workspace to act in, by name or id. Empty means the
+	// token's own workspace, or the default one for an instance token.
+	Workspace string
+}
+
+// scoped is every part of the API that acts inside a workspace. Only these
+// take the /v1/workspaces/<workspace> prefix; /v1/workspaces and
+// /v1/instance are about the instance and never do.
+var scoped = map[string]bool{"databases": true, "trash": true, "buckets": true, "tokens": true, "audit": true, "workspace": true, "s3": true}
+
+// workspaceRef is a workspace name or id. Anything else never goes in a
+// path: ".." and an empty segment are resolved away on the way, and the
+// request would land in another workspace.
+var workspaceRef = regexp.MustCompile(`^(?:[a-z0-9][a-z0-9-]{0,62}|ws_[a-z0-9]{20})$`)
+
+// ValidWorkspace reports whether ref can name a workspace.
+func ValidWorkspace(ref string) error {
+	if !workspaceRef.MatchString(ref) {
+		return fmt.Errorf("%q can't name a workspace: use its name (lowercase letters, digits and dashes) or its id", ref)
+	}
+	return nil
+}
+
+// path names the client's workspace in a path that acts inside one.
+func (c *Client) path(p string) string {
+	if c.Workspace == "" {
+		return p
+	}
+	rest, ok := strings.CutPrefix(p, "/v1/")
+	if !ok {
+		return p
+	}
+	head, _, _ := strings.Cut(rest, "/")
+	if !scoped[head] {
+		return p
+	}
+	return "/v1/workspaces/" + seg(c.Workspace) + "/" + rest
 }
 
 // New returns a client.
 func New(baseURL, token string) *Client {
 	// No overall timeout: imports and downloads can take as long as they
 	// take. Requests end with their context (Ctrl-C).
-	return &Client{URL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: &http.Client{}, UserAgent: "lumbung-cli"}
+	// Redirects are never followed: the API doesn't use them, and following
+	// one would send the token and the body to a path nobody asked for.
+	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Client{URL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: &http.Client{CheckRedirect: noRedirect}, UserAgent: "lumbung-cli"}
 }
 
 // Error is a problem response from the API.
@@ -75,7 +116,12 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 // Upload PUTs a body of a known length with extra headers and decodes the
 // JSON response into out.
 func (c *Client) Upload(ctx context.Context, path string, query url.Values, body io.Reader, size int64, contentType string, h http.Header, out any) error {
-	u := c.URL + path
+	if c.Workspace != "" {
+		if err := ValidWorkspace(c.Workspace); err != nil {
+			return err
+		}
+	}
+	u := c.URL + c.path(path)
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -96,7 +142,7 @@ func (c *Client) Upload(ctx context.Context, path string, query url.Values, body
 		return fmt.Errorf("can't reach %s: %w", c.URL, err)
 	}
 	defer res.Body.Close()
-	if res.StatusCode >= 400 {
+	if res.StatusCode >= 300 {
 		e := &Error{Status: res.StatusCode}
 		if json.NewDecoder(res.Body).Decode(e) != nil || e.Code == "" {
 			e.Code, e.Title = "http_error", res.Status
@@ -116,7 +162,12 @@ func (c *Client) Raw(ctx context.Context, method, path string, query url.Values,
 }
 
 func (c *Client) send(ctx context.Context, method, path string, query url.Values, body io.Reader, contentType string) (*http.Response, error) {
-	u := c.URL + path
+	if c.Workspace != "" {
+		if err := ValidWorkspace(c.Workspace); err != nil {
+			return nil, err
+		}
+	}
+	u := c.URL + c.path(path)
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -134,7 +185,7 @@ func (c *Client) send(ctx context.Context, method, path string, query url.Values
 	if err != nil {
 		return nil, fmt.Errorf("can't reach %s: %w", c.URL, err)
 	}
-	if res.StatusCode >= 400 {
+	if res.StatusCode >= 300 {
 		defer res.Body.Close()
 		e := &Error{Status: res.StatusCode}
 		if json.NewDecoder(res.Body).Decode(e) != nil || e.Code == "" {
@@ -154,9 +205,40 @@ func BranchPath(db, branch string) string {
 	return DBPath(db) + "/branches/" + seg(branch)
 }
 
+// WorkspaceLimits are a workspace's own limits; 0 means none of its own.
+type WorkspaceLimits struct {
+	MaxDatabases     int   `json:"max_databases"`
+	MaxBuckets       int   `json:"max_buckets"`
+	MaxDatabaseBytes int64 `json:"max_database_bytes"`
+	MaxObjectBytes   int64 `json:"max_object_bytes"`
+}
+
+// WorkspaceUsage is what a workspace holds.
+type WorkspaceUsage struct {
+	Databases     int   `json:"databases"`
+	Buckets       int   `json:"buckets"`
+	Tokens        int   `json:"tokens"`
+	DatabaseBytes int64 `json:"database_bytes"`
+	ObjectBytes   int64 `json:"object_bytes"`
+}
+
+// Workspace is a workspace. Limits and Usage are nil for a token that
+// doesn't reach the whole workspace.
+type Workspace struct {
+	ID         string           `json:"id"`
+	Name       string           `json:"name"`
+	Default    bool             `json:"default"`
+	Limits     *WorkspaceLimits `json:"limits,omitempty"`
+	Usage      *WorkspaceUsage  `json:"usage,omitempty"`
+	CreatedAt  time.Time        `json:"created_at"`
+	DeletedAt  *time.Time       `json:"deleted_at"`
+	PurgeAfter *time.Time       `json:"purge_after"`
+}
+
 // Database is a database.
 type Database struct {
 	ID             string     `json:"id"`
+	WorkspaceID    string     `json:"workspace_id"`
 	Name           string     `json:"name"`
 	DefaultBranch  string     `json:"default_branch"`
 	BranchCount    int        `json:"branch_count"`

@@ -36,7 +36,7 @@ func (e *Engine) snapshot(ctx context.Context, tg target, kind, label string) (m
 	sn, err := e.meta.CreateSnapshot(ctx, meta.Snapshot{
 		ID: id, DatabaseID: tg.db.ID, BranchID: tg.branch.ID, BranchName: tg.branch.Name,
 		Kind: kind, Label: label, SizeBytes: size,
-	})
+	}, tg.db.WorkspaceID)
 	if err != nil {
 		_ = os.Remove(path)
 		return meta.Snapshot{}, err

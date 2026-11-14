@@ -148,6 +148,7 @@ func (a *app) bucketCmd() *cobra.Command {
 			return nil
 		},
 	})
+	cmd.AddCommand(a.moveCmd("bucket", func(name string) string { return "/v1/buckets/" + url.PathEscape(name) + "/move" }))
 	return cmd
 }
 

@@ -42,7 +42,8 @@ func (s *Server) mountMCP() {
 		Instructions: "Lumbung holds SQLite databases, each with branches (full copies). A token works inside one workspace and sees only that workspace's databases and buckets. Use list_databases first. " +
 			"query runs read-only SQL; execute runs writes and needs a write token. Branches never merge back: " +
 			"to test a schema change, create_branch, execute the migration there, diff_branches against main, then run the same SQL on main. " +
-			"Buckets hold files: list_buckets, list_objects, get_object and put_object work with them, and presign_object makes a URL to share one.",
+			"Buckets hold files: list_buckets, list_objects, get_object and put_object work with them, and presign_object makes a URL to share one. " +
+			"With an admin token for the workspace you can make your own: create_database and create_bucket, and delete_database (to the trash, restore_database brings it back) and delete_bucket when done. get_workspace shows the limits and what is used.",
 	})
 	s.addMCPTools(server)
 	s.mcpServer = server
@@ -109,15 +110,18 @@ func (s *Server) gateRequest(w http.ResponseWriter, r *http.Request) (auth.Princ
 		w.Header().Set("WWW-Authenticate", `Bearer realm="lumbung"`)
 		return auth.Principal{}, id, ae
 	}
-	if ok, wait := s.perToken.Allow(p.TokenID); !ok {
-		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-		return auth.Principal{}, id, apierr.New(apierr.RateLimited, "too many requests for this token")
-	}
 	if a := r.Header.Get("X-Lumbung-Actor"); a != "" && p.Service && actorRe.MatchString(a) {
 		p.Actor = a
 	}
+	if ok, wait := s.perToken.Allow(rateKey(p)); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		return auth.Principal{}, id, apierr.New(apierr.RateLimited, "too many requests for this token")
+	}
 	// As on REST, the request runs as a principal acting in one workspace.
 	p, err = s.act(r.Context(), p, selFrom(r.Context()))
+	if err == nil {
+		p, err = narrowed(p, r.Header.Get(actorAccessHeader), selFrom(r.Context()) != "")
+	}
 	if err != nil {
 		ae := apierr.As(err)
 		if ae.Code == apierr.Internal {
@@ -882,6 +886,7 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 		})
 
 	s.addObjectTools(server)
+	s.addWorkspaceTools(server)
 }
 
 func results(r *engine.Result) []*engine.Result {

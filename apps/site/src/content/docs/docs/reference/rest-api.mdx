@@ -145,6 +145,37 @@ Response `200`:
 | `updated_at` (required) | string |  |
 | `workspace_id` (required) | string | The workspace the database is in. |
 
+### Move a database to another workspace
+
+`POST /v1/databases/{db}/move`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `db` (required) | path | string | Database name or id. |
+
+Request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `workspace` (required) | string | The workspace to move it to, by name or id. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `branch_count` (required) | integer | Branches the token reaches: all of them, unless it is limited to some. |
+| `created_at` (required) | string |  |
+| `default_branch` (required) | string | Name of the default branch. Empty for a token that can't reach that branch. |
+| `default_branch_id` (required) | string | Empty for a token that can't reach the default branch. |
+| `deleted_at` (required) | string or null | When it went to the trash, or null. |
+| `id` (required) | string |  |
+| `last_activity_at` (required) | string or null | Start of the last minute with a query on a branch the token reaches, or null. |
+| `name` (required) | string |  |
+| `purge_after` (required) | string or null | When a trashed database is removed for good, or null. |
+| `size_bytes` (required) | integer | Space the branches the token reaches take on disk. |
+| `updated_at` (required) | string |  |
+| `workspace_id` (required) | string | The workspace the database is in. |
+
 ### Restore a database from the trash
 
 `POST /v1/databases/{db}/restore`
@@ -837,6 +868,34 @@ Response `200`:
 
 Response `204`: no content.
 
+### Move a bucket to another workspace
+
+`POST /v1/buckets/{bucket}/move`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `bucket` (required) | path | string | Bucket name or id. |
+
+Request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `workspace` (required) | string | The workspace to move it to, by name or id. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `cors_origins` (required) | string[] | Origins a browser may call the S3 API from. |
+| `created_at` (required) | string |  |
+| `id` (required) | string |  |
+| `name` (required) | string |  |
+| `object_count` (required) | integer |  |
+| `public_read` (required) | boolean | Anyone may read objects without a token. |
+| `size_bytes` (required) | integer | Bytes the objects take. |
+| `updated_at` (required) | string |  |
+| `workspace_id` (required) | string | The workspace the bucket is in. |
+
 ## Objects
 
 ### Copy an object into this bucket
@@ -1160,6 +1219,7 @@ Response `200`:
 |---|---|---|---|
 | `limit` | query | integer | Most items to return. |
 | `cursor` | query | string | The next_cursor from the previous page. |
+| `trashed` | query | boolean | List the workspaces in the trash instead. Needs an instance admin. |
 
 Response `200`:
 
@@ -1239,6 +1299,56 @@ Request body:
 | `max_databases` | integer | 0: no limit of its own. |
 | `max_object_bytes` | integer |  |
 | `name` | string |  |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `created_at` (required) | string |  |
+| `default` (required) | boolean | The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted. |
+| `deleted_at` (required) | string or null | When it went to the trash, or null. |
+| `id` (required) | string |  |
+| `limits` | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. Left out for a token that doesn't reach the whole workspace. |
+| `name` (required) | string |  |
+| `purge_after` (required) | string or null | When a trashed workspace is removed for good, or null. |
+| `updated_at` (required) | string |  |
+| `usage` | WorkspaceUsageOut | What the workspace holds now. Left out for a token that doesn't reach the whole workspace. |
+
+### Move a workspace to the trash
+
+`DELETE /v1/workspaces/{ws}`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `ws` (required) | path | string | Workspace name or id. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `created_at` (required) | string |  |
+| `default` (required) | boolean | The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted. |
+| `deleted_at` (required) | string or null | When it went to the trash, or null. |
+| `id` (required) | string |  |
+| `limits` | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. Left out for a token that doesn't reach the whole workspace. |
+| `name` (required) | string |  |
+| `purge_after` (required) | string or null | When a trashed workspace is removed for good, or null. |
+| `updated_at` (required) | string |  |
+| `usage` | WorkspaceUsageOut | What the workspace holds now. Left out for a token that doesn't reach the whole workspace. |
+
+### Restore a workspace from the trash
+
+`POST /v1/workspaces/{ws}/restore`
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `ws` (required) | path | string | Workspace name or id. |
+
+Request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Restore under this name instead of the old one. |
 
 Response `200`:
 
