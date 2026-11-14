@@ -19,8 +19,16 @@
 #      - dashboard.db with VACUUM INTO (ops/dashboard-backup.mjs) to
 #        /data/backups/pre-deploy-<UTC time>.db in its volume, keeping 5
 #   4. up -d --no-build --wait
-#   5. on failure: print the last 50 log lines of both services, put :prev
-#      back as :latest and bring that up
+#   5. on failure, print the last 50 log lines of both services and roll
+#      back what failed:
+#      - the new engine is healthy and only the dashboard failed: put the
+#        dashboard's :prev back and start it; the new engine keeps serving
+#      - otherwise both go back to :prev. When the new engine migrated
+#        meta.db past what the old one knows, the old one would refuse it
+#        (/health 503), so ops/rollback-meta.sh first takes a full backup of
+#        every branch, then restores meta.db from the copy taken in step 3.
+#        Anything created after that copy is only in the full backup
+#        (ops/README.md says how to get it back).
 #
 # Every step before 4 changes nothing that runs: a failure there puts the
 # tags back and stops.
@@ -50,10 +58,12 @@ for image in "${IMAGES[@]}"; do
   fi
 done
 
-# Puts :prev back as :latest for every image that has one.
+# Puts :prev back as :latest for the given images (default both) that have
+# one.
 restore_prev() {
-  local image
-  for image in "${IMAGES[@]}"; do
+  local images=("$@") image
+  [ "${#images[@]}" -gt 0 ] || images=("${IMAGES[@]}")
+  for image in "${images[@]}"; do
     if image_exists "${image%:*}:prev"; then
       docker tag "${image%:*}:prev" "$image"
     fi
@@ -147,20 +157,53 @@ if docker compose up -d --no-build --wait --wait-timeout "$WAIT_TIMEOUT"; then
   exit 0
 fi
 
-# 5. Roll back.
+# 5. Roll back what failed.
 log "the new images didn't become healthy within ${WAIT_TIMEOUT}s"
 docker compose logs --tail 50 engine dashboard >&2 || true
 if [ "$had_prev" -eq 0 ]; then
   log "first deploy, nothing to roll back to"
   exit 1
 fi
+
+service_healthy() {
+  local id
+  id=$(docker compose ps --quiet "$1" 2>/dev/null) && [ -n "$id" ] &&
+    [ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$id" 2>/dev/null)" = healthy ]
+}
+
+# 5a. The new engine is fine: keep it, put back only the dashboard. A newer
+# engine serves an older dashboard (it's an API client), and the dashboard's
+# own migrations only add tables and columns.
+if service_healthy engine && image_exists "$DASHBOARD_PREV"; then
+  log "the new engine is healthy, rolling back only the dashboard"
+  restore_prev "$DASHBOARD_IMAGE"
+  if docker compose up -d --no-build --wait --wait-timeout "$WAIT_TIMEOUT" dashboard; then
+    log "rolled back the dashboard to the previous image; the new engine keeps serving"
+    exit 1
+  fi
+  log "the previous dashboard didn't become healthy either, rolling back the engine too"
+fi
+
+# 5b. Both go back. The new engine's image id is kept first: it knows the
+# newer meta.db, so it takes the full backup before a meta-only restore.
+new_engine=$(docker image inspect -f '{{.Id}}' "$ENGINE_IMAGE")
+log "stopping the new services"
+docker compose stop dashboard engine || true
 restore_prev
+if image_exists "$ENGINE_PREV" && file_in_volume "$DATA_VOLUME" meta.db; then
+  # Exits 0 without changing anything when the old engine can serve meta.db.
+  if ! LUMBUNG_ROLLBACK_IMAGE="$ENGINE_IMAGE" LUMBUNG_BACKUP_IMAGE="$new_engine" \
+    ./ops/rollback-meta.sh ${META_BACKUP:+--from "$META_BACKUP"}; then
+    log "rolling meta.db back FAILED, so the old engine can't start on it. See ops/README.md, Deploy and roll back:"
+    log "  ./ops/rollback-meta.sh${META_BACKUP:+ --from $META_BACKUP}"
+    log "  docker compose up -d --no-build --wait"
+    log "(run from $(pwd) with COMPOSE_FILE=$COMPOSE_FILE)"
+    exit 1
+  fi
+fi
 if docker compose up -d --no-build --wait --wait-timeout "$WAIT_TIMEOUT"; then
   log "rolled back to the previous images"
 else
-  log "rollback also failed. If the new engine migrated meta.db, the old one refuses it:"
-  log "  ./ops/rollback-meta.sh${META_BACKUP:+ --from $META_BACKUP}"
-  log "  docker compose up -d --no-build --wait"
-  log "(run from $(pwd) with COMPOSE_FILE=$COMPOSE_FILE)"
+  log "rollback also failed: docker compose ps, docker compose logs engine dashboard"
 fi
 exit 1

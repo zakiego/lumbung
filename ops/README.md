@@ -85,6 +85,11 @@ A push to `main` deploys (once allowlisted). By hand:
 
 A `meta.db` backup must be one the old engine can restore: its manifest's `meta_version` can't be higher than the migrations that engine knows. When it is (a `meta.db` already migrated past the running engine), the copy is removed and the deploy stops before the swap. `LUMBUNG_ALLOW_NO_ROLLBACK=1` deploys anyway, for when the new engine is the fix.
 
+When health fails, `deploy-up.sh` rolls back what failed, and the deploy still counts as failed (it alerts):
+
+- New engine healthy, dashboard not: only the dashboard goes back to `:prev`. The new engine keeps serving.
+- Otherwise both go back to `:prev`. If the new engine migrated `meta.db` past what the old one knows (the old one would answer 503 on `/health`), `ops/rollback-meta.sh` first takes a full backup of every branch, then restores `meta.db` from the copy taken right before the swap.
+
 Going back one image after a healthy deploy:
 
 ```bash
