@@ -2,7 +2,7 @@ import { act, render, screen } from "@testing-library/react"
 import { createAgent } from "@ui-sdk/react/agent"
 import { afterEach, beforeEach, expect, test, vi } from "vitest"
 import { FakeIntersectionObserver } from "@/test/setup"
-import { next, session, Terminal, TYPE_MS, type Frame } from "./terminal"
+import { next, POSTER, session, Terminal, TYPE_MS, type Frame } from "./terminal"
 
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => vi.useRealTimers())
@@ -30,9 +30,9 @@ test("with reduced motion it shows the finished session and no pause control", (
   const { container } = render(<Terminal />)
   expect(container.querySelector("[data-terminal]")?.getAttribute("data-terminal")).toBe("poster")
   const all = lines(container)
-  expect(typed(all[3])).toBe(session[3].cmd)
-  expect(all[3].className).not.toContain("invisible")
-  expect(all[4].className).toContain("invisible")
+  expect(typed(all[POSTER])).toBe(session[POSTER].cmd)
+  expect(all[POSTER].className).not.toContain("invisible")
+  expect(all[POSTER + 1].className).toContain("invisible")
   expect(screen.queryByRole("button", { name: "Pause demo" })).toBeNull()
 })
 
@@ -62,7 +62,9 @@ test("one full loop runs every step in order and comes back to the start", () =>
     frame = following
   } while (frame.step !== 0 || frame.typed !== 0 || frame.ran)
   expect(steps).toEqual(session.map((_, i) => i))
-  expect(total).toBeLessThan(25_000)
+  // About 26s: long enough to read every step, short enough that a visitor
+  // sees the loop come back around.
+  expect(total).toBeLessThan(27_000)
 })
 
 test("an agent can find and press the pause control", async () => {

@@ -9,7 +9,7 @@ export const GET: APIRoute = async ({ site }) => {
   const lines = [
     "# Lumbung",
     "",
-    "> Self-hosted SQLite databases with branches. One server holds many databases, each with branches, reached through a REST API, a TypeScript SDK, a CLI, MCP and a dashboard.",
+    "> Self-hosted SQLite databases with branches. One server holds many databases, each with branches, reached through a REST API, the libSQL protocol, a TypeScript SDK, a CLI, MCP and a dashboard. Buckets store files next to them behind an S3-compatible API.",
     "",
     "## Docs",
     "",
