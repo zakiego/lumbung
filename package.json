@@ -17,6 +17,7 @@
     "docs:test": "node scripts/docs-test/run.ts",
     "e2e": "node scripts/e2e/run.ts",
     "proof:workspaces": "node scripts/workspace-proof/run.ts",
+    "rehearse:upgrade": "bash scripts/upgrade-rehearsal.sh",
     "check:links": "node scripts/check-links.mjs"
   }
 }

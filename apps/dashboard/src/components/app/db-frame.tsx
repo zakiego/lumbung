@@ -19,20 +19,21 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs"
 import { TruncatedTip } from "@/components/ui/tooltip"
 import { ScrollArea } from "@/components/ui/layout"
 import { CONTAINER, PageBody, PageHeader } from "./shell"
+import { useWs } from "./workspace"
 
-const dbRoute = getRouteApi("/_app/db/$db")
+const dbRoute = getRouteApi("/_app/w/$ws/db/$db")
 
 export type DbSection = "overview" | "data" | "sql" | "schema" | "branches" | "snapshots" | "connect" | "settings"
 
 const SECTIONS: { value: DbSection; label: string; icon: LucideIcon; to: string }[] = [
-  { value: "overview", label: "Overview", icon: LayoutGridIcon, to: "/db/$db" },
-  { value: "data", label: "Data", icon: TableIcon, to: "/db/$db/data" },
-  { value: "sql", label: "SQL", icon: TerminalIcon, to: "/db/$db/sql" },
-  { value: "schema", label: "Schema", icon: CodeIcon, to: "/db/$db/schema" },
-  { value: "branches", label: "Branches", icon: NetworkIcon, to: "/db/$db/branches" },
-  { value: "snapshots", label: "Snapshots", icon: CameraIcon, to: "/db/$db/snapshots" },
-  { value: "connect", label: "Connect", icon: PlugIcon, to: "/db/$db/connect" },
-  { value: "settings", label: "Settings", icon: SettingsIcon, to: "/db/$db/settings" },
+  { value: "overview", label: "Overview", icon: LayoutGridIcon, to: "/w/$ws/db/$db" },
+  { value: "data", label: "Data", icon: TableIcon, to: "/w/$ws/db/$db/data" },
+  { value: "sql", label: "SQL", icon: TerminalIcon, to: "/w/$ws/db/$db/sql" },
+  { value: "schema", label: "Schema", icon: CodeIcon, to: "/w/$ws/db/$db/schema" },
+  { value: "branches", label: "Branches", icon: NetworkIcon, to: "/w/$ws/db/$db/branches" },
+  { value: "snapshots", label: "Snapshots", icon: CameraIcon, to: "/w/$ws/db/$db/snapshots" },
+  { value: "connect", label: "Connect", icon: PlugIcon, to: "/w/$ws/db/$db/connect" },
+  { value: "settings", label: "Settings", icon: SettingsIcon, to: "/w/$ws/db/$db/settings" },
 ]
 
 // The branch comes from ?branch=, else the database's default branch.
@@ -44,6 +45,7 @@ export function useDb() {
 }
 
 export function DbFrame({ section, actions, children }: { section: DbSection; actions?: ReactNode; children: ReactNode }) {
+  const ws = useWs()
   const { database, branches, branch, branchParam } = useDb()
   const tabRow = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -62,7 +64,7 @@ export function DbFrame({ section, actions, children }: { section: DbSection; ac
         <nav aria-label="Breadcrumb" className="min-w-0">
           <ol className="flex min-w-0 items-center gap-1.5 text-[13px]">
             <li className="hidden sm:block">
-              <Link to="/" className="text-muted-foreground transition-colors duration-100 hover:text-foreground">
+              <Link to="/w/$ws" params={{ ws }} className="text-muted-foreground transition-colors duration-100 hover:text-foreground">
                 Databases
               </Link>
             </li>
@@ -92,7 +94,7 @@ export function DbFrame({ section, actions, children }: { section: DbSection; ac
                     key={s.value}
                     value={s.value}
                     icon={<s.icon />}
-                    render={<Link to={s.to} params={{ db: database.name }} search={{ branch: branchParam }} />}
+                    render={<Link to={s.to} params={{ ws, db: database.name }} search={{ branch: branchParam }} />}
                   >
                     {s.label}
                   </TabsTab>
@@ -110,9 +112,10 @@ export function DbFrame({ section, actions, children }: { section: DbSection; ac
 }
 
 export function OpenSql() {
+  const ws = useWs()
   const { database, branchParam } = useDb()
   return (
-    <Link to="/db/$db/sql" params={{ db: database.name }} search={{ branch: branchParam }} className={buttonVariants({ variant: "secondary" })}>
+    <Link to="/w/$ws/db/$db/sql" params={{ ws, db: database.name }} search={{ branch: branchParam }} className={buttonVariants({ variant: "secondary" })}>
       <TerminalIcon aria-hidden="true" />
       Open SQL
     </Link>

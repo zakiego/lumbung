@@ -211,7 +211,7 @@ func (s *Server) s3Authenticate(req *s3Req) *s3proto.Error {
 }
 
 func (s *Server) s3RateLimit(req *s3Req) *s3proto.Error {
-	if ok, wait := s.perToken.Allow(req.p.TokenID); !ok {
+	if ok, wait := s.perToken.Allow(rateKey(req.p)); !ok {
 		req.w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 		return s3proto.Errf("SlowDown", http.StatusServiceUnavailable, "too many requests for this token")
 	}

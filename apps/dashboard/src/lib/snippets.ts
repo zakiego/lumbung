@@ -8,8 +8,13 @@ export function libsqlUrl(url: string, db: string, branch: string) {
   return `${url}/libsql/${db}/${branch}/`
 }
 
-export function s3Endpoint(url: string) {
-  return `${url}/v1/s3`
+/**
+ * The S3 endpoint. A token's own workspace needs nothing in the URL, so
+ * client snippets use the short one. An anonymous link has no token to say
+ * which workspace it means: outside the default workspace it names it.
+ */
+export function s3Endpoint(url: string, workspace?: { id: string; default: boolean }) {
+  return workspace && !workspace.default ? `${url}/v1/workspaces/${workspace.id}/s3` : `${url}/v1/s3`
 }
 
 // Lumbung accepts any region; this is the one S3 clients expect.

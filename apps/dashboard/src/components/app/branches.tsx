@@ -27,12 +27,14 @@ import { cn } from "@/lib/utils"
 import { CodeBlock } from "./connect"
 import { Confirm, FormDialog } from "./form-dialog"
 import { NAME_PATTERN } from "./name-dialog"
+import { useWs } from "./workspace"
 
 export function parentName(branch: BranchOut, branches: BranchOut[]): string | undefined {
   return branch.parent_id ? branches.find((b) => b.id === branch.parent_id)?.name : undefined
 }
 
 export function BranchTable({ db, branches, current }: { db: string; branches: BranchOut[]; current: string }) {
+  const ws = useWs()
   const defaultBranch = branches.find((b) => b.default)?.name
   return (
     <Table>
@@ -53,8 +55,8 @@ export function BranchTable({ db, branches, current }: { db: string; branches: B
               <TableCell className="w-1/2 max-w-0">
                 <TruncatedTip text={b.name}>
                   <Link
-                    to="/db/$db/branches"
-                    params={{ db }}
+                    to="/w/$ws/db/$db/branches"
+                    params={{ ws, db }}
                     search={{ branch: b.name === defaultBranch ? undefined : b.name }}
                     aria-current={b.name === current ? "true" : undefined}
                     className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0"

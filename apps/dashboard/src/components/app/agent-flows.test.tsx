@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createAgent } from "@ui-sdk/react/agent"
 import { expect, test, vi } from "vitest"
-import type { Member } from "@/server/users"
+import type { Member, MemberAccess } from "@/server/users"
 import { PromoteBranch, ResetBranch } from "./branches"
 import { BranchPicker } from "./db-frame"
 import { ImportForm } from "./db-settings"
@@ -78,18 +78,62 @@ test("Enter in the typed field confirms once the name matches", async () => {
   await waitFor(() => expect(onReset).toHaveBeenCalledOnce())
 })
 
-test("an agent changes a member's role", async () => {
-  const members: Member[] = [
-    { id: "me", name: "Ann", email: "ann@example.com", role: "owner", createdAt: at },
-    { id: "m1", name: "Bo", email: "bo@example.com", role: "readonly", createdAt: at },
+test("an agent changes a member's role in a workspace", async () => {
+  const workspaces = [
+    { id: "ws_aaaaaaaaaaaaaaaaaaaa", name: "default" },
+    { id: "ws_bbbbbbbbbbbbbbbbbbbb", name: "agents" },
   ]
-  const onRole = vi.fn(async (_m: Member, _r: string) => {})
-  render(<MemberTable members={members} me="me" onRole={onRole} onRemove={async () => {}} />)
-  expect(named()).toContain("Role for Bo")
+  const members: Member[] = [
+    { id: "me", name: "Ann", email: "ann@example.com", owner: true, grants: [], createdAt: at },
+    { id: "m1", name: "Bo", email: "bo@example.com", owner: false, grants: [{ workspace: "ws_aaaaaaaaaaaaaaaaaaaa", role: "readonly" }], createdAt: at },
+  ]
+  const onAccess = vi.fn(async (_m: Member, _a: MemberAccess) => {})
+  render(<MemberTable members={members} me="me" workspaces={workspaces} onAccess={onAccess} onRemove={async () => {}} />)
+  expect(named()).toContain("Change access for Bo")
 
-  const result = await agent.act({ steps: [{ ref: "Role for Bo", action: "setValue", args: ["member"] }] })
+  const opened = await agent.act({ steps: [{ ref: "Change access for Bo", action: "press" }] })
+  expect(opened.ok, opened.error?.message).toBe(true)
+  const open = named()
+  for (const label of ["Access for Bo", "Access", "Workspaces", "Role in default", "Role in agents", "Save"]) expect(open).toContain(label)
+
+  const result = await agent.act({
+    steps: [
+      { ref: "Role in default", action: "setValue", args: ["member"] },
+      { ref: "Role in agents", action: "setValue", args: ["admin"] },
+      { ref: "Access for Bo", action: "press", args: ["Save"] },
+    ],
+  })
   expect(result.ok, result.error?.message).toBe(true)
-  await waitFor(() => expect(onRole).toHaveBeenCalledWith(members[1], "member"))
+  await waitFor(() => expect(onAccess).toHaveBeenCalledOnce())
+  expect(onAccess).toHaveBeenCalledWith(members[1], {
+    owner: false,
+    grants: [
+      { workspace: "ws_aaaaaaaaaaaaaaaaaaaa", role: "member" },
+      { workspace: "ws_bbbbbbbbbbbbbbbbbbbb", role: "admin" },
+    ],
+  })
+})
+
+test("an agent makes a member an owner, and the workspace roles leave the page", async () => {
+  const workspaces = [{ id: "ws_aaaaaaaaaaaaaaaaaaaa", name: "default" }]
+  const members: Member[] = [
+    { id: "me", name: "Ann", email: "ann@example.com", owner: true, grants: [], createdAt: at },
+    { id: "m1", name: "Bo", email: "bo@example.com", owner: false, grants: [{ workspace: "ws_aaaaaaaaaaaaaaaaaaaa", role: "admin" }], createdAt: at },
+  ]
+  const onAccess = vi.fn(async (_m: Member, _a: MemberAccess) => {})
+  render(<MemberTable members={members} me="me" workspaces={workspaces} onAccess={onAccess} onRemove={async () => {}} />)
+  const result = await agent.act({
+    steps: [
+      { ref: "Change access for Bo", action: "press" },
+      { ref: "Access", action: "setValue", args: ["Owner, every workspace"] },
+    ],
+  })
+  expect(result.ok, result.error?.message).toBe(true)
+  expect(named()).not.toContain("Role in default")
+  expect(named()).not.toContain("Workspaces")
+  const saved = await agent.act({ steps: [{ ref: "Access for Bo", action: "press", args: ["Save"] }] })
+  expect(saved.ok, saved.error?.message).toBe(true)
+  await waitFor(() => expect(onAccess).toHaveBeenCalledWith(members[1], { owner: true }))
 })
 
 const snapshot: SnapshotOut = {

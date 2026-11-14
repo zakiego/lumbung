@@ -15,6 +15,7 @@ description: What changed in each version of Lumbung.
 - **CLI**: `lumbung workspace list|show|create|update|delete|restore|trash`, `--workspace` (or `LUMBUNG_WORKSPACE`, or saved by `lumbung login --workspace`), `db move`, `bucket move`, and `--instance` on the token commands.
 - **MCP**: `get_workspace`, `delete_database`, `restore_database`, `delete_bucket`, `restore_snapshot` and `delete_snapshot`.
 - **Limits per workspace** on databases, buckets, the bytes its databases and its buckets take, and live tokens. An audit log per workspace.
+- **Dashboard**: a workspace switcher, a page per workspace for tokens, the audit log, the trash and settings (usage, limits, delete), restoring deleted workspaces, and moving a database or a bucket to another workspace. People get a role per workspace (admin, member or read-only) and see only the workspaces they have one in. The engine holds each person to their role, not only the dashboard.
 - The database list no longer tells a token limited to some branches about the branches it can't reach.
 
 Changed behavior to check when upgrading:
@@ -26,6 +27,8 @@ Changed behavior to check when upgrading:
 - Database, bucket, token and audit bodies have a `workspace_id`, and a token's `scope` can be `workspace`.
 - `LUMBUNG_AUDIT_MAX_ROWS` now applies to each workspace's entries.
 - Existing tokens keep working. Instance tokens stay instance tokens and act in the default workspace on the usual URLs.
+- Dashboard addresses are `/app/w/<workspace>/...`. The old ones open the same page in the default workspace.
+- Dashboard members and read-only people keep their role, in the default workspace. Creating, renaming and deleting a database and reading the audit log now take an admin of the workspace, where a member could do them before.
 
 ### The first version
 

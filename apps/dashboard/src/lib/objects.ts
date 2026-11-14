@@ -1,8 +1,8 @@
 import { APP_BASE } from "./paths"
 
-/** The dashboard's own download route for an object. */
-export function objectURL(bucket: string, key: string): string {
-  return `${APP_BASE}/api/objects?${new URLSearchParams({ bucket, key })}`
+/** The dashboard's own download route for an object in a workspace. */
+export function objectURL(ws: string, bucket: string, key: string): string {
+  return `${APP_BASE}/api/objects?${new URLSearchParams({ ws, bucket, key })}`
 }
 
 /** The anonymous S3 URL of an object, or null when the key can't travel in a URL path. */
