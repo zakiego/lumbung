@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-A bucket holds files, called objects. Buckets live on the same instance as your databases, behind the same tokens, and show up in the dashboard, the CLI, the SDK and MCP.
+A bucket holds files, called objects. Buckets live in a [workspace](/docs/concepts/workspaces/) next to your databases, behind the same tokens, and show up in the dashboard, the CLI, the SDK and MCP.
 
 ```sh
 echo "hello from the granary" > note.txt
@@ -17,11 +17,11 @@ lumbung object get photos/notes/note.txt
 
 ## Buckets
 
-A bucket name is 3 to 63 lowercase letters, digits and hyphens, starting and ending with a letter or digit, so every S3 client accepts it. Only an instance admin token creates and deletes buckets. A bucket can only be deleted when it holds no objects.
+A bucket name is 3 to 63 lowercase letters, digits and hyphens, starting and ending with a letter or digit, so every S3 client accepts it. It is unique inside its workspace. Only an admin of the whole workspace creates and deletes buckets. A bucket can only be deleted when it holds no objects.
 
 Each bucket has two settings:
 
-- **Public read.** Anyone can GET and HEAD objects without a token. Listing, writing and deleting still need one. Off by default.
+- **Public read.** Anyone can GET and HEAD objects without a token. Listing, writing and deleting still need one. Off by default. A request without a token reaches the default workspace; a public bucket in another workspace is read at `/v1/workspaces/<workspace>/s3/<bucket>/<key>`.
 - **CORS origins.** Origins a browser may call the S3 API from, for [uploads straight from the browser](/docs/guides/browser-uploads/). Empty by default.
 
 ```sh

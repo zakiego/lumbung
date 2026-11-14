@@ -30,7 +30,7 @@ Durations use Go syntax (`500ms`, `30s`, `5m`). Sizes are bytes, or a number wit
 | `LUMBUNG_MAX_BRANCH_BYTES` | bytes | `1GiB` | Largest a branch file may grow. Writes past it fail with `branch_size_limit`. |
 | `LUMBUNG_MAX_INSTANCE_BYTES` | bytes | `10GiB` | Total size of all branch files. Writes that would pass it fail with `instance_quota_exceeded`. |
 | `LUMBUNG_MIN_FREE_DISK` | bytes | `2GiB` | Creating a database, branch, snapshot or import is refused with HTTP 507 when the disk has less free space than this. |
-| `LUMBUNG_MAX_DATABASES` | integer | `100` | Most databases on the instance, counting ones in the trash. |
+| `LUMBUNG_MAX_DATABASES` | integer | `100` | Most databases on the instance, in every workspace together, counting ones in the trash. |
 | `LUMBUNG_MAX_BRANCHES` | integer | `50` | Most branches in one database. |
 | `LUMBUNG_TRASH_RETENTION` | duration | `168h` | How long a deleted database stays in the trash, restorable, before its files are removed. |
 | `LUMBUNG_MAX_IMPORT_BYTES` | bytes | `1GiB` | Largest `.db` file or SQL dump an import accepts. The branch size limit also applies. |
@@ -43,7 +43,7 @@ Durations use Go syntax (`500ms`, `30s`, `5m`). Sizes are bytes, or a number wit
 | `LUMBUNG_TRUSTED_PROXIES` | string | `127.0.0.1/32,::1/128` | Comma-separated networks whose connections may set the client IP header. |
 | `LUMBUNG_SLOW_QUERY` | duration | `1s` | Queries slower than this go to the branch's slow-query log (the newest 50 are kept). |
 | `LUMBUNG_STATS_RETENTION` | duration | `48h` | How long per-minute branch stats are kept. |
-| `LUMBUNG_AUDIT_MAX_ROWS` | integer | `100000` | Most audit log entries kept; the oldest are dropped first. |
+| `LUMBUNG_AUDIT_MAX_ROWS` | integer | `100000` | Most audit log entries kept for each workspace, and for the instance's own actions; the oldest are dropped first. |
 | `LUMBUNG_READERS_PER_BRANCH` | integer | `4` | Read-only connections kept per open branch, next to its one writer. |
 | `LUMBUNG_MAX_OPEN_BRANCHES` | integer | `64` | Most branches with open connections at once. The least recently used idle branch is closed to make room. |
 | `LUMBUNG_IDLE_CONN_TIMEOUT` | duration | `5m` | A branch unused this long has its connections closed. |
@@ -52,7 +52,7 @@ Durations use Go syntax (`500ms`, `30s`, `5m`). Sizes are bytes, or a number wit
 | `LUMBUNG_LIBSQL_TX_TIMEOUT` | duration | `60s` | Longest an interactive transaction over the libSQL protocol may stay open, from its BEGIN. Past it the transaction is rolled back and its stream closed. An open write transaction holds the branch's only writer, so other writes wait for it. |
 | `LUMBUNG_LIBSQL_MAX_STREAMS` | integer | `128` | Most open libSQL protocol streams on the instance. Past it new streams fail with `too_many_streams`. |
 | `LUMBUNG_LIBSQL_MAX_STREAMS_PER_TOKEN` | integer | `16` | Most open libSQL protocol streams per token. |
-| `LUMBUNG_MAX_BUCKETS` | integer | `100` | Most buckets on the instance. |
+| `LUMBUNG_MAX_BUCKETS` | integer | `100` | Most buckets on the instance, in every workspace together. |
 | `LUMBUNG_MAX_OBJECT_BYTES` | bytes | `5GiB` | Largest object, sent in one piece or assembled from a multipart upload. Larger ones fail with `object_too_large`. |
 | `LUMBUNG_MAX_BUCKET_BYTES` | bytes | `10GiB` | Most bytes one bucket may hold, counting its multipart uploads in progress. Writes past it fail with `bucket_size_limit`. |
 | `LUMBUNG_MAX_OBJECT_STORAGE_BYTES` | bytes | `20GiB` | Most bytes all buckets together may hold, counting multipart uploads in progress. Writes past it fail with `object_storage_quota_exceeded`. Separate from `LUMBUNG_MAX_INSTANCE_BYTES`, which covers branch files. |

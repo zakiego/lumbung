@@ -7,6 +7,8 @@ sidebar:
 
 The engine serves an S3-compatible API at `/v1/s3`, path-style: `/v1/s3/<bucket>/<key>`. It's what the AWS SDKs, boto3, rclone and other S3 clients speak. For using it from code, see [Use an S3 client](/docs/guides/s3-clients/).
 
+An access key works in the [workspace](/docs/concepts/workspaces/) of its token: `/v1/s3/<bucket>` is that workspace's bucket, and other workspaces' buckets answer `NoSuchBucket`. To name a workspace (an instance token's key, or a public link outside the default workspace), use `/v1/workspaces/<workspace>/s3` as the endpoint.
+
 A Lumbung bearer token works on it too, which is handy with curl. With a bearer token, `x-amz-content-sha256` may still carry the body's SHA-256 or `STREAMING-UNSIGNED-PAYLOAD-TRAILER`; signed chunks need a signature:
 
 ```sh
@@ -40,9 +42,9 @@ curl -s -H "Authorization: Bearer <token>" "http://127.0.0.1:4870/v1/s3/docs?lis
 | Operation | Request | Needs |
 |---|---|---|
 | ListBuckets | `GET /v1/s3` | any token (lists the buckets it can see) |
-| CreateBucket | `PUT /v1/s3/{bucket}` | instance admin |
+| CreateBucket | `PUT /v1/s3/{bucket}` | admin of the whole workspace |
 | HeadBucket | `HEAD /v1/s3/{bucket}` | read |
-| DeleteBucket | `DELETE /v1/s3/{bucket}` | instance admin; the bucket must be empty |
+| DeleteBucket | `DELETE /v1/s3/{bucket}` | admin of the whole workspace; the bucket must be empty |
 | GetBucketLocation | `GET /v1/s3/{bucket}?location` | read; always the default (empty) location |
 | GetBucketVersioning | `GET /v1/s3/{bucket}?versioning` | read; always unversioned |
 | ListObjectsV2 | `GET /v1/s3/{bucket}?list-type=2` | read |

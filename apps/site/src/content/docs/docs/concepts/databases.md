@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-A database is a set of branches that share a name. Every database starts with one branch, `main`, which is its default: requests that don't name a branch go there.
+A database is a set of branches that share a name. It lives in a [workspace](/docs/concepts/workspaces/), and its name is unique there: two workspaces can each have a database called `notes`. Every database starts with one branch, `main`, which is its default: requests that don't name a branch go there.
 
 Each branch is a single SQLite file on the server. Clients never see file paths. They address a database by its name or its id:
 
@@ -18,4 +18,4 @@ Deleting a database moves it to the trash. Its branches and snapshots stop answe
 
 ## Limits
 
-An instance holds at most `LUMBUNG_MAX_DATABASES` databases (100 by default), counting the ones in the trash. See [Limits](/docs/concepts/limits/).
+An instance holds at most `LUMBUNG_MAX_DATABASES` databases (100 by default), counting the ones in the trash. A workspace can have a lower limit of its own. See [Limits](/docs/concepts/limits/).

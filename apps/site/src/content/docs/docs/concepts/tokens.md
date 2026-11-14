@@ -15,7 +15,7 @@ A token looks like `lmb_<id>_<secret>`. Lumbung stores only a SHA-256 hash of it
 
 ## Scope and access
 
-A token has a **scope**, the whole instance, one database (optionally one branch of it) or one bucket, and an **access** level: `read`, `write` or `admin`. A token can also hold [several grants](#tokens-with-several-grants), each a database or a bucket with its own level.
+A token has a **scope** and an **access** level: `read`, `write` or `admin`. The scope is a whole [workspace](/docs/concepts/workspaces/), one database (optionally one branch of it), one bucket, or [several grants](#tokens-with-several-grants), each a database or a bucket with its own level. Every one of these belongs to one workspace and reaches nothing outside it. An [instance token](#instance-tokens) belongs to no workspace and is for running the instance.
 
 | Can it... | read | write | admin |
 |---|---|---|---|
@@ -25,19 +25,29 @@ A token has a **scope**, the whole instance, one database (optionally one branch
 | Delete, rename, protect or promote branches, set snapshot schedules, delete snapshots, import with `mode=replace` | no | no | yes |
 | Create and revoke tokens within its own scope | no | no | yes |
 
-On top of that, only an **instance admin** token (instance scope, admin access) can create, rename, delete and restore databases, list the trash and read the audit log.
+On top of that, only an admin of the **whole workspace** (a workspace token with admin access, or an instance admin) can create, rename, delete and restore databases, list the trash and read the audit log.
 
 A read token runs every statement on a read-only connection, so SQLite itself refuses writes. A write token can ask for the same with `"read_only": true` in a query.
 
+### Workspace tokens
+
+A token made without a database, a bucket or grants reaches the whole workspace it was made in, at its level, including databases and buckets created later:
+
+```sh
+lumbung token create --name backend --access write
+```
+
+With admin access it also creates and deletes databases and buckets and manages the workspace's tokens. [Workspaces](/docs/concepts/workspaces/#what-a-workspace-token-can-do) has the full table.
+
 ### Database and branch tokens
 
-A database token only sees its database: other databases answer `database_not_found`, as if they didn't exist. A token limited to one branch can query, download, snapshot and read the schema of that branch only. Every other branch, and any branch name that doesn't exist, answers `forbidden`, so it can't probe for names. It can't list branches, read the database's details, reset its branch (a reset copies the parent's data in), or reach the default branch through `/v1/databases/{db}/query` unless that branch is the default.
+A database token only sees its database: other databases answer `database_not_found`, as if they didn't exist. In a list of databases, a token limited to some branches sees counts, sizes and the default branch only for the branches it reaches. A token limited to one branch can query, download, snapshot and read the schema of that branch only. Every other branch, and any branch name that doesn't exist, answers `forbidden`, so it can't probe for names. It can't list branches, read the database's details, reset its branch (a reset copies the parent's data in), or reach the default branch through `/v1/databases/{db}/query` unless that branch is the default.
 
 When a branch is deleted, tokens limited to it are revoked. When a database is purged from the trash, its tokens are removed.
 
 ### Bucket tokens
 
-A bucket token reaches one [bucket](/docs/concepts/buckets/) and nothing else: other buckets answer `bucket_not_found` (`NoSuchBucket` on the S3 API), and it sees no databases. A database token sees no buckets. Instance tokens reach every bucket at their access level.
+A bucket token reaches one [bucket](/docs/concepts/buckets/) and nothing else: other buckets answer `bucket_not_found` (`NoSuchBucket` on the S3 API), and it sees no databases. A database token sees no buckets. Workspace tokens reach every bucket of their workspace at their access level.
 
 | On a bucket, can it... | read | write | admin |
 |---|---|---|---|
@@ -46,11 +56,11 @@ A bucket token reaches one [bucket](/docs/concepts/buckets/) and nothing else: o
 | Rename, set public read and CORS origins | no | no | yes |
 | Create and revoke tokens for the bucket | no | no | yes |
 
-Creating and deleting buckets needs an instance admin token. Copying from another bucket needs read on that bucket too, in the same token. When a bucket is deleted, its tokens are revoked.
+Creating and deleting buckets needs an admin of the whole workspace. Copying from another bucket needs read on that bucket too, in the same token. When a bucket is deleted, its tokens are revoked.
 
 ### Tokens with several grants
 
-One token can reach more than one thing. Each **grant** names a database (or one branch of it) or a bucket, with its own access level. It suits an app or an agent that keeps rows in a database and files in a bucket: one credential, and nothing else on the instance in reach.
+One token can reach more than one thing. Each **grant** names a database (or one branch of it) or a bucket, with its own access level. It suits an app or an agent that keeps rows in one database and files in one bucket that someone else made for it: one credential, and nothing else in reach. For an app or an agent that should make its own, give it a [workspace](/docs/concepts/workspaces/) instead.
 
 ```sh
 lumbung db create notes
@@ -100,8 +110,22 @@ Each token is rate limited (`LUMBUNG_RATE_LIMIT`, `LUMBUNG_RATE_BURST`). Failed 
 
 Creating a token takes no `Idempotency-Key`: replaying the response would mean storing the secret, which is only ever shown once.
 
+## Instance tokens
+
+An instance token belongs to no workspace. With admin access it makes workspaces and sets their limits, makes other instance tokens and reads the audit log of the whole instance. It can also work inside any workspace at its level: on the usual URLs it acts in the default workspace, and with `/v1/workspaces/<workspace>` in front, in that one.
+
+Instance tokens are made, listed and revoked at `/v1/instance/tokens`, by an instance admin:
+
+```sh
+curl -s -X POST http://127.0.0.1:4870/v1/instance/tokens \
+  -H "Authorization: Bearer $LUMBUNG_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "operator", "access": "admin", "expires_in_days": 30}' | jq -r .scope
+```
+
+Keep them for people and scripts that run the instance. An app or an agent gets a workspace token.
+
 ## The service token
 
 On first start lumbungd creates one instance admin token for the dashboard and writes it to `secrets/service-token` in the data folder, readable only by its owner. Set `LUMBUNG_SERVICE_TOKEN` to use your own instead. The service token can't be revoked through the API; replace it by changing the variable or the file and restarting.
 
-The dashboard sends `X-Lumbung-Actor` with the signed-in user, so the [audit log](/docs/reference/rest-api/#read-the-audit-log) records who acted. The header is ignored on every other token.
+The dashboard sends `X-Lumbung-Actor` with the signed-in user, so the [audit log](/docs/reference/rest-api/#read-the-workspaces-audit-log) records who acted. The header is ignored on every other token.

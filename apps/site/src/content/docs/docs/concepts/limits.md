@@ -53,6 +53,19 @@ Object storage has its own quotas, apart from the branches'. An upload needs its
 
 Fixed by the S3 protocol: keys are at most 1024 bytes, custom metadata at most 2 KB, a multipart upload has at most 10,000 parts, and every part but the last is at least 5 MiB. A bucket has at most 1,000 multipart uploads in progress.
 
+## Workspaces
+
+The limits above are for the whole instance. Each [workspace](/docs/concepts/workspaces/#limits) can have lower ones of its own, set when it is made or changed later by an instance admin. `0` means no limit of its own.
+
+| Limit | Default for a new workspace | Setting | Error |
+|---|---|---|---|
+| Databases in one workspace, counting its trash | 20 | `LUMBUNG_WORKSPACE_MAX_DATABASES` | `limit_reached` |
+| Buckets in one workspace | 20 | `LUMBUNG_WORKSPACE_MAX_BUCKETS` | `limit_reached` |
+| Live tokens in one workspace | 1,000 | `LUMBUNG_MAX_TOKENS_PER_WORKSPACE` | `limit_reached` |
+| Workspaces, counting the trash | 100 | `LUMBUNG_MAX_WORKSPACES` | `limit_reached` |
+
+The default workspace starts with no limits of its own, so an instance that never makes a workspace is bound by the instance limits alone.
+
 ## Connections
 
 Each open branch has one writer connection and up to `LUMBUNG_READERS_PER_BRANCH` (4) read-only ones. Writes to one branch run one at a time; reads run alongside them. At most `LUMBUNG_MAX_OPEN_BRANCHES` (64) branches keep connections open; the least recently used idle one closes to make room, and any branch idle for `LUMBUNG_IDLE_CONN_TIMEOUT` (5 minutes) closes on its own. A closed branch reopens on the next request.
