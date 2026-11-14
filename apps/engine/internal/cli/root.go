@@ -26,6 +26,9 @@ type Profile struct {
 	URL      string `json:"url"`
 	Token    string `json:"token"`
 	Database string `json:"database,omitempty"`
+	// Workspace is the workspace commands act in. Only an instance token
+	// needs one; a workspace token always acts in its own.
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // Config is the CLI's config file.
@@ -42,8 +45,8 @@ type app struct {
 	getenv  func(string) string
 	cfgPath string
 
-	flagURL, flagToken, flagProfile, flagDB, flagBranch string
-	json, yes                                           bool
+	flagURL, flagToken, flagProfile, flagDB, flagBranch, flagWorkspace string
+	json, yes                                                          bool
 }
 
 // Options configure Root for tests.
@@ -76,7 +79,7 @@ func Root(o Options) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "lumbung",
 		Short:         "Work with a Lumbung instance: databases, branches, queries, migrations, snapshots, buckets and tokens",
-		Long:          "lumbung talks to a Lumbung engine over its REST API.\n\nConnection settings come from flags, then LUMBUNG_URL, LUMBUNG_TOKEN and LUMBUNG_DATABASE, then the profile saved by `lumbung login`.",
+		Long:          "lumbung talks to a Lumbung engine over its REST API.\n\nConnection settings come from flags, then LUMBUNG_URL, LUMBUNG_TOKEN, LUMBUNG_DATABASE and LUMBUNG_WORKSPACE, then the profile saved by `lumbung login`.\n\nA token for a workspace acts in that workspace. An instance token acts in the default workspace, or in the one --workspace names.",
 		Version:       version.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -88,11 +91,12 @@ func Root(o Options) *cobra.Command {
 	pf.StringVar(&a.flagURL, "url", "", "engine URL (or LUMBUNG_URL)")
 	pf.StringVar(&a.flagToken, "token", "", "API token (or LUMBUNG_TOKEN)")
 	pf.StringVar(&a.flagProfile, "profile", "", "saved profile to use")
+	pf.StringVarP(&a.flagWorkspace, "workspace", "w", "", "workspace to act in, by name or id (or LUMBUNG_WORKSPACE); only an instance token needs it")
 	pf.BoolVar(&a.json, "json", false, "print JSON instead of tables")
 	pf.BoolVarP(&a.yes, "yes", "y", false, "don't ask before destructive actions")
 
 	root.AddCommand(a.loginCmd(), a.dbCmd(), a.branchCmd(), a.queryCmd(), a.shellCmd(), a.migrateCmd(),
-		a.snapshotCmd(), a.tokenCmd(), a.importCmd(), a.exportCmd(), a.bucketCmd(), a.objectCmd(), a.versionCmd())
+		a.snapshotCmd(), a.tokenCmd(), a.importCmd(), a.exportCmd(), a.bucketCmd(), a.objectCmd(), a.workspaceCmd(), a.versionCmd())
 	return root
 }
 
@@ -173,6 +177,9 @@ func (a *app) profile() (Profile, error) {
 	if p.Database == "" {
 		p.Database = saved.Database
 	}
+	if p.Workspace = override(a.flagWorkspace, "LUMBUNG_WORKSPACE"); p.Workspace == "" {
+		p.Workspace = saved.Workspace
+	}
 	if p.URL == "" || p.Token == "" {
 		return Profile{}, errors.New("not logged in: run `lumbung login`, or set LUMBUNG_URL and LUMBUNG_TOKEN")
 	}
@@ -186,6 +193,7 @@ func (a *app) client() (*client.Client, Profile, error) {
 	}
 	c := client.New(p.URL, p.Token)
 	c.UserAgent = "lumbung-cli/" + version.Version
+	c.Workspace = p.Workspace
 	return c, p, nil
 }
 

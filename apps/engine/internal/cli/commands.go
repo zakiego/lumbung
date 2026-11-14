@@ -31,7 +31,7 @@ func (a *app) loginCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Save the engine URL and a token as a profile",
-		Long:  "Saves the engine URL and a token (and optionally a default database) to the config file, mode 600, as the profile named by --profile (default \"default\"), and makes it current. The token is read from --token, LUMBUNG_TOKEN, or one line on standard input.",
+		Long:  "Saves the engine URL and a token (and optionally a default database and, for an instance token, the workspace to act in) to the config file, mode 600, as the profile named by --profile (default \"default\"), and makes it current. The token is read from --token, LUMBUNG_TOKEN, or one line on standard input.",
 		Example: "  lumbung login --url http://127.0.0.1:4870 --db app < token.txt\n" +
 			"  lumbung login --url https://db.example.com --token lmb_... --profile prod",
 		Args: cobra.NoArgs,
@@ -55,7 +55,12 @@ func (a *app) loginCmd() *cobra.Command {
 				}
 				tok = strings.TrimSpace(line)
 			}
+			ws := a.flagWorkspace
+			if ws == "" {
+				ws = a.getenv("LUMBUNG_WORKSPACE")
+			}
 			c := client.New(u, tok)
+			c.Workspace = ws
 			if err := c.Do(cmd.Context(), http.MethodGet, "/v1/databases", url.Values{"limit": {"1"}}, nil, nil); err != nil {
 				return fmt.Errorf("checking the token: %w", err)
 			}
@@ -67,7 +72,7 @@ func (a *app) loginCmd() *cobra.Command {
 			if name == "" {
 				name = "default"
 			}
-			cfg.Profiles[name] = Profile{URL: strings.TrimRight(u, "/"), Token: tok, Database: db}
+			cfg.Profiles[name] = Profile{URL: strings.TrimRight(u, "/"), Token: tok, Database: db, Workspace: ws}
 			cfg.Current = name
 			if err := a.saveConfig(cfg); err != nil {
 				return err
@@ -150,6 +155,7 @@ func (a *app) dbCmd() *cobra.Command {
 			},
 		},
 		a.dbRestoreCmd(),
+		a.moveCmd("database", func(name string) string { return client.DBPath(name) + "/move" }),
 		&cobra.Command{
 			Use: "trash", Short: "List databases in the trash", Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
@@ -483,15 +489,24 @@ func (a *app) snapshotCmd() *cobra.Command {
 // ---- tokens
 
 func (a *app) tokenCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "token", Short: "List, create and revoke API tokens"}
-	cmd.AddCommand(&cobra.Command{
-		Use: "list", Short: "List tokens", Args: cobra.NoArgs,
+	cmd := &cobra.Command{Use: "token", Short: "List, create and revoke API tokens",
+		Long: "Tokens belong to the workspace the command acts in. With --instance the commands work on instance tokens instead, which belong to no workspace and need an instance admin token."}
+	// instance switches list, create and revoke to the instance's tokens.
+	var instance bool
+	tokensPath := func() string {
+		if instance {
+			return "/v1/instance/tokens"
+		}
+		return "/v1/tokens"
+	}
+	list := &cobra.Command{
+		Use: "list", Short: "List the workspace's tokens, or the instance's with --instance", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, _, err := a.client()
 			if err != nil {
 				return err
 			}
-			toks, err := client.List[client.Token](cmd.Context(), c, "/v1/tokens")
+			toks, err := client.List[client.Token](cmd.Context(), c, tokensPath())
 			if err != nil {
 				return err
 			}
@@ -525,20 +540,26 @@ func (a *app) tokenCmd() *cobra.Command {
 			a.table([]string{"ID", "NAME", "SCOPE", "ACCESS", "EXPIRES", "LAST USED"}, rows)
 			return nil
 		},
-	})
+	}
+	list.Flags().BoolVar(&instance, "instance", false, "list instance tokens instead of the workspace's")
+	cmd.AddCommand(list)
 	var name, access, branch, bucket string
 	var grants []string
 	var expires int
 	var accessKey bool
 	create := &cobra.Command{
 		Use: "create", Short: "Create a token; the full token is printed once", Args: cobra.NoArgs,
-		Example: "  lumbung token create --name ci --db app --access write --expires-in-days 90\n  lumbung token create --name uploads --bucket photos --access write --access-key\n  lumbung token create --name agent --grant db=notes:write --grant bucket=files:read",
+		Long:    "Without --db, --bucket or --grant the token reaches the whole workspace at --access, including what is created later. With admin access it can create and delete databases and buckets there.",
+		Example: "  lumbung token create --name ci --db app --access write --expires-in-days 90\n  lumbung token create --name uploads --bucket photos --access write --access-key\n  lumbung token create --name agent --grant db=notes:write --grant bucket=files:read\n  lumbung token create --name agent --access admin --workspace agent\n  lumbung token create --name operator --access admin --instance",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, _, err := a.client()
 			if err != nil {
 				return err
 			}
 			body := map[string]any{"name": name, "expires_in_days": expires}
+			if instance && (len(grants) > 0 || a.flagDB != "" || branch != "" || bucket != "") {
+				return errors.New("an instance token belongs to no workspace: drop --db, --branch, --bucket and --grant, or drop --instance")
+			}
 			if len(grants) > 0 {
 				if a.flagDB != "" || branch != "" || bucket != "" || cmd.Flags().Changed("access") {
 					return errors.New("pass --grant, or --db, --branch, --bucket and --access, not both")
@@ -568,7 +589,7 @@ func (a *app) tokenCmd() *cobra.Command {
 				body["access_key"] = true
 			}
 			var t client.Token
-			if err := c.Do(cmd.Context(), http.MethodPost, "/v1/tokens", nil, body, &t); err != nil {
+			if err := c.Do(cmd.Context(), http.MethodPost, tokensPath(), nil, body, &t); err != nil {
 				return err
 			}
 			if a.json {
@@ -586,14 +607,15 @@ func (a *app) tokenCmd() *cobra.Command {
 	}
 	create.Flags().StringVar(&name, "name", "", "what the token is for")
 	create.Flags().StringVar(&access, "access", "read", "read, write or admin")
-	create.Flags().StringVar(&a.flagDB, "db", "", "limit the token to this database (default: the whole instance)")
+	create.Flags().StringVar(&a.flagDB, "db", "", "limit the token to this database (default: the whole workspace)")
+	create.Flags().BoolVar(&instance, "instance", false, "make an instance token, which belongs to no workspace")
 	create.Flags().StringVar(&branch, "branch", "", "limit the token to this branch of --db")
 	create.Flags().StringVar(&bucket, "bucket", "", "limit the token to this bucket (instead of --db)")
 	create.Flags().StringArrayVar(&grants, "grant", nil, "reach several things with one token: db=NAME:ACCESS, db=NAME/BRANCH:ACCESS or bucket=NAME:ACCESS (repeat it)")
 	create.Flags().BoolVar(&accessKey, "access-key", false, "also make an S3 access key for the token")
 	create.Flags().IntVar(&expires, "expires-in-days", 0, "expire after this many days (0: never)")
 	_ = create.MarkFlagRequired("name")
-	cmd.AddCommand(create, &cobra.Command{
+	revoke := &cobra.Command{
 		Use: "revoke TOKEN_ID", Short: "Revoke a token", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, _, err := a.client()
@@ -603,7 +625,7 @@ func (a *app) tokenCmd() *cobra.Command {
 			if err := a.confirm("revoke token "+args[0], args[0]); err != nil {
 				return err
 			}
-			if err := c.Do(cmd.Context(), http.MethodDelete, "/v1/tokens/"+url.PathEscape(args[0]), nil, nil, nil); err != nil {
+			if err := c.Do(cmd.Context(), http.MethodDelete, tokensPath()+"/"+url.PathEscape(args[0]), nil, nil, nil); err != nil {
 				return err
 			}
 			if a.json {
@@ -612,7 +634,9 @@ func (a *app) tokenCmd() *cobra.Command {
 			fmt.Fprintf(a.out, "Revoked %s\n", args[0])
 			return nil
 		},
-	})
+	}
+	revoke.Flags().BoolVar(&instance, "instance", false, "revoke an instance token")
+	cmd.AddCommand(create, revoke)
 	return cmd
 }
 
