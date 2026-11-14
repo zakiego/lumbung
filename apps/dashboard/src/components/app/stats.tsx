@@ -1,6 +1,6 @@
 import { Await, useRouter } from "@tanstack/react-router"
 import { CircleAlertIcon, RotateCwIcon } from "lucide-react"
-import type { ReactNode } from "react"
+import { type ReactNode, useDeferredValue } from "react"
 import { Button } from "@/components/ui/button"
 import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control"
 import { Skeleton, StatusText } from "@/components/ui/surface"
@@ -26,9 +26,32 @@ export function Stat({ label, hint, children }: { label: string; hint?: ReactNod
   )
 }
 
+// The router reloads a stale loader in the background (coming back to a page,
+// a new window), which hands over a fresh promise. A plain Await would drop the
+// last result for its skeleton until that settles. This keeps the last result
+// up instead; the fallback only shows on the first load. With `dim`, a reload
+// slower than 300ms fades the old result so it doesn't pass for the new one.
+export function AwaitLatest<T>({ promise, fallback, dim, children }: { promise: Promise<T>; fallback: ReactNode; dim?: boolean; children: (value: T) => ReactNode }) {
+  const shown = useDeferredValue(promise)
+  const stale = shown !== promise
+  return (
+    <Await promise={shown} fallback={fallback}>
+      {(value) =>
+        dim ? (
+          <div aria-busy={stale || undefined} data-stale={stale || undefined} className="transition-opacity duration-200 ease-out-cubic data-stale:opacity-50 data-stale:delay-300">
+            {children(value)}
+          </div>
+        ) : (
+          children(value)
+        )
+      }
+    </Await>
+  )
+}
+
 export function Deferred<T>({ promise, children }: { promise: Promise<Settled<T>>; children: (value: T) => ReactNode }) {
   return (
-    <Await promise={promise} fallback={<Skeleton className="mt-1 h-6 w-16" />}>
+    <AwaitLatest promise={promise} fallback={<Skeleton className="mt-1 h-6 w-16" />}>
       {(r) =>
         r.ok ? (
           children(r.value)
@@ -40,7 +63,7 @@ export function Deferred<T>({ promise, children }: { promise: Promise<Settled<T>
           </Tooltip>
         )
       }
-    </Await>
+    </AwaitLatest>
   )
 }
 
