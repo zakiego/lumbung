@@ -43,6 +43,7 @@ pnpm lint                             # gofmt, go vet, staticcheck
 pnpm build                            # engine binaries in apps/engine/bin, site in apps/site/dist
 pnpm check:wording                    # the wording rule (CI runs it with its self-test)
 pnpm e2e                              # end-to-end test (PLAN 13): builds lumbungd and the dashboard, boots both on free ports, walks setup to MCP (build the SDK first; E2E_SKIP_BUILD=1 reuses the dashboard build)
+pnpm proof:workspaces                 # workspace isolation through MCP (mcporter when installed), REST, libSQL and S3, against a fresh local lumbungd (PLAN 17)
 pnpm --filter @lumbung/engine vulncheck   # govulncheck
 pnpm --filter @lumbung/engine openapi:gen # regenerate apps/engine/openapi.json from the handlers
 pnpm --filter @lumbung/engine docs:gen    # regenerate the configuration, error code and REST API reference pages

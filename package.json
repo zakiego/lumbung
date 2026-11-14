@@ -16,6 +16,7 @@
     "check:wording": "bash scripts/check-wording.sh",
     "docs:test": "node scripts/docs-test/run.ts",
     "e2e": "node scripts/e2e/run.ts",
+    "proof:workspaces": "node scripts/workspace-proof/run.ts",
     "check:links": "node scripts/check-links.mjs"
   }
 }
