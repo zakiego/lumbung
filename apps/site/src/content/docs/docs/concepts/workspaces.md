@@ -76,7 +76,7 @@ To name a workspace, put `/v1/workspaces/<workspace>` in front. The name or the 
 | Short URL | In workspace `palui` |
 |---|---|
 | `/v1/databases/notes/query` | `/v1/workspaces/palui/databases/notes/query` |
-| `/v1/buckets`, `/v1/tokens`, `/v1/audit`, `/v1/trash` | `/v1/workspaces/palui/buckets`, and so on |
+| `/v1/buckets`, `/v1/tokens`, `/v1/audit`, `/v1/trash`, `/v1/workspace` | `/v1/workspaces/palui/buckets`, and so on |
 | `/v1/s3/files/a.txt` | `/v1/workspaces/palui/s3/files/a.txt` |
 | `/libsql/notes/main/` | `/v1/workspaces/palui/libsql/notes/main/` |
 | `/mcp` | `/v1/workspaces/palui/mcp` |

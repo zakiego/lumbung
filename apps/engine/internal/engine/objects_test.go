@@ -30,7 +30,12 @@ func mustBucket(t testing.TB, e *Engine, name string) meta.Bucket {
 }
 
 func put(e *Engine, bucketID, key, body string) (meta.Object, error) {
-	return e.PutObject(context.Background(), PutObjectInput{BucketID: bucketID, Key: key, Size: int64(len(body)), Body: strings.NewReader(body)})
+	// The bucket's own workspace, wherever the test made it.
+	b, err := e.meta.BucketByID(context.Background(), bucketID)
+	if err != nil {
+		return meta.Object{}, err
+	}
+	return e.PutObject(context.Background(), PutObjectInput{Workspace: b.WorkspaceID, BucketID: bucketID, Key: key, Size: int64(len(body)), Body: strings.NewReader(body)})
 }
 
 func mustPut(t testing.TB, e *Engine, bucketID, key, body string) meta.Object {
@@ -119,10 +124,10 @@ func TestPutGetOverwriteDelete(t *testing.T) {
 	if bk.SizeBytes != 8 || bk.ObjectCount != 1 {
 		t.Fatalf("bucket totals %d bytes %d objects", bk.SizeBytes, bk.ObjectCount)
 	}
-	if ok, err := e.DeleteObject(ctx, b.ID, "a/b.txt"); err != nil || !ok {
+	if ok, err := e.DeleteObject(ctx, ws(e), b.ID, "a/b.txt"); err != nil || !ok {
 		t.Fatalf("delete: %v %v", ok, err)
 	}
-	if ok, err := e.DeleteObject(ctx, b.ID, "a/b.txt"); err != nil || ok {
+	if ok, err := e.DeleteObject(ctx, ws(e), b.ID, "a/b.txt"); err != nil || ok {
 		t.Fatalf("second delete: %v %v", ok, err)
 	}
 	_, err = e.HeadObject(ctx, b.ID, "a/b.txt")
@@ -138,24 +143,24 @@ func TestPutChecksBody(t *testing.T) {
 	ctx := context.Background()
 	b := mustBucket(t, e, "files")
 	before := tree(t, e.layout.Root)
-	_, err := e.PutObject(ctx, PutObjectInput{BucketID: b.ID, Key: "short", Size: 10, Body: strings.NewReader("abc")})
+	_, err := e.PutObject(ctx, PutObjectInput{Workspace: ws(e), BucketID: b.ID, Key: "short", Size: 10, Body: strings.NewReader("abc")})
 	wantCode(t, err, apierr.IncompleteBody, "short body")
-	_, err = e.PutObject(ctx, PutObjectInput{BucketID: b.ID, Key: "long", Size: 2, Body: strings.NewReader("abc")})
+	_, err = e.PutObject(ctx, PutObjectInput{Workspace: ws(e), BucketID: b.ID, Key: "long", Size: 2, Body: strings.NewReader("abc")})
 	wantCode(t, err, apierr.IncompleteBody, "long body")
 	sum := md5.Sum([]byte("other"))
-	_, err = e.PutObject(ctx, PutObjectInput{BucketID: b.ID, Key: "md5", Size: 3, Body: strings.NewReader("abc"), ContentMD5: sum[:]})
+	_, err = e.PutObject(ctx, PutObjectInput{Workspace: ws(e), BucketID: b.ID, Key: "md5", Size: 3, Body: strings.NewReader("abc"), ContentMD5: sum[:]})
 	wantCode(t, err, apierr.BadDigest, "content-md5")
 	// A verifying reader failing at the end leaves nothing behind.
 	bad := io.MultiReader(strings.NewReader("abc"), errReader{apierr.New(apierr.BadDigest, "signature")})
-	_, err = e.PutObject(ctx, PutObjectInput{BucketID: b.ID, Key: "sig", Size: 3, Body: bad})
+	_, err = e.PutObject(ctx, PutObjectInput{Workspace: ws(e), BucketID: b.ID, Key: "sig", Size: 3, Body: bad})
 	wantCode(t, err, apierr.BadDigest, "verifier")
 	if after := tree(t, e.layout.Root); fmt.Sprint(after) != fmt.Sprint(before) {
 		t.Fatalf("failed puts left files: before %v after %v", before, after)
 	}
-	_, err = e.PutObject(ctx, PutObjectInput{BucketID: b.ID, Key: "x", Size: 1, Body: strings.NewReader("a"),
+	_, err = e.PutObject(ctx, PutObjectInput{Workspace: ws(e), BucketID: b.ID, Key: "x", Size: 1, Body: strings.NewReader("a"),
 		Attrs: ObjectAttrs{Metadata: map[string]string{"big": strings.Repeat("v", 3000)}}})
 	wantCode(t, err, apierr.BadRequest, "metadata too big")
-	_, err = e.PutObject(ctx, PutObjectInput{BucketID: b.ID, Key: "x", Size: 1, Body: strings.NewReader("a"),
+	_, err = e.PutObject(ctx, PutObjectInput{Workspace: ws(e), BucketID: b.ID, Key: "x", Size: 1, Body: strings.NewReader("a"),
 		Attrs: ObjectAttrs{Headers: map[string]string{"x-evil": "1"}}})
 	wantCode(t, err, apierr.BadRequest, "unknown header")
 }
@@ -297,12 +302,12 @@ func TestCopyObject(t *testing.T) {
 	ctx := context.Background()
 	a := mustBucket(t, e, "aaa")
 	b := mustBucket(t, e, "bbb")
-	src, err := e.PutObject(ctx, PutObjectInput{BucketID: a.ID, Key: "src", Size: 3, Body: strings.NewReader("abc"),
+	src, err := e.PutObject(ctx, PutObjectInput{Workspace: ws(e), BucketID: a.ID, Key: "src", Size: 3, Body: strings.NewReader("abc"),
 		Attrs: ObjectAttrs{ContentType: "text/plain", Metadata: map[string]string{"m": "1"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	cp, err := e.CopyObject(ctx, CopyObjectInput{SrcBucketID: a.ID, SrcKey: "src", BucketID: b.ID, Key: "dst"})
+	cp, err := e.CopyObject(ctx, CopyObjectInput{Workspace: ws(e), SrcBucketID: a.ID, SrcKey: "src", BucketID: b.ID, Key: "dst"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,21 +315,21 @@ func TestCopyObject(t *testing.T) {
 		t.Fatalf("copy %+v", cp)
 	}
 	// The source can go away; the copy keeps its content.
-	if _, err := e.DeleteObject(ctx, a.ID, "src"); err != nil {
+	if _, err := e.DeleteObject(ctx, ws(e), a.ID, "src"); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, e, b.ID, "dst"); got != "abc" {
 		t.Fatalf("copy read %q", got)
 	}
-	_, err = e.CopyObject(ctx, CopyObjectInput{SrcBucketID: b.ID, SrcKey: "dst", BucketID: b.ID, Key: "dst"})
+	_, err = e.CopyObject(ctx, CopyObjectInput{Workspace: ws(e), SrcBucketID: b.ID, SrcKey: "dst", BucketID: b.ID, Key: "dst"})
 	wantCode(t, err, apierr.BadRequest, "copy onto itself without replace")
-	cp, err = e.CopyObject(ctx, CopyObjectInput{SrcBucketID: b.ID, SrcKey: "dst", BucketID: b.ID, Key: "dst", Replace: true,
+	cp, err = e.CopyObject(ctx, CopyObjectInput{Workspace: ws(e), SrcBucketID: b.ID, SrcKey: "dst", BucketID: b.ID, Key: "dst", Replace: true,
 		Attrs: ObjectAttrs{ContentType: "text/csv"}})
 	if err != nil || cp.ContentType != "text/csv" || len(cp.Metadata) != 0 {
 		t.Fatalf("replace: %+v %v", cp, err)
 	}
 	stop := errors.New("nope")
-	_, err = e.CopyObject(ctx, CopyObjectInput{SrcBucketID: b.ID, SrcKey: "dst", BucketID: a.ID, Key: "x", Check: func(meta.Object) error { return stop }})
+	_, err = e.CopyObject(ctx, CopyObjectInput{Workspace: ws(e), SrcBucketID: b.ID, SrcKey: "dst", BucketID: a.ID, Key: "x", Check: func(meta.Object) error { return stop }})
 	if !errors.Is(err, stop) {
 		t.Fatalf("check: %v", err)
 	}
@@ -336,13 +341,13 @@ func TestMultipart(t *testing.T) {
 	e := newEngine(t, nil)
 	ctx := context.Background()
 	b := mustBucket(t, e, "files")
-	u, err := e.CreateUpload(ctx, b.ID, "big", ObjectAttrs{ContentType: "text/plain"}, "tok_x")
+	u, err := e.CreateUpload(ctx, ws(e), b.ID, "big", ObjectAttrs{ContentType: "text/plain"}, "tok_x")
 	if err != nil {
 		t.Fatal(err)
 	}
 	part := func(n int, body string) string {
 		t.Helper()
-		etag, err := e.UploadPart(ctx, UploadPartInput{UploadID: u.ID, BucketID: b.ID, Key: "big", Number: n, Size: int64(len(body)), Body: strings.NewReader(body)})
+		etag, err := e.UploadPart(ctx, UploadPartInput{Workspace: ws(e), UploadID: u.ID, BucketID: b.ID, Key: "big", Number: n, Size: int64(len(body)), Body: strings.NewReader(body)})
 		if err != nil {
 			t.Fatalf("part %d: %v", n, err)
 		}
@@ -352,20 +357,20 @@ func TestMultipart(t *testing.T) {
 	part(2, "XXXX")
 	e2 := part(2, "bbbb") // replaces
 	e3 := part(3, "c")
-	_, err = e.UploadPart(ctx, UploadPartInput{UploadID: u.ID, BucketID: b.ID, Key: "other", Number: 1, Size: 1, Body: strings.NewReader("x")})
+	_, err = e.UploadPart(ctx, UploadPartInput{Workspace: ws(e), UploadID: u.ID, BucketID: b.ID, Key: "other", Number: 1, Size: 1, Body: strings.NewReader("x")})
 	wantCode(t, err, apierr.UploadNotFound, "other key")
 	other := mustBucket(t, e, "other")
-	_, err = e.UploadPart(ctx, UploadPartInput{UploadID: u.ID, BucketID: other.ID, Key: "big", Number: 1, Size: 1, Body: strings.NewReader("x")})
+	_, err = e.UploadPart(ctx, UploadPartInput{Workspace: ws(e), UploadID: u.ID, BucketID: other.ID, Key: "big", Number: 1, Size: 1, Body: strings.NewReader("x")})
 	wantCode(t, err, apierr.UploadNotFound, "other bucket")
 
-	_, err = e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{2, e2}, {1, e1}}, nil)
+	_, err = e.CompleteUpload(ctx, ws(e), u.ID, b.ID, "big", []CompletedPart{{2, e2}, {1, e1}}, nil)
 	wantCode(t, err, apierr.InvalidPart, "order")
-	_, err = e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{1, e1}, {2, e1}}, nil)
+	_, err = e.CompleteUpload(ctx, ws(e), u.ID, b.ID, "big", []CompletedPart{{1, e1}, {2, e1}}, nil)
 	wantCode(t, err, apierr.InvalidPart, "etag")
-	_, err = e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{1, e1}, {4, e3}}, nil)
+	_, err = e.CompleteUpload(ctx, ws(e), u.ID, b.ID, "big", []CompletedPart{{1, e1}, {4, e3}}, nil)
 	wantCode(t, err, apierr.InvalidPart, "missing part")
 
-	o, err := e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{1, `"` + e1 + `"`}, {2, e2}, {3, e3}}, nil)
+	o, err := e.CompleteUpload(ctx, ws(e), u.ID, b.ID, "big", []CompletedPart{{1, `"` + e1 + `"`}, {2, e2}, {3, e3}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,22 +385,22 @@ func TestMultipart(t *testing.T) {
 	if _, err := os.Stat(e.layout.UploadDir(u.ID)); !os.IsNotExist(err) {
 		t.Fatalf("upload folder left: %v", err)
 	}
-	_, err = e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{1, e1}}, nil)
+	_, err = e.CompleteUpload(ctx, ws(e), u.ID, b.ID, "big", []CompletedPart{{1, e1}}, nil)
 	wantCode(t, err, apierr.UploadNotFound, "complete twice")
 
 	// Small parts before the last are refused; abort removes everything.
-	u2, _ := e.CreateUpload(ctx, b.ID, "small", ObjectAttrs{}, "")
-	s1, _ := e.UploadPart(ctx, UploadPartInput{UploadID: u2.ID, BucketID: b.ID, Key: "small", Number: 1, Size: 1, Body: strings.NewReader("a")})
-	s2, _ := e.UploadPart(ctx, UploadPartInput{UploadID: u2.ID, BucketID: b.ID, Key: "small", Number: 2, Size: 1, Body: strings.NewReader("b")})
-	_, err = e.CompleteUpload(ctx, u2.ID, b.ID, "small", []CompletedPart{{1, s1}, {2, s2}}, nil)
+	u2, _ := e.CreateUpload(ctx, ws(e), b.ID, "small", ObjectAttrs{}, "")
+	s1, _ := e.UploadPart(ctx, UploadPartInput{Workspace: ws(e), UploadID: u2.ID, BucketID: b.ID, Key: "small", Number: 1, Size: 1, Body: strings.NewReader("a")})
+	s2, _ := e.UploadPart(ctx, UploadPartInput{Workspace: ws(e), UploadID: u2.ID, BucketID: b.ID, Key: "small", Number: 2, Size: 1, Body: strings.NewReader("b")})
+	_, err = e.CompleteUpload(ctx, ws(e), u2.ID, b.ID, "small", []CompletedPart{{1, s1}, {2, s2}}, nil)
 	wantCode(t, err, apierr.PartTooSmall, "small part")
-	if err := e.AbortUpload(ctx, u2.ID, b.ID, "small"); err != nil {
+	if err := e.AbortUpload(ctx, ws(e), u2.ID, b.ID, "small"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(e.layout.UploadDir(u2.ID)); !os.IsNotExist(err) {
 		t.Fatalf("aborted upload folder left: %v", err)
 	}
-	_, err = e.UploadPart(ctx, UploadPartInput{UploadID: u2.ID, BucketID: b.ID, Key: "small", Number: 3, Size: 1, Body: strings.NewReader("c")})
+	_, err = e.UploadPart(ctx, UploadPartInput{Workspace: ws(e), UploadID: u2.ID, BucketID: b.ID, Key: "small", Number: 3, Size: 1, Body: strings.NewReader("c")})
 	wantCode(t, err, apierr.UploadNotFound, "after abort")
 }
 
@@ -403,9 +408,9 @@ func TestPartsCountTowardQuota(t *testing.T) {
 	e := newEngine(t, func(c *config.Config) { c.MaxBucketBytes = 10 })
 	ctx := context.Background()
 	b := mustBucket(t, e, "files")
-	u, _ := e.CreateUpload(ctx, b.ID, "k", ObjectAttrs{}, "")
+	u, _ := e.CreateUpload(ctx, ws(e), b.ID, "k", ObjectAttrs{}, "")
 	for n := 1; n <= 2; n++ {
-		if _, err := e.UploadPart(ctx, UploadPartInput{UploadID: u.ID, BucketID: b.ID, Key: "k", Number: n, Size: 5, Body: strings.NewReader("12345")}); err != nil {
+		if _, err := e.UploadPart(ctx, UploadPartInput{Workspace: ws(e), UploadID: u.ID, BucketID: b.ID, Key: "k", Number: n, Size: 5, Body: strings.NewReader("12345")}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -419,11 +424,11 @@ func TestDeleteBucket(t *testing.T) {
 	b := mustBucket(t, e, "files")
 	mustPut(t, e, b.ID, "k", "v")
 	wantCode(t, e.DeleteBucket(ctx, b.ID), apierr.BucketNotEmpty, "not empty")
-	u, _ := e.CreateUpload(ctx, b.ID, "up", ObjectAttrs{}, "")
-	if _, err := e.UploadPart(ctx, UploadPartInput{UploadID: u.ID, BucketID: b.ID, Key: "up", Number: 1, Size: 1, Body: strings.NewReader("x")}); err != nil {
+	u, _ := e.CreateUpload(ctx, ws(e), b.ID, "up", ObjectAttrs{}, "")
+	if _, err := e.UploadPart(ctx, UploadPartInput{Workspace: ws(e), UploadID: u.ID, BucketID: b.ID, Key: "up", Number: 1, Size: 1, Body: strings.NewReader("x")}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.DeleteObject(ctx, b.ID, "k"); err != nil {
+	if _, err := e.DeleteObject(ctx, ws(e), b.ID, "k"); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.DeleteBucket(ctx, b.ID); err != nil {
@@ -487,8 +492,8 @@ func TestMultipartExpiry(t *testing.T) {
 	e := newEngine(t, func(c *config.Config) { c.MultipartExpiry = time.Hour })
 	ctx := context.Background()
 	b := mustBucket(t, e, "files")
-	u, _ := e.CreateUpload(ctx, b.ID, "k", ObjectAttrs{}, "")
-	if _, err := e.UploadPart(ctx, UploadPartInput{UploadID: u.ID, BucketID: b.ID, Key: "k", Number: 1, Size: 1, Body: strings.NewReader("x")}); err != nil {
+	u, _ := e.CreateUpload(ctx, ws(e), b.ID, "k", ObjectAttrs{}, "")
+	if _, err := e.UploadPart(ctx, UploadPartInput{Workspace: ws(e), UploadID: u.ID, BucketID: b.ID, Key: "k", Number: 1, Size: 1, Body: strings.NewReader("x")}); err != nil {
 		t.Fatal(err)
 	}
 	e.objectHousekeeping(ctx, time.Now())

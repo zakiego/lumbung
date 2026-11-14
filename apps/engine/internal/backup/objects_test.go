@@ -17,7 +17,11 @@ import (
 
 func putObj(t *testing.T, e *engine.Engine, bucketID, key, body string) meta.Object {
 	t.Helper()
-	o, err := e.PutObject(bg, engine.PutObjectInput{BucketID: bucketID, Key: key, Size: int64(len(body)), Body: strings.NewReader(body)})
+	b, err := e.Meta().BucketByID(bg, bucketID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, err := e.PutObject(bg, engine.PutObjectInput{Workspace: b.WorkspaceID, BucketID: bucketID, Key: key, Size: int64(len(body)), Body: strings.NewReader(body)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +48,7 @@ func TestBackupIncludesObjects(t *testing.T) {
 	}
 	putObj(t, e, b.ID, "a.txt", "alpha")
 	putObj(t, e, b.ID, "dir/b.txt", "bravo")
-	if _, err := e.CreateUpload(bg, b.ID, "in-progress", engine.ObjectAttrs{}, ""); err != nil {
+	if _, err := e.CreateUpload(bg, b.WorkspaceID, b.ID, "in-progress", engine.ObjectAttrs{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	// A token whose access key secret is sealed with this instance's key.
@@ -263,8 +267,8 @@ func TestRestoreMetaDropsUploadsWithMissingParts(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := e.CreateBucket(bg, ws(e), "photos")
-	u, _ := e.CreateUpload(bg, b.ID, "big", engine.ObjectAttrs{}, "")
-	if _, err := e.UploadPart(bg, engine.UploadPartInput{UploadID: u.ID, BucketID: b.ID, Key: "big", Number: 1, Size: 1, Body: strings.NewReader("x")}); err != nil {
+	u, _ := e.CreateUpload(bg, b.WorkspaceID, b.ID, "big", engine.ObjectAttrs{}, "")
+	if _, err := e.UploadPart(bg, engine.UploadPartInput{Workspace: b.WorkspaceID, UploadID: u.ID, BucketID: b.ID, Key: "big", Number: 1, Size: 1, Body: strings.NewReader("x")}); err != nil {
 		t.Fatal(err)
 	}
 	dir, _, err := Run(bg, Options{DataDir: src, To: t.TempDir(), MetaOnly: true})

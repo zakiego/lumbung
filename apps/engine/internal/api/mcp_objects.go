@@ -319,7 +319,7 @@ func (s *Server) addObjectTools(server *mcp.Server) {
 			if len(data) > mcpPutMax {
 				return nil, mcpObject{}, s.toolErr(req, apierr.Newf(apierr.ObjectTooLarge, "put_object takes at most %d bytes; use the S3 API or a presigned PUT URL for more", mcpPutMax))
 			}
-			o, err := s.eng.PutObject(ctx, engine.PutObjectInput{BucketID: b.ID, Key: in.Key, Size: int64(len(data)), Body: bytes.NewReader(data),
+			o, err := s.eng.PutObject(ctx, engine.PutObjectInput{Workspace: b.WorkspaceID, BucketID: b.ID, Key: in.Key, Size: int64(len(data)), Body: bytes.NewReader(data),
 				Attrs: engine.ObjectAttrs{ContentType: ct, Metadata: in.Metadata}})
 			if err != nil {
 				return nil, mcpObject{}, s.toolErr(req, err)
@@ -342,7 +342,7 @@ func (s *Server) addObjectTools(server *mcp.Server) {
 			if err != nil {
 				return nil, out, s.toolErr(req, err)
 			}
-			if out.Deleted, err = s.eng.DeleteObject(ctx, b.ID, in.Key); err != nil {
+			if out.Deleted, err = s.eng.DeleteObject(ctx, b.WorkspaceID, b.ID, in.Key); err != nil {
 				return nil, out, s.toolErr(req, err)
 			}
 			return nil, out, nil

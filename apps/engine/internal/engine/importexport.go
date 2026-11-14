@@ -366,6 +366,13 @@ func (e *Engine) copyBranch(ctx context.Context, tg target, dst string) error {
 		return apierr.New(apierr.Busy, "timed out waiting for the branch")
 	}
 	defer g.unshare()
+	// The wait may have been for a workspace delete, a database delete or a
+	// move, which hold the gate alone. Look the branch up again, in the
+	// workspace it was found in: after any of those it is no longer there,
+	// and nothing is copied.
+	if _, err := e.resolve(ctx, tg.db.WorkspaceID, tg.db.ID, tg.branch.ID); err != nil {
+		return err
+	}
 	if _, err := e.copyDB(ctx, tg.path, dst); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return apierr.New(apierr.StatementTimeout, "the copy ran too long")

@@ -329,7 +329,7 @@ func (s *Server) registerBuckets(api huma.API) {
 		}
 		h := http.Header{}
 		hctx.EachHeader(func(name, value string) { h.Add(name, value) })
-		o, err := s.eng.PutObject(ctx, engine.PutObjectInput{BucketID: b.ID, Key: in.Key, Size: size, Body: body, Attrs: s3Attrs(h)})
+		o, err := s.eng.PutObject(ctx, engine.PutObjectInput{Workspace: b.WorkspaceID, BucketID: b.ID, Key: in.Key, Size: size, Body: body, Attrs: s3Attrs(h)})
 		if err != nil {
 			return nil, toProblem(ctx, err)
 		}
@@ -420,7 +420,7 @@ func (s *Server) registerBuckets(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			if _, err := s.eng.DeleteObject(ctx, b.ID, in.Key); err != nil {
+			if _, err := s.eng.DeleteObject(ctx, b.WorkspaceID, b.ID, in.Key); err != nil {
 				return nil, toProblem(ctx, err)
 			}
 			return nil, nil
@@ -439,7 +439,7 @@ func (s *Server) registerBuckets(api huma.API) {
 					return nil, toProblem(ctx, err)
 				}
 			}
-			o, err := s.eng.CopyObject(ctx, engine.CopyObjectInput{SrcBucketID: src.ID, SrcKey: in.Body.FromKey, BucketID: dst.ID, Key: in.Body.Key,
+			o, err := s.eng.CopyObject(ctx, engine.CopyObjectInput{Workspace: dst.WorkspaceID, SrcBucketID: src.ID, SrcKey: in.Body.FromKey, BucketID: dst.ID, Key: in.Body.Key,
 				Replace: in.Body.ContentType != "" || in.Body.Metadata != nil, Attrs: engine.ObjectAttrs{ContentType: in.Body.ContentType, Metadata: in.Body.Metadata}})
 			if err != nil {
 				return nil, toProblem(ctx, err)

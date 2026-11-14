@@ -120,7 +120,7 @@ func (s *Server) gateRequest(w http.ResponseWriter, r *http.Request) (auth.Princ
 	// As on REST, the request runs as a principal acting in one workspace.
 	p, err = s.act(r.Context(), p, selFrom(r.Context()))
 	if err == nil {
-		p, err = narrowed(p, r.Header.Get(actorAccessHeader))
+		p, err = narrowed(p, r.Header.Get(actorAccessHeader), selFrom(r.Context()) != "")
 	}
 	if err != nil {
 		ae := apierr.As(err)

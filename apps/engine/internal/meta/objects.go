@@ -178,6 +178,19 @@ func (s *Store) BucketByID(ctx context.Context, id string) (Bucket, error) {
 	return b, err
 }
 
+// BucketIn reports, as bucket_not_found, a bucket that isn't in the given
+// workspace any more, or whose workspace is in the trash. A write to a
+// bucket's objects or uploads checks it right before it commits.
+func (s *Store) BucketIn(ctx context.Context, wsID, bucketID string) error {
+	var one int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM buckets b JOIN workspaces w ON w.id = b.workspace_id
+		WHERE b.id = ? AND b.workspace_id = ? AND w.deleted_at IS NULL`, bucketID, wsID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return apierr.Newf(apierr.BucketNotFound, "no bucket %q", bucketID)
+	}
+	return err
+}
+
 // ListBuckets returns a workspace's buckets by name.
 func (s *Store) ListBuckets(ctx context.Context, wsID string) ([]Bucket, error) {
 	return s.listBuckets(ctx, `WHERE workspace_id = ? ORDER BY name`, wsID)

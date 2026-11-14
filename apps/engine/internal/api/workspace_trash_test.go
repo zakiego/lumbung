@@ -283,7 +283,14 @@ func TestWorkspaceActorAccess(t *testing.T) {
 			{"GET", "/v1/workspaces", "/v1/workspaces?trashed=true", nil},
 			{"POST", "", base + "/databases/notes/move", map[string]any{"workspace": "globex"}},
 		} {
-			w.fails(w.do(w.admin, o.method, o.template, o.path, o.body, as(level)...), 403, "forbidden")
+			// The instance's own endpoints have no workspace in their URL,
+			// so a level on them is refused before anything is looked at.
+			// The move is in the workspace, where the level isn't enough.
+			if r := w.do(w.admin, o.method, o.template, o.path, o.body, as(level)...); strings.HasPrefix(o.path, base+"/") {
+				w.fails(r, 403, "forbidden")
+			} else {
+				w.fails(r, 400, "bad_request")
+			}
 		}
 		// It acts in the one workspace the URL names. The others don't
 		// exist for it: its list is a list of one, and B's things aren't
@@ -292,13 +299,24 @@ func TestWorkspaceActorAccess(t *testing.T) {
 		if bytes.Contains(ws.body, []byte(b.notesID)) || bytes.Contains(ws.body, []byte(b.only)) {
 			t.Fatalf("narrowed to %s in A sees B: %s", level, ws.body)
 		}
-		list := w.ok(w.do(w.admin, "GET", "/v1/workspaces", "/v1/workspaces", nil, as(level)...), 200).json(t)["data"].([]any)
-		if len(list) != 1 || list[0].(map[string]any)["id"] != w.defaultWS() {
-			t.Fatalf("narrowed on a short URL lists %v", list)
+		// A level needs a URL that names its workspace. On a short URL the
+		// service token acts in the default workspace, where this user's
+		// level means nothing, so the request is refused, not run there.
+		for _, o := range []restOp{
+			{"GET", "/v1/workspaces", "/v1/workspaces", nil}, {"GET", pDBs, "/v1/databases", nil},
+			{"POST", pDBs, "/v1/databases", map[string]any{"name": "in-default"}}, {"GET", "/v1/workspace", "/v1/workspace", nil},
+		} {
+			w.fails(w.do(w.admin, o.method, o.template, o.path, o.body, as(level)...), 400, "bad_request")
 		}
 		w.fails(w.do(w.admin, "GET", "", base+"/databases/"+b.notesID, nil, as(level)...), 404, "database_not_found")
 		w.fails(w.do(w.admin, "GET", "", base+"/buckets/"+b.onlyBucket, nil, as(level)...), 404, "bucket_not_found")
-		w.fails(w.do(w.admin, "GET", "/v1/workspaces/{ws}", "/v1/workspaces/globex", nil, as(level)...), 404, "workspace_not_found")
+		// Its own workspace's record is the qualified form of /v1/workspace,
+		// with limits and usage as for a workspace token at that level.
+		own := w.ok(w.do(w.admin, "GET", "", base+"/workspace", nil, as(level)...), 200).json(t)
+		if own["id"] != a.id || own["limits"] == nil || own["usage"] == nil {
+			t.Fatalf("narrowed to %s: its workspace: %v", level, own)
+		}
+		w.fails(w.do(w.admin, "GET", "/v1/workspaces/{ws}", "/v1/workspaces/globex", nil, as(level)...), 400, "bad_request")
 	}
 	// The other doors.
 	post := func(level, sql string) (int, string) {
@@ -326,9 +344,65 @@ func TestWorkspaceActorAccess(t *testing.T) {
 		t.Fatalf("S3 write as write: %d %s", r.status, r.body)
 	}
 
-	// A value that isn't a level is refused, not treated as no header.
-	for _, bad := range []string{"owner", "ADMIN", "admin,read", "*", "instance"} {
-		w.fails(w.do(w.admin, "GET", "", base+"/databases", nil, h, bad), 400, "bad_request")
+	// A value that isn't a level is refused, not treated as no header. So
+	// is an empty one, or two of them: either would otherwise run the
+	// request as the instance admin the service token is.
+	for _, bad := range []string{"owner", "ADMIN", "admin,read", "*", "instance", "", "   "} {
+		for _, path := range []string{base + "/databases", "/v1/databases", "/v1/instance/tokens", base + "/s3", base + "/mcp"} {
+			req, _ := http.NewRequest("GET", w.http.URL+path, nil)
+			req.Header.Set("Authorization", "Bearer "+w.admin)
+			req.Header[h] = []string{bad}
+			if r := w.send(req); r.status != 400 {
+				t.Fatalf("level %q on %s: %d %s", bad, path, r.status, r.body)
+			}
+		}
+	}
+	for _, path := range []string{base + "/databases", "/v1/instance/tokens"} {
+		req, _ := http.NewRequest("GET", w.http.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+w.admin)
+		req.Header[h] = []string{"read", "admin"}
+		if r := w.send(req); r.status != 400 {
+			t.Fatalf("two levels on %s: %d %s", path, r.status, r.body)
+		}
+	}
+	if got := len(w.ok(w.do(w.admin, "GET", pDBs, "/v1/databases", nil), 200).json(t)["data"].([]any)); got != 0 {
+		t.Fatalf("a refused request created something in the default workspace: %d databases", got)
+	}
+
+	// A libSQL stream belongs to who opened it, at the level they had. All
+	// dashboard users share the service token, so the token alone isn't
+	// who: a transaction begun with write can't be continued by a request
+	// narrowed to read, or by another user, even with the baton.
+	pipe := func(level, actor string, baton any, reqs ...map[string]any) (int, map[string]any) {
+		body, _ := json.Marshal(map[string]any{"baton": baton, "requests": reqs})
+		req, _ := http.NewRequest("POST", w.http.URL+base+"/libsql/notes/main/v2/pipeline", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+w.admin)
+		req.Header.Set("Content-Type", "application/json")
+		if level != "" {
+			req.Header.Set(h, level)
+		}
+		req.Header.Set("X-Lumbung-Actor", actor)
+		r := w.send(req)
+		var m map[string]any
+		_ = json.Unmarshal(r.body, &m)
+		return r.status, m
+	}
+	status, opened := pipe("write", "dashboard:writer@example.com", nil, exec("BEGIN"), exec("INSERT INTO t VALUES ('uncommitted')"))
+	if status != 200 || opened["baton"] == nil {
+		t.Fatalf("open a stream as write: %d %v", status, opened)
+	}
+	for who, try := range map[string][2]string{
+		"the same user at read":  {"read", "dashboard:writer@example.com"},
+		"the same user at admin": {"admin", "dashboard:writer@example.com"},
+		"another user at write":  {"write", "dashboard:other@example.com"},
+		"the bare service token": {"", "dashboard:writer@example.com"},
+	} {
+		if status, got := pipe(try[0], try[1], opened["baton"], exec("COMMIT")); status != 400 || got["code"] != "invalid_baton" {
+			t.Fatalf("%s continued a stream that isn't theirs: %d %v", who, status, got)
+		}
+	}
+	if status, got := pipe("write", "dashboard:writer@example.com", opened["baton"], exec("ROLLBACK"), closeReq); status != 200 {
+		t.Fatalf("the stream's owner: %d %v", status, got)
 	}
 	// On any other token the header does nothing, in either direction.
 	w.fails(w.do(a.read.Token, "POST", pDBs, "/v1/databases", map[string]any{"name": "x"}, h, "admin"), 403, "forbidden")
@@ -336,6 +410,7 @@ func TestWorkspaceActorAccess(t *testing.T) {
 	w.ok(w.do(a.admin.Token, "POST", pDBs, "/v1/databases", map[string]any{"name": "still-admin"}, h, "read"), 201)
 	inst := w.ok(w.do(w.admin, "POST", "/v1/instance/tokens", "/v1/instance/tokens", map[string]any{"name": "op", "access": "admin"}), 201).json(t)["token"].(string)
 	w.ok(w.do(inst, "GET", "/v1/instance/tokens", "/v1/instance/tokens", nil, h, "read"), 200)
+	w.ok(w.do(inst, "GET", pDBs, "/v1/databases", nil, h, "read"), 200)
 	w.ok(w.do(inst, "GET", "", base+"/databases", nil, h, "owner"), 200)
 	// Without the header the service token is the instance admin it was.
 	w.ok(w.do(w.admin, "GET", "/v1/instance/tokens", "/v1/instance/tokens", nil), 200)

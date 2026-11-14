@@ -74,7 +74,7 @@ func (e *Engine) CreateBranch(ctx context.Context, ws, dbRef, name string, src B
 		return meta.Branch{}, err
 	}
 
-	nb := meta.NewBranch{ID: ids.New(ids.Branch), DatabaseID: d.ID, Name: name, Protected: opts.Protected}
+	nb := meta.NewBranch{ID: ids.New(ids.Branch), DatabaseID: d.ID, WorkspaceID: d.WorkspaceID, Name: name, Protected: opts.Protected}
 	if opts.ExpiresIn > 0 {
 		at := time.Now().Add(opts.ExpiresIn)
 		nb.ExpiresAt = &at

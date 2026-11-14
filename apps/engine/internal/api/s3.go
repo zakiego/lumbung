@@ -149,7 +149,7 @@ func (s *Server) s3Workspace(req *s3Req) *s3proto.Error {
 	if req.bearer {
 		// The dashboard reaches this API with the service token as a bearer
 		// token, for a user whose level it names.
-		if p, err = narrowed(p, req.r.Header.Get(actorAccessHeader)); err != nil {
+		if p, err = narrowed(p, req.r.Header.Get(actorAccessHeader), req.sel != ""); err != nil {
 			return s3proto.Errf("InvalidRequest", http.StatusBadRequest, "%s", apierr.As(err).Message)
 		}
 	}
@@ -1069,7 +1069,7 @@ func (s *Server) s3PutObject(req *s3Req) {
 		s.s3Fail(req, e)
 		return
 	}
-	o, err := s.eng.PutObject(req.r.Context(), engine.PutObjectInput{BucketID: b.ID, Key: req.key, Size: size, Body: body,
+	o, err := s.eng.PutObject(req.r.Context(), engine.PutObjectInput{Workspace: req.ws, BucketID: b.ID, Key: req.key, Size: size, Body: body,
 		Attrs: s3Attrs(req.r.Header), ContentMD5: md5, Cond: cond})
 	if err != nil {
 		s.s3Err(req, err)
@@ -1105,7 +1105,7 @@ func (s *Server) s3DeleteObject(req *s3Req) {
 		s.s3Fail(req, e)
 		return
 	}
-	if _, err := s.eng.DeleteObject(req.r.Context(), b.ID, req.key); err != nil {
+	if _, err := s.eng.DeleteObject(req.r.Context(), req.ws, b.ID, req.key); err != nil {
 		s.s3Err(req, err)
 		return
 	}
@@ -1134,7 +1134,7 @@ func (s *Server) s3DeleteObjects(req *s3Req) {
 			out.Errors = append(out.Errors, s3proto.DeleteErrorEntry{Key: o.Key, Code: "NoSuchVersion", Message: "versioning isn't supported"})
 			continue
 		}
-		if _, err := s.eng.DeleteObject(req.r.Context(), b.ID, o.Key); err != nil {
+		if _, err := s.eng.DeleteObject(req.r.Context(), req.ws, b.ID, o.Key); err != nil {
 			se := s.s3FromAPI(req, err)
 			out.Errors = append(out.Errors, s3proto.DeleteErrorEntry{Key: o.Key, Code: se.Code, Message: se.Message})
 			continue
@@ -1205,7 +1205,7 @@ func (s *Server) s3CopyObject(req *s3Req) {
 			cond.Set(n, v)
 		}
 	}
-	o, err := s.eng.CopyObject(ctx, engine.CopyObjectInput{SrcBucketID: src.ID, SrcKey: srcKey, BucketID: dst.ID, Key: req.key,
+	o, err := s.eng.CopyObject(ctx, engine.CopyObjectInput{Workspace: req.ws, SrcBucketID: src.ID, SrcKey: srcKey, BucketID: dst.ID, Key: req.key,
 		Replace: directive == "REPLACE", Attrs: s3Attrs(req.r.Header),
 		Check: func(o meta.Object) error {
 			// Every copy condition that doesn't hold, If-Modified-Since
@@ -1323,7 +1323,7 @@ func (s *Server) s3CreateUpload(req *s3Req) {
 		s.s3Fail(req, e)
 		return
 	}
-	u, err := s.eng.CreateUpload(req.r.Context(), b.ID, req.key, s3Attrs(req.r.Header), req.p.TokenID)
+	u, err := s.eng.CreateUpload(req.r.Context(), req.ws, b.ID, req.key, s3Attrs(req.r.Header), req.p.TokenID)
 	if err != nil {
 		s.s3Err(req, err)
 		return
@@ -1352,7 +1352,7 @@ func (s *Server) s3UploadPart(req *s3Req) {
 		s.s3Fail(req, e)
 		return
 	}
-	etag, err := s.eng.UploadPart(req.r.Context(), engine.UploadPartInput{UploadID: req.q.Get("uploadId"), BucketID: b.ID, Key: req.key,
+	etag, err := s.eng.UploadPart(req.r.Context(), engine.UploadPartInput{Workspace: req.ws, UploadID: req.q.Get("uploadId"), BucketID: b.ID, Key: req.key,
 		Number: n, Size: size, Body: body, ContentMD5: md5})
 	if err != nil {
 		s.s3Err(req, err)
@@ -1387,7 +1387,7 @@ func (s *Server) s3CompleteUpload(req *s3Req) {
 		s.s3Fail(req, e)
 		return
 	}
-	o, err := s.eng.CompleteUpload(req.r.Context(), req.q.Get("uploadId"), b.ID, req.key, parts, cond)
+	o, err := s.eng.CompleteUpload(req.r.Context(), req.ws, req.q.Get("uploadId"), b.ID, req.key, parts, cond)
 	if err != nil {
 		s.s3Err(req, err)
 		return
@@ -1402,7 +1402,7 @@ func (s *Server) s3AbortUpload(req *s3Req) {
 		s.s3Fail(req, e)
 		return
 	}
-	if err := s.eng.AbortUpload(req.r.Context(), req.q.Get("uploadId"), b.ID, req.key); err != nil {
+	if err := s.eng.AbortUpload(req.r.Context(), req.ws, req.q.Get("uploadId"), b.ID, req.key); err != nil {
 		s.s3Err(req, err)
 		return
 	}

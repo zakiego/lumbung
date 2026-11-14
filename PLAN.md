@@ -460,7 +460,7 @@ Scopes: `instance`, `workspace`, `database`, `bucket`, `grants`.
 ### 17.3 Addressing
 
 - Short URLs resolve in the caller's workspace: `/v1/databases/...`, `/v1/trash`, `/v1/buckets/...`, `/v1/tokens`, `/v1/audit`, `/v1/s3/...`, `/libsql/...`, `/mcp`. A workspace-bound token's workspace is its own. A caller with no workspace of its own (an instance token, an anonymous request) acts in the default workspace.
-- Qualified URLs put `/v1/workspaces/{ws}` in front of the same paths, for every door: `/v1/workspaces/{ws}/databases/...`, `/v1/workspaces/{ws}/s3/<bucket>/<key>`, `/v1/workspaces/{ws}/libsql/{db}/{branch}/`, `/v1/workspaces/{ws}/mcp`. `{ws}` is a name or an id.
+- Qualified URLs put `/v1/workspaces/{ws}` in front of the same paths (and of `/v1/workspace`), for every door: `/v1/workspaces/{ws}/databases/...`, `/v1/workspaces/{ws}/s3/<bucket>/<key>`, `/v1/workspaces/{ws}/libsql/{db}/{branch}/`, `/v1/workspaces/{ws}/mcp`. `{ws}` is a name or an id.
 - A workspace-bound token using a qualified URL for any workspace but its own gets `workspace_not_found`, the same answer as a workspace that doesn't exist. On the S3 API that is `NoSuchBucket`, or `AccessDenied` where no bucket is named.
 - `{db}` and `{bucket}` still accept a name or an id. An id from another workspace is not found.
 - OpenAPI lists each operation once, at its short path, and states the qualified form as a rule.
@@ -497,6 +497,7 @@ Settings: `LUMBUNG_MAX_WORKSPACES`, `LUMBUNG_MAX_TOKENS_PER_WORKSPACE`, and the 
 ### 17.6 Deleting, restoring, moving
 
 - Deleting a workspace moves it to the trash for `LUMBUNG_TRASH_RETENTION`. At once its tokens stop authenticating, its databases and buckets stop resolving (public links and presigned URLs included), open connections and libSQL streams close, and scheduled snapshots and branch expiry pause.
+- What is in flight doesn't land afterwards. A branch copy, a download or a snapshot that waited on the delete looks its database up again and finds nothing. A write to a bucket checks, under the lock a delete and a move take, that the bucket is still in the workspace it was resolved in, right before it commits. The same holds for a move.
 - Restoring brings everything back, tokens included. The name is free while it is in the trash, so a restore may need a new one.
 - After retention the engine purges it: databases, snapshots, objects, uploads, tokens. Audit entries stay.
 - The default workspace can't be deleted.
@@ -510,7 +511,7 @@ Settings: `LUMBUNG_MAX_WORKSPACES`, `LUMBUNG_MAX_TOKENS_PER_WORKSPACE`, and the 
 
 ### 17.8 Dashboard
 
-- The service token stays the dashboard's one engine credential. It calls qualified URLs and sends `X-Lumbung-Actor-Access: read|write|admin` for a user who isn't an owner. The engine then narrows the request to a workspace principal at that level, so the engine enforces the role. Only the service token is narrowed, and only downwards.
+- The service token stays the dashboard's one engine credential. It calls qualified URLs and sends `X-Lumbung-Actor-Access: read|write|admin` for a user who isn't an owner. The engine then narrows the request to a workspace principal at that level, so the engine enforces the role. Only the service token is narrowed, and only downwards. The header needs a qualified URL: on a short URL it is refused, so a missing prefix can never apply a user's level in the default workspace. An empty or repeated header is refused too. A libSQL stream belongs to the user and level that opened it.
 - Roles: an instance `owner` sees and manages every workspace, the members and the instance. Everyone else has a role per workspace (admin, member, read-only) and sees only the workspaces they have a role in. Invites carry workspaces and roles. On upgrade, members and read-only users get that role in the default workspace.
 - The workspace is in the URL: `/app/w/{workspace}/...`. Old URLs redirect to the default workspace. A switcher sits at the top of the sidebar, with create for owners.
 - Screens: workspace switcher and create, workspace settings (name, limits, usage, delete with a typed confirmation, trash and restore for owners), members with a role per workspace, tokens for the workspace (a whole-workspace reach next to databases and buckets), audit for the workspace and for the instance, moving a database or bucket (owners).

@@ -139,6 +139,13 @@ func (s *Store) CreateDatabase(ctx context.Context, wsID, name, dbID, branchID s
 // engine's own jobs (PLAN 17.6).
 const inLiveWorkspace = ` AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id = databases.workspace_id AND w.deleted_at IS NULL)`
 
+// databaseLiveIn selects a row when a database (first argument) is live in
+// a workspace (second argument) that is live too. Writes that follow a slow
+// copy put it in their own statement, so they can't land in a workspace
+// that was deleted, or on a database that was moved, while they ran.
+const databaseLiveIn = `SELECT 1 FROM databases d JOIN workspaces w ON w.id = d.workspace_id
+	WHERE d.id = ? AND d.workspace_id = ? AND d.deleted_at IS NULL AND w.deleted_at IS NULL`
+
 // GetDatabase finds a live database of a workspace by name or id. A
 // database of another workspace is not found, by id as much as by name.
 func (s *Store) GetDatabase(ctx context.Context, wsID, ref string) (Database, error) {

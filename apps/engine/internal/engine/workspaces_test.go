@@ -66,11 +66,11 @@ func fill(t *testing.T, e *Engine, name string) filledWorkspace {
 	}
 	o := mustPut(t, e, f.bucket.ID, "doc.txt", f.holds)
 	f.blob = o.BlobID
-	if f.upload, err = e.CreateUpload(bg, f.bucket.ID, "big", ObjectAttrs{}, ""); err != nil {
+	if f.upload, err = e.CreateUpload(bg, w.ID, f.bucket.ID, "big", ObjectAttrs{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	// A part, so the upload has a folder on disk.
-	if _, err := e.UploadPart(bg, UploadPartInput{UploadID: f.upload.ID, BucketID: f.bucket.ID, Key: "big", Number: 1, Size: 4, Body: strings.NewReader("part")}); err != nil {
+	if _, err := e.UploadPart(bg, UploadPartInput{Workspace: w.ID, UploadID: f.upload.ID, BucketID: f.bucket.ID, Key: "big", Number: 1, Size: 4, Body: strings.NewReader("part")}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.meta.CreateToken(bg, meta.Token{ID: f.token, Name: "t", SecretHash: []byte{1}, WorkspaceID: w.ID, Scope: "grants", Access: "admin",

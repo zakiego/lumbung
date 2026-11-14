@@ -2646,7 +2646,7 @@
     }
   },
   "info": {
-    "description": "Self-hosted SQLite databases with branches. Every request needs `Authorization: Bearer \u003ctoken\u003e`. Errors are `application/problem+json` with a stable `code`.\n\nDatabases, buckets and tokens live in workspaces. A request acts in the workspace of its token; an instance token, which belongs to none, acts in the default workspace. To name a workspace, put `/v1/workspaces/{workspace}` in front of a path under `/v1/databases`, `/v1/trash`, `/v1/buckets`, `/v1/tokens`, `/v1/audit` or `/v1/s3` (for example `/v1/workspaces/acme/databases`), or of `/libsql` and `/mcp`. A token that belongs to a workspace can only name its own; any other gets `workspace_not_found`.",
+    "description": "Self-hosted SQLite databases with branches. Every request needs `Authorization: Bearer \u003ctoken\u003e`. Errors are `application/problem+json` with a stable `code`.\n\nDatabases, buckets and tokens live in workspaces. A request acts in the workspace of its token; an instance token, which belongs to none, acts in the default workspace. To name a workspace, put `/v1/workspaces/{workspace}` in front of a path under `/v1/databases`, `/v1/trash`, `/v1/buckets`, `/v1/tokens`, `/v1/audit`, `/v1/workspace` or `/v1/s3` (for example `/v1/workspaces/acme/databases`), or of `/libsql` and `/mcp`. A token that belongs to a workspace can only name its own; any other gets `workspace_not_found`.",
     "title": "Lumbung API",
     "version": "1"
   },
