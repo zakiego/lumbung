@@ -94,9 +94,24 @@ prune() {
   for ((i = 0; i < drop; i++)); do rm -rf "${dir:?}/${names[i]}"; done
 }
 
+# A backup whose retention failed is complete: report it at the end, but
+# never retry it, or every retry takes one more full backup.
+retention_failed=""
+
 # --- 1. engine ----------------------------------------------------------------
 engine_backup() {
-  engine_json=$(docker compose exec -T engine lumbungd backup --to /data/backups/nightly --keep "$KEEP" </dev/null)
+  local rc=0 done_path
+  engine_json=$(docker compose exec -T engine lumbungd backup --to /data/backups/nightly --keep "$KEEP" </dev/null) || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  # When only retention fails, lumbungd still prints the JSON with the
+  # finished backup's folder, then exits 1.
+  done_path=$(printf '%s' "$engine_json" | tail -n 1 | json_field backup 2>/dev/null) || done_path=""
+  if [ -n "$done_path" ]; then
+    log "engine: $done_path is complete, but retention failed (exit $rc); not taking another"
+    retention_failed="$retention_failed engine"
+    return 0
+  fi
+  return "$rc"
 }
 retry engine_backup
 log "engine: $engine_json"
@@ -114,6 +129,12 @@ dashboard_backup() {
   dash_json=$(docker compose exec -T dashboard node - /data/backups nightly-dashboard "$KEEP" <ops/dashboard-backup.mjs) || rc=$?
   # 2 means there's no dashboard.db yet: nothing to keep, not worth a retry.
   [ "$rc" -eq 2 ] && { dash_json=""; return 0; }
+  # 3 means the copy is complete but retention failed.
+  if [ "$rc" -eq 3 ]; then
+    log "dashboard: the copy is complete, but retention failed; not taking another"
+    retention_failed="$retention_failed dashboard"
+    return 0
+  fi
   return "$rc"
 }
 retry dashboard_backup
@@ -165,4 +186,9 @@ if [ -n "$dash_remote" ]; then
   partial=""
   log "dashboard copy: $dash_dest ($(stat -f %z "$dash_dest") bytes)"
   prune "$OUT/dashboard" 'nightly-dashboard-*.db'
+fi
+
+if [ -n "$retention_failed" ]; then
+  log "retention failed in the volume for:$retention_failed (old backups pile up there; see the lines above)"
+  exit 1
 fi

@@ -122,6 +122,8 @@ backup_dashboard() {
     - /data/backups pre-deploy "$KEEP" <ops/dashboard-backup.mjs || rc=$?
   # 2 means there's no dashboard.db yet: nothing to keep.
   [ "$rc" -eq 2 ] && { log "no dashboard.db yet, no dashboard backup needed"; return 0; }
+  # 3: the copy is complete, only removing old ones failed.
+  [ "$rc" -eq 3 ] && { log "WARNING: dashboard.db is backed up, but removing old pre-deploy copies failed"; return 0; }
   return "$rc"
 }
 

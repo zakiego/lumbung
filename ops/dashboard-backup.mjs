@@ -6,7 +6,9 @@
 //   docker compose exec -T dashboard node - <dir> <prefix> <keep> < ops/dashboard-backup.mjs
 //
 // Writes <dir>/<prefix>-<UTC time>.db and prints {"backup": path, "bytes": n}.
-// Exits 2 when there's no dashboard.db yet, 1 on any other failure.
+// Exits 2 when there's no dashboard.db yet, 3 when the copy is complete but
+// removing old copies failed (so a caller doesn't take another), 1 on any
+// other failure.
 // LUMBUNG_DASHBOARD_DATA_DIR (set in the image) says where dashboard.db is.
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
@@ -58,7 +60,20 @@ if (result.length !== 1 || result[0] !== "ok") {
 
 // Timestamps sort by name: drop everything after the newest `keep`.
 const pattern = new RegExp(`^${prefix}-\\d{8}T\\d{6}Z\\.db$`)
-const old = readdirSync(dir).filter((n) => pattern.test(n)).sort().reverse().slice(keep)
-for (const name of old) unlinkSync(join(dir, name))
+let pruned = 0
+let retentionError
+try {
+  const old = readdirSync(dir).filter((n) => pattern.test(n)).sort().reverse().slice(keep)
+  for (const name of old) {
+    unlinkSync(join(dir, name))
+    pruned++
+  }
+} catch (e) {
+  retentionError = e
+}
 
-console.log(JSON.stringify({ backup: dest, bytes: statSync(dest).size, pruned: old.length }))
+console.log(JSON.stringify({ backup: dest, bytes: statSync(dest).size, pruned }))
+if (retentionError) {
+  console.error(`${dest} is complete, but removing old copies failed: ${retentionError.message}`)
+  process.exit(3)
+}
