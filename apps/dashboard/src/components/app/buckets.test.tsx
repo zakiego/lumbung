@@ -3,7 +3,7 @@ import { RouterProvider, createMemoryHistory, createRootRoute, createRouter } fr
 import { render as rtlRender, screen } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { expect, test } from "vitest"
-import { BucketTable, ObjectTable, prefixTrail } from "./buckets"
+import { BucketTable, ObjectTable, PART_BYTES, prefixTrail, uploadFile } from "./buckets"
 
 const noop = async () => {}
 
@@ -89,4 +89,32 @@ test("breadcrumb trail", () => {
     { label: "x", prefix: "/x/" },
   ])
   expect(prefixTrail("a/partial")).toEqual([{ label: "a", prefix: "a/" }])
+})
+
+test("uploadFile: small files in one request, large ones in parts, aborted on failure", async () => {
+  const calls: { url: string; method: string; size?: number }[] = []
+  const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 })
+  const fake = (failAt?: number) =>
+    (async (u: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(u)
+      const size = init?.body instanceof Blob ? init.body.size : undefined
+      calls.push({ url, method: init?.method ?? "GET", size })
+      if (url.includes("&uploads")) return ok({ uploadId: "up_aaaaaaaaaaaaaaaaaaaa" })
+      if (url.includes("partNumber=")) {
+        if (failAt && url.includes(`partNumber=${failAt}`)) return new Response(JSON.stringify({ error: "disk full" }), { status: 507 })
+        return ok({ etag: "a".repeat(32) })
+      }
+      return ok({ key: "k", etag: "e" })
+    }) as typeof fetch
+  await uploadFile("b", "", new File(["hi"], "small.txt"), fake())
+  expect(calls.map((c) => c.method)).toEqual(["PUT"])
+  calls.length = 0
+  const big = new File([new Uint8Array(PART_BYTES * 2 + 5)], "big.bin")
+  await uploadFile("b", "dir/", big, fake())
+  expect(calls.map((c) => c.method)).toEqual(["POST", "PUT", "PUT", "PUT", "POST"])
+  expect(calls.slice(1, 4).map((c) => c.size)).toEqual([PART_BYTES, PART_BYTES, 5])
+  expect(calls[0]!.url).toContain("key=dir%2Fbig.bin")
+  calls.length = 0
+  await expect(uploadFile("b", "", big, fake(2))).rejects.toThrow("disk full")
+  expect(calls.at(-1)!.method).toBe("DELETE")
 })

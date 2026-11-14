@@ -1,19 +1,51 @@
 // Object uploads and downloads move file bodies, too big for server
 // functions, so they use a plain route under /app/api. Both stream: an
 // upload goes to the engine as it arrives, never buffered, and the engine
-// enforces the size limits.
+// enforces the size limits. Large files go up as a multipart upload, part
+// by part, so no single request runs long enough to meet the server's
+// request timeout.
 import { type Client, LumbungError } from "@lumbung/client"
 import { type Permission, can } from "@/lib/roles"
 import { crossOriginWrite } from "./auth"
+import { config, engineToken } from "./config"
 import { engineFor, userMessage } from "./engine"
 import { type Viewer, viewerFromRequest } from "./session"
+
+/** A request to the engine's S3 API, with the service token as a bearer token. */
+export type S3Call = (method: string, path: string, query: Record<string, string>, init?: { body?: BodyInit | null; headers?: Record<string, string> }) => Promise<Response>
 
 export type ObjectDeps = {
   viewer: (request: Request) => Promise<Viewer | null>
   engine: (viewer: Viewer) => Pick<Client, "bucket">
+  s3?: S3Call
 }
 
-const defaults: ObjectDeps = { viewer: viewerFromRequest, engine: engineFor }
+const engineS3: S3Call = (method, path, query, init = {}) => {
+  const url = `${config().engineUrl}${path}${Object.keys(query).length ? `?${new URLSearchParams(query)}` : ""}`
+  return fetch(url, {
+    method,
+    body: init.body,
+    headers: { authorization: `Bearer ${engineToken()}`, ...init.headers },
+    ...(init.body instanceof ReadableStream ? { duplex: "half" } : {}),
+  } as RequestInit)
+}
+
+const defaults: ObjectDeps = { viewer: viewerFromRequest, engine: engineFor, s3: engineS3 }
+
+/**
+ * The S3 path of an object. Dot segments are percent-encoded so nothing on
+ * the way resolves them; the engine decodes them back into the key.
+ */
+export function s3Path(bucket: string, key: string): string {
+  const segs = key.split("/").map((s) => (s === "." || s === ".." ? s.replace(/\./g, "%2E") : encodeURIComponent(s)))
+  return `/v1/s3/${encodeURIComponent(bucket)}/${segs.join("/")}`
+}
+
+async function s3Failure(res: Response): Promise<Response> {
+  const text = await res.text()
+  const message = text.match(/<Message>([^<]*)<\/Message>/)?.[1] ?? `HTTP ${res.status}`
+  return fail(res.status >= 400 && res.status < 600 ? res.status : 502, message)
+}
 
 function fail(status: number, message: string): Response {
   return Response.json({ error: message }, { status, headers: { "cache-control": "no-store" } })
@@ -40,7 +72,10 @@ function target(request: Request): { bucket: string; key: string } | null {
   return { bucket, key }
 }
 
-/** PUT /app/api/objects?bucket=&key=, the file as the body with a Content-Length. */
+/**
+ * PUT /app/api/objects?bucket=&key=, the file as the body with a Content-Length.
+ * With &uploadId=&partNumber=, the body is one part of a multipart upload.
+ */
 export async function uploadObject(request: Request, deps: ObjectDeps = defaults): Promise<Response> {
   const viewer = await guard(request, "write", deps)
   if (viewer instanceof Response) return viewer
@@ -48,6 +83,22 @@ export async function uploadObject(request: Request, deps: ObjectDeps = defaults
   if (!t) return fail(400, "Pick a bucket and a key.")
   const length = Number(request.headers.get("content-length"))
   if (!request.headers.has("content-length") || !Number.isSafeInteger(length) || length < 0) return fail(411, "The upload needs a length.")
+  const q = new URL(request.url).searchParams
+  const uploadId = q.get("uploadId")
+  if (uploadId !== null) {
+    const part = q.get("partNumber") ?? ""
+    if (!/^up_[a-z0-9]{20}$/.test(uploadId) || !/^[1-9][0-9]{0,4}$/.test(part)) return fail(400, "Pick an upload and a part number.")
+    try {
+      const res = await (deps.s3 ?? engineS3)("PUT", s3Path(t.bucket, t.key), { uploadId, partNumber: part }, {
+        body: request.body ?? "",
+        headers: { "content-length": String(length) },
+      })
+      if (!res.ok) return s3Failure(res)
+      return Response.json({ etag: (res.headers.get("etag") ?? "").replace(/"/g, "") }, { headers: { "cache-control": "no-store" } })
+    } catch (e) {
+      return engineFailure(e)
+    }
+  }
   try {
     const body = request.body ?? new ReadableStream<Uint8Array>({ start: (c) => c.close() })
     const out = await deps.engine(viewer).bucket(t.bucket).put(t.key, body, {
@@ -92,4 +143,65 @@ export async function downloadObject(request: Request, deps: ObjectDeps = defaul
   const length = obj.response.headers.get("content-length")
   if (length && !obj.response.headers.get("content-encoding")) headers.set("content-length", length)
   return new Response(obj.response.body, { status: 200, headers })
+}
+
+/**
+ * POST /app/api/objects?bucket=&key=&uploads starts a multipart upload.
+ * POST ...&uploadId= with {"parts": [{"number", "etag"}]} completes it.
+ */
+export async function multipartObject(request: Request, deps: ObjectDeps = defaults): Promise<Response> {
+  const viewer = await guard(request, "write", deps)
+  if (viewer instanceof Response) return viewer
+  const t = target(request)
+  if (!t) return fail(400, "Pick a bucket and a key.")
+  const q = new URL(request.url).searchParams
+  const s3 = deps.s3 ?? engineS3
+  try {
+    if (q.has("uploads")) {
+      const res = await s3("POST", s3Path(t.bucket, t.key), { uploads: "" }, {
+        headers: { "content-type": request.headers.get("x-object-content-type") || "application/octet-stream" },
+      })
+      if (!res.ok) return s3Failure(res)
+      const uploadId = (await res.text()).match(/<UploadId>([^<]+)<\/UploadId>/)?.[1]
+      if (!uploadId) return fail(502, "The engine didn't return an upload id.")
+      return Response.json({ uploadId }, { headers: { "cache-control": "no-store" } })
+    }
+    const uploadId = q.get("uploadId") ?? ""
+    if (!/^up_[a-z0-9]{20}$/.test(uploadId)) return fail(400, "Pick an upload.")
+    const body = (await request.json().catch(() => null)) as { parts?: { number: number; etag: string }[] } | null
+    const parts = body?.parts
+    if (!Array.isArray(parts) || parts.length === 0 || parts.length > 10000) return fail(400, "List the uploaded parts.")
+    const xml = parts
+      .map((p) => {
+        if (!Number.isInteger(p.number) || typeof p.etag !== "string" || !/^[0-9a-f]{32}$/.test(p.etag)) throw new Error("bad part")
+        return `<Part><PartNumber>${p.number}</PartNumber><ETag>"${p.etag}"</ETag></Part>`
+      })
+      .join("")
+    const res = await s3("POST", s3Path(t.bucket, t.key), { uploadId }, {
+      body: `<CompleteMultipartUpload>${xml}</CompleteMultipartUpload>`,
+      headers: { "content-type": "application/xml" },
+    })
+    if (!res.ok) return s3Failure(res)
+    const etag = (await res.text()).match(/<ETag>&#34;([^&<]+)&#34;<\/ETag>|<ETag>"?([^"<]+)"?<\/ETag>/)
+    return Response.json({ key: t.key, etag: etag?.[1] ?? etag?.[2] ?? "" }, { headers: { "cache-control": "no-store" } })
+  } catch (e) {
+    if (e instanceof Error && e.message === "bad part") return fail(400, "A part number or ETag isn't valid.")
+    return engineFailure(e)
+  }
+}
+
+/** DELETE /app/api/objects?bucket=&key=&uploadId= aborts a multipart upload. */
+export async function abortUpload(request: Request, deps: ObjectDeps = defaults): Promise<Response> {
+  const viewer = await guard(request, "write", deps)
+  if (viewer instanceof Response) return viewer
+  const t = target(request)
+  const uploadId = new URL(request.url).searchParams.get("uploadId") ?? ""
+  if (!t || !/^up_[a-z0-9]{20}$/.test(uploadId)) return fail(400, "Pick an upload.")
+  try {
+    const res = await (deps.s3 ?? engineS3)("DELETE", s3Path(t.bucket, t.key), { uploadId })
+    if (!res.ok && res.status !== 404) return s3Failure(res)
+    return new Response(null, { status: 204 })
+  } catch (e) {
+    return engineFailure(e)
+  }
 }

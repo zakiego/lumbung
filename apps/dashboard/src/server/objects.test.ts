@@ -1,7 +1,7 @@
 import { LumbungError } from "@lumbung/client"
 import { describe, expect, test, vi } from "vitest"
 import type { Role } from "@/lib/roles"
-import { type ObjectDeps, downloadObject, uploadObject } from "./objects"
+import { type ObjectDeps, abortUpload, downloadObject, multipartObject, uploadObject } from "./objects"
 
 const ORIGIN = "http://localhost:4871"
 
@@ -100,4 +100,65 @@ test("a stored Content-Encoding drops the encoded length, and filenames follow R
   expect(res.headers.get("content-length")).toBeNull()
   expect(res.headers.get("content-disposition")).toContain("filename*=UTF-8''it%27s%20%28final%29%2A.js")
   expect(await res.text()).toBe("decoded body")
+})
+
+describe("multipart", () => {
+  const UP = "up_aaaaaaaaaaaaaaaaaaaa"
+  function withS3(role: Role | null, respond: (method: string, path: string, q: Record<string, string>) => Response) {
+    const calls: { method: string; path: string; q: Record<string, string>; body?: unknown }[] = []
+    const base = deps(role).d
+    const d: ObjectDeps = {
+      ...base,
+      s3: async (method, path, q, init) => {
+        calls.push({ method, path, q, body: init?.body })
+        return respond(method, path, q)
+      },
+    }
+    return { d, calls }
+  }
+  const post = (q: string, body?: unknown) =>
+    new Request(url(q), { method: "POST", body: body === undefined ? undefined : JSON.stringify(body), headers: { origin: ORIGIN, "x-object-content-type": "video/mp4" } })
+
+  test("start, send parts, complete, abort", async () => {
+    const { d, calls } = withS3("member", (method, _path, q) => {
+      if (method === "POST" && "uploads" in q) return new Response(`<InitiateMultipartUploadResult><UploadId>${UP}</UploadId></InitiateMultipartUploadResult>`)
+      if (method === "PUT") return new Response(null, { headers: { etag: `"${"a".repeat(32)}"` } })
+      if (method === "POST") return new Response(`<CompleteMultipartUploadResult><ETag>&#34;${"b".repeat(32)}-2&#34;</ETag></CompleteMultipartUploadResult>`)
+      return new Response(null, { status: 204 })
+    })
+    const key = "videos/../a b.mp4"
+    const start = await multipartObject(post(`bucket=photos&key=${encodeURIComponent(key)}&uploads`), d)
+    expect(await start.json()).toEqual({ uploadId: UP })
+    expect(calls[0]!.path).toBe("/v1/s3/photos/videos/%2E%2E/a%20b.mp4")
+    const part = await uploadObject(put(`bucket=photos&key=${encodeURIComponent(key)}&uploadId=${UP}&partNumber=1`), d)
+    expect(await part.json()).toEqual({ etag: "a".repeat(32) })
+    expect(calls[1]!.q).toEqual({ uploadId: UP, partNumber: "1" })
+    const done = await multipartObject(post(`bucket=photos&key=${encodeURIComponent(key)}&uploadId=${UP}`, { parts: [{ number: 1, etag: "a".repeat(32) }] }), d)
+    expect(await done.json()).toEqual({ key, etag: `${"b".repeat(32)}-2` })
+    expect(String(calls[2]!.body)).toContain(`<PartNumber>1</PartNumber><ETag>"${"a".repeat(32)}"</ETag>`)
+    const abort = await abortUpload(new Request(url(`bucket=photos&key=x&uploadId=${UP}`), { method: "DELETE", headers: { origin: ORIGIN } }), d)
+    expect(abort.status).toBe(204)
+  })
+
+  test("guards and bad input", async () => {
+    const ro = withS3("readonly", () => new Response())
+    expect((await multipartObject(post("bucket=photos&key=a&uploads"), ro.d)).status).toBe(403)
+    expect((await uploadObject(put(`bucket=photos&key=a&uploadId=${UP}&partNumber=1`), ro.d)).status).toBe(403)
+    expect(ro.calls).toHaveLength(0)
+    const { d, calls } = withS3("owner", () => new Response())
+    expect((await uploadObject(put("bucket=photos&key=a&uploadId=nope&partNumber=1"), d)).status).toBe(400)
+    expect((await uploadObject(put(`bucket=photos&key=a&uploadId=${UP}&partNumber=0`), d)).status).toBe(400)
+    expect((await multipartObject(post(`bucket=photos&key=a&uploadId=${UP}`, { parts: [{ number: 1, etag: "<x/>" }] }), d)).status).toBe(400)
+    expect((await multipartObject(post(`bucket=photos&key=a&uploadId=${UP}`, { parts: [] }), d)).status).toBe(400)
+    expect(calls).toHaveLength(0)
+    const evil = new Request(url("bucket=photos&key=a&uploads"), { method: "POST", headers: { origin: "https://evil.example" } })
+    expect((await multipartObject(evil, d)).status).toBe(403)
+  })
+
+  test("engine errors come back with their message", async () => {
+    const { d } = withS3("owner", () => new Response("<Error><Code>EntityTooSmall</Code><Message>part 1 is too small</Message></Error>", { status: 400 }))
+    const res = await multipartObject(post(`bucket=photos&key=a&uploadId=${UP}`, { parts: [{ number: 1, etag: "a".repeat(32) }] }), d)
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: "part 1 is too small" })
+  })
 })

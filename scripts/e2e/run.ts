@@ -382,6 +382,35 @@ async function main() {
       check(res.ok, `upload: HTTP ${res.status} ${await res.text()}`)
     })
 
+    await step("upload a large file in parts through the dashboard (multipart)", async () => {
+      const key = encodeURIComponent("videos/big.bin")
+      const base = `${dashboard.url}/app/api/objects?bucket=e2e-files&key=${key}`
+      const start = await fetch(`${base}&uploads`, { method: "POST", headers: { ...owner.headers(), "x-object-content-type": "application/octet-stream" } })
+      const { uploadId } = (await start.json()) as { uploadId: string }
+      check(start.ok && /^up_/.test(uploadId ?? ""), `start: HTTP ${start.status}`)
+      const parts: { number: number; etag: string }[] = []
+      for (const [n, size] of [[1, 5 * 1024 * 1024], [2, 1234]] as const) {
+        const body = new Uint8Array(size).fill(n)
+        const res = await fetch(`${base}&uploadId=${uploadId}&partNumber=${n}`, {
+          method: "PUT",
+          headers: { ...owner.headers(), "content-length": String(size) },
+          body,
+        })
+        const out = (await res.json()) as { etag?: string; error?: string }
+        check(res.ok && out.etag, `part ${n}: HTTP ${res.status} ${out.error ?? ""}`)
+        parts.push({ number: n, etag: out.etag! })
+      }
+      const done = await fetch(`${base}&uploadId=${uploadId}`, {
+        method: "POST",
+        headers: { ...owner.headers(), "content-type": "application/json" },
+        body: JSON.stringify({ parts }),
+      })
+      const out = (await done.json()) as { etag?: string; error?: string }
+      check(done.ok && /-2$/.test(out.etag ?? ""), `complete: HTTP ${done.status} ${JSON.stringify(out)}`)
+      const head = await service.bucket("e2e-files").head("videos/big.bin")
+      check(head?.size === 5 * 1024 * 1024 + 1234, `the assembled object is ${head?.size} bytes`)
+    })
+
     await step("browse the bucket's docs/ folder and download the file", async () => {
       const html = await (await owner.get(`/app/buckets/e2e-files?prefix=${encodeURIComponent("docs/")}`)).text()
       check(html.includes("hello.txt") && html.includes("22 B"), `the server-rendered bucket page doesn't list hello.txt: ${html.slice(0, 300)}`)

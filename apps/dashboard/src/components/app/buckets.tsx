@@ -91,16 +91,42 @@ export function objectURL(bucket: string, key: string): string {
   return `${APP_BASE}/api/objects?${new URLSearchParams({ bucket, key })}`
 }
 
-/** Uploads one file under a prefix, through the dashboard's streaming route. */
-export async function uploadFile(bucket: string, prefix: string, file: File): Promise<ObjectOut> {
-  const res = await fetch(objectURL(bucket, prefix + file.name), {
-    method: "PUT",
-    body: file,
-    headers: { "content-type": file.type || "application/octet-stream" },
-  })
-  const body = (await res.json().catch(() => ({}))) as ObjectOut & { error?: string }
+/** Files larger than this go up in parts of this size. */
+export const PART_BYTES = 16 * 1024 * 1024
+
+async function jsonOrThrow<T>(res: Response): Promise<T> {
+  const body = (await res.json().catch(() => ({}))) as T & { error?: string }
   if (!res.ok) throw new Error(body.error || `Upload failed (HTTP ${res.status})`)
   return body
+}
+
+/**
+ * Uploads one file under a prefix, through the dashboard's streaming route.
+ * A large file goes up as a multipart upload, one part per request, so no
+ * request runs long.
+ */
+export async function uploadFile(bucket: string, prefix: string, file: File, f: typeof fetch = fetch): Promise<{ key: string; etag: string }> {
+  const key = prefix + file.name
+  const url = objectURL(bucket, key)
+  const type = file.type || "application/octet-stream"
+  if (file.size <= PART_BYTES) {
+    return jsonOrThrow(await f(url, { method: "PUT", body: file, headers: { "content-type": type } }))
+  }
+  const { uploadId } = await jsonOrThrow<{ uploadId: string }>(await f(`${url}&uploads`, { method: "POST", headers: { "x-object-content-type": type } }))
+  try {
+    const parts: { number: number; etag: string }[] = []
+    for (let n = 1, at = 0; at < file.size; n++, at += PART_BYTES) {
+      const q = new URLSearchParams({ uploadId, partNumber: String(n) })
+      const { etag } = await jsonOrThrow<{ etag: string }>(await f(`${url}&${q}`, { method: "PUT", body: file.slice(at, at + PART_BYTES) }))
+      parts.push({ number: n, etag })
+    }
+    return await jsonOrThrow(
+      await f(`${url}&${new URLSearchParams({ uploadId })}`, { method: "POST", body: JSON.stringify({ parts }), headers: { "content-type": "application/json" } }),
+    )
+  } catch (e) {
+    await f(`${url}&${new URLSearchParams({ uploadId })}`, { method: "DELETE" }).catch(() => {})
+    throw e
+  }
 }
 
 export function UploadButton({ bucket, prefix, onDone }: { bucket: string; prefix: string; onDone: () => Promise<unknown> }) {
