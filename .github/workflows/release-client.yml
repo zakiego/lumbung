@@ -1,7 +1,7 @@
 name: Release client
 
-# Publishes the TypeScript SDK to GitHub Packages when a client-vX.Y.Z tag is
-# pushed. The tag must match packages/client/package.json. Steps: ops/README.md.
+# Publishes @lumbung/client to npm when a client-vX.Y.Z tag is pushed. The tag
+# must match packages/client/package.json. Steps: ops/README.md.
 on:
   push:
     tags: ["client-v*"]
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      id-token: write # npm trusted publishing signs in with GitHub's OIDC token
     steps:
       - uses: actions/checkout@v7
       - name: Tag matches the package version
@@ -40,26 +40,32 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-          registry-url: https://npm.pkg.github.com
+          registry-url: https://registry.npmjs.org
+      - name: npm supports trusted publishing
+        run: |
+          v=$(npm --version)
+          node -e '
+            const [a, b, c] = process.argv[1].split(".").map(Number)
+            if (a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1)))) process.exit(0)
+            console.log(`::error::npm ${process.argv[1]} is too old for trusted publishing (needs 11.5.1 or later)`)
+            process.exit(1)
+          ' "$v"
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @lumbung/client build
       - run: pnpm --filter @lumbung/client typecheck
       - run: pnpm --filter @lumbung/client test
-      # GitHub Packages only accepts a scope named after the repository owner,
-      # so the package goes out as @<owner>/lumbung-client. The workspace keeps
-      # @lumbung/client and "private" so nothing publishes it by accident.
+      # The workspace keeps "private" so nothing publishes it from a laptop.
       - name: Publish
         working-directory: packages/client
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OWNER: ${{ github.repository_owner }}
+          # Only for the first release, before the package exists on npm. Once
+          # the trusted publisher is set up, delete the secret and npm signs in
+          # with OIDC.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          scope=$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')
           npm pkg delete private
           npm pkg set \
-            "name=@$scope/lumbung-client" \
             "repository.type=git" \
             "repository.url=git+https://github.com/${GITHUB_REPOSITORY}.git" \
-            "repository.directory=packages/client" \
-            "publishConfig.registry=https://npm.pkg.github.com"
-          npm publish
+            "repository.directory=packages/client"
+          npm publish --access public
