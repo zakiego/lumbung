@@ -1,6 +1,7 @@
-import type { DatabaseOut } from "@lumbung/client"
+import type { BucketOut, DatabaseOut } from "@lumbung/client"
 import { Link, type LinkProps, useRouter } from "@tanstack/react-router"
 import {
+  ArchiveIcon,
   DatabaseIcon,
   KeyRoundIcon,
   LogOutIcon,
@@ -41,7 +42,17 @@ function useShell(): ShellState {
   return s
 }
 
-export function AppShell({ viewer, databases, children }: { viewer: Viewer; databases: DatabaseOut[] | null; children: ReactNode }) {
+export function AppShell({
+  viewer,
+  databases,
+  buckets = [],
+  children,
+}: {
+  viewer: Viewer
+  databases: DatabaseOut[] | null
+  buckets?: BucketOut[] | null
+  children: ReactNode
+}) {
   const [drawer] = useState(() => createDrawerController<unknown, unknown>())
   const [collapsed, setCollapsed] = useState(false)
   useEffect(() => setCollapsed(readSidebarCollapsed()), [])
@@ -56,12 +67,12 @@ export function AppShell({ viewer, databases, children }: { viewer: Viewer; data
           data-sidebar-rail=""
           className="sticky top-0 hidden h-svh w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex sidebar-collapsed:w-[53px]"
         >
-          <SidebarBody viewer={viewer} databases={databases} rail={collapsed} />
+          <SidebarBody viewer={viewer} databases={databases} buckets={buckets} rail={collapsed} />
         </aside>
         <Drawer controller={drawer} side="start" preventEdgeSwipe>
           <DrawerContent>
             <DrawerTitle className="sr-only">Navigation</DrawerTitle>
-            <SidebarBody viewer={viewer} databases={databases} onNavigate={() => drawer.close()} />
+            <SidebarBody viewer={viewer} databases={databases} buckets={buckets} onNavigate={() => drawer.close()} />
           </DrawerContent>
         </Drawer>
         <div className="flex min-w-0 flex-1 flex-col">{children}</div>
@@ -72,7 +83,19 @@ export function AppShell({ viewer, databases, children }: { viewer: Viewer; data
 
 type NavLink = { to: LinkProps["to"]; params?: Record<string, string>; label: string; icon: ReactNode; exact?: boolean }
 
-function SidebarBody({ viewer, databases, rail = false, onNavigate }: { viewer: Viewer; databases: DatabaseOut[] | null; rail?: boolean; onNavigate?: () => void }) {
+function SidebarBody({
+  viewer,
+  databases,
+  buckets,
+  rail = false,
+  onNavigate,
+}: {
+  viewer: Viewer
+  databases: DatabaseOut[] | null
+  buckets: BucketOut[] | null
+  rail?: boolean
+  onNavigate?: () => void
+}) {
   const all: (NavLink & { show: boolean })[] = [
     { show: can(viewer.role, "admin"), to: "/tokens", label: "Tokens", icon: <KeyRoundIcon /> },
     { show: can(viewer.role, "admin"), to: "/members", label: "Members", icon: <UsersIcon /> },
@@ -100,6 +123,13 @@ function SidebarBody({ viewer, databases, rail = false, onNavigate }: { viewer: 
               <NavItem key={d.id} to="/db/$db" params={{ db: d.name }} label={d.name} icon={<DatabaseIcon />} rail={rail} onNavigate={onNavigate} />
             ))}
           </NavGroup>
+          <NavGroup label="Buckets" to="/buckets" onNavigate={onNavigate}>
+            {buckets === null && <p className="px-2 text-xs text-muted-foreground sidebar-collapsed:hidden">Can't load buckets</p>}
+            {buckets?.length === 0 && <NavItem to="/buckets" label="All buckets" icon={<ArchiveIcon />} exact rail={rail} onNavigate={onNavigate} />}
+            {buckets?.map((b) => (
+              <NavItem key={b.id} to="/buckets/$bucket" params={{ bucket: b.name }} label={b.name} icon={<ArchiveIcon />} rail={rail} onNavigate={onNavigate} />
+            ))}
+          </NavGroup>
           {instance.length > 0 && (
             <NavGroup label="Instance">
               {instance.map(({ show: _, ...item }) => (
@@ -116,10 +146,18 @@ function SidebarBody({ viewer, databases, rail = false, onNavigate }: { viewer: 
   )
 }
 
-function NavGroup({ label, children }: { label: string; children: ReactNode }) {
+function NavGroup({ label, to, onNavigate, children }: { label: string; to?: LinkProps["to"]; onNavigate?: () => void; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <h2 className="flex h-7 items-center px-2 text-xs font-[510] text-muted-foreground sidebar-collapsed:sr-only">{label}</h2>
+      <h2 className="flex h-7 items-center px-2 text-xs font-[510] text-muted-foreground sidebar-collapsed:sr-only">
+        {to ? (
+          <Link to={to} onClick={onNavigate} activeOptions={{ exact: true }} className="rounded-sm transition-colors duration-150 hover:text-foreground hover:duration-0">
+            {label}
+          </Link>
+        ) : (
+          label
+        )}
+      </h2>
       {children}
     </div>
   )

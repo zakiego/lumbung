@@ -13,7 +13,7 @@ export type Access = TokenOut["access"]
 
 export const ACCESS_LABEL: Record<Access, string> = { read: "Read", write: "Read and write", admin: "Admin" }
 
-export type TokenNames = { databases: Record<string, string>; branches: Record<string, string> }
+export type TokenNames = { databases: Record<string, string>; branches: Record<string, string>; buckets?: Record<string, string> }
 
 export function TokenTable({ tokens, names, onRevoke }: { tokens: TokenOut[]; names: TokenNames; onRevoke: (t: TokenOut) => Promise<unknown> }) {
   if (tokens.length === 0) return <Empty icon={<KeyRoundIcon />} title="No tokens yet" />
@@ -35,7 +35,8 @@ export function TokenTable({ tokens, names, onRevoke }: { tokens: TokenOut[]; na
         {tokens.map((t) => {
           const db = t.database_id ? (names.databases[t.database_id] ?? t.database_id) : ""
           const branch = t.branch_id ? (names.branches[t.branch_id] ?? t.branch_id) : ""
-          const reach = t.scope === "instance" ? "Every database" : branch ? `${db} / ${branch}` : db
+          const bucket = t.bucket_id ? (names.buckets?.[t.bucket_id] ?? t.bucket_id) : ""
+          const reach = t.scope === "instance" ? "Everything" : t.scope === "bucket" ? `Bucket ${bucket}` : branch ? `${db} / ${branch}` : db
           return (
             <TableRow key={t.id}>
               <TableCell className="w-2/5 max-w-0">

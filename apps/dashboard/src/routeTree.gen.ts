@@ -22,9 +22,13 @@ import { Route as AppTrashRouteImport } from './routes/_app/trash'
 import { Route as ApiExportRouteImport } from './routes/api/export'
 import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ApiImportRouteImport } from './routes/api/import'
+import { Route as ApiObjectsRouteImport } from './routes/api/objects'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
+import { Route as AppBucketsIndexRouteImport } from './routes/_app/buckets/index'
 import { Route as AppDbDbRouteRouteImport } from './routes/_app/db/$db/route'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as AppBucketsBucketIndexRouteImport } from './routes/_app/buckets/$bucket/index'
+import { Route as AppBucketsBucketSettingsRouteImport } from './routes/_app/buckets/$bucket/settings'
 import { Route as AppDbDbIndexRouteImport } from './routes/_app/db/$db/index'
 import { Route as AppDbDbBranchesRouteImport } from './routes/_app/db/$db/branches'
 import { Route as AppDbDbDataRouteImport } from './routes/_app/db/$db/data'
@@ -97,10 +101,20 @@ const ApiImportRoute = ApiImportRouteImport.update({
   path: '/api/import',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiObjectsRoute = ApiObjectsRouteImport.update({
+  id: '/api/objects',
+  path: '/api/objects',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InviteTokenRoute = InviteTokenRouteImport.update({
   id: '/invite/$token',
   path: '/invite/$token',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppBucketsIndexRoute = AppBucketsIndexRouteImport.update({
+  id: '/buckets/',
+  path: '/buckets/',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppDbDbRouteRoute = AppDbDbRouteRouteImport.update({
   id: '/db/$db',
@@ -112,6 +126,17 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppBucketsBucketIndexRoute = AppBucketsBucketIndexRouteImport.update({
+  id: '/buckets/$bucket/',
+  path: '/buckets/$bucket/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBucketsBucketSettingsRoute =
+  AppBucketsBucketSettingsRouteImport.update({
+    id: '/buckets/$bucket/settings',
+    path: '/buckets/$bucket/settings',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppDbDbIndexRoute = AppDbDbIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -161,15 +186,19 @@ export interface FileRoutesByFullPath {
   '/api/export': typeof ApiExportRoute
   '/api/health': typeof ApiHealthRoute
   '/api/import': typeof ApiImportRoute
+  '/api/objects': typeof ApiObjectsRoute
   '/invite/$token': typeof InviteTokenRoute
   '/db/$db': typeof AppDbDbRouteRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/buckets/': typeof AppBucketsIndexRoute
+  '/buckets/$bucket/settings': typeof AppBucketsBucketSettingsRoute
   '/db/$db/branches': typeof AppDbDbBranchesRoute
   '/db/$db/data': typeof AppDbDbDataRoute
   '/db/$db/schema': typeof AppDbDbSchemaRoute
   '/db/$db/settings': typeof AppDbDbSettingsRoute
   '/db/$db/snapshots': typeof AppDbDbSnapshotsRoute
   '/db/$db/sql': typeof AppDbDbSqlRoute
+  '/buckets/$bucket/': typeof AppBucketsBucketIndexRoute
   '/db/$db/': typeof AppDbDbIndexRoute
 }
 export interface FileRoutesByTo {
@@ -184,15 +213,19 @@ export interface FileRoutesByTo {
   '/api/export': typeof ApiExportRoute
   '/api/health': typeof ApiHealthRoute
   '/api/import': typeof ApiImportRoute
+  '/api/objects': typeof ApiObjectsRoute
   '/invite/$token': typeof InviteTokenRoute
   '/': typeof AppIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/buckets': typeof AppBucketsIndexRoute
+  '/buckets/$bucket/settings': typeof AppBucketsBucketSettingsRoute
   '/db/$db/branches': typeof AppDbDbBranchesRoute
   '/db/$db/data': typeof AppDbDbDataRoute
   '/db/$db/schema': typeof AppDbDbSchemaRoute
   '/db/$db/settings': typeof AppDbDbSettingsRoute
   '/db/$db/snapshots': typeof AppDbDbSnapshotsRoute
   '/db/$db/sql': typeof AppDbDbSqlRoute
+  '/buckets/$bucket': typeof AppBucketsBucketIndexRoute
   '/db/$db': typeof AppDbDbIndexRoute
 }
 export interface FileRoutesById {
@@ -209,16 +242,20 @@ export interface FileRoutesById {
   '/api/export': typeof ApiExportRoute
   '/api/health': typeof ApiHealthRoute
   '/api/import': typeof ApiImportRoute
+  '/api/objects': typeof ApiObjectsRoute
   '/invite/$token': typeof InviteTokenRoute
   '/_app/': typeof AppIndexRoute
   '/_app/db/$db': typeof AppDbDbRouteRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/_app/buckets/': typeof AppBucketsIndexRoute
+  '/_app/buckets/$bucket/settings': typeof AppBucketsBucketSettingsRoute
   '/_app/db/$db/branches': typeof AppDbDbBranchesRoute
   '/_app/db/$db/data': typeof AppDbDbDataRoute
   '/_app/db/$db/schema': typeof AppDbDbSchemaRoute
   '/_app/db/$db/settings': typeof AppDbDbSettingsRoute
   '/_app/db/$db/snapshots': typeof AppDbDbSnapshotsRoute
   '/_app/db/$db/sql': typeof AppDbDbSqlRoute
+  '/_app/buckets/$bucket/': typeof AppBucketsBucketIndexRoute
   '/_app/db/$db/': typeof AppDbDbIndexRoute
 }
 export interface FileRouteTypes {
@@ -236,15 +273,19 @@ export interface FileRouteTypes {
     | '/api/export'
     | '/api/health'
     | '/api/import'
+    | '/api/objects'
     | '/invite/$token'
     | '/db/$db'
     | '/api/auth/$'
+    | '/buckets/'
+    | '/buckets/$bucket/settings'
     | '/db/$db/branches'
     | '/db/$db/data'
     | '/db/$db/schema'
     | '/db/$db/settings'
     | '/db/$db/snapshots'
     | '/db/$db/sql'
+    | '/buckets/$bucket/'
     | '/db/$db/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -259,15 +300,19 @@ export interface FileRouteTypes {
     | '/api/export'
     | '/api/health'
     | '/api/import'
+    | '/api/objects'
     | '/invite/$token'
     | '/'
     | '/api/auth/$'
+    | '/buckets'
+    | '/buckets/$bucket/settings'
     | '/db/$db/branches'
     | '/db/$db/data'
     | '/db/$db/schema'
     | '/db/$db/settings'
     | '/db/$db/snapshots'
     | '/db/$db/sql'
+    | '/buckets/$bucket'
     | '/db/$db'
   id:
     | '__root__'
@@ -283,16 +328,20 @@ export interface FileRouteTypes {
     | '/api/export'
     | '/api/health'
     | '/api/import'
+    | '/api/objects'
     | '/invite/$token'
     | '/_app/'
     | '/_app/db/$db'
     | '/api/auth/$'
+    | '/_app/buckets/'
+    | '/_app/buckets/$bucket/settings'
     | '/_app/db/$db/branches'
     | '/_app/db/$db/data'
     | '/_app/db/$db/schema'
     | '/_app/db/$db/settings'
     | '/_app/db/$db/snapshots'
     | '/_app/db/$db/sql'
+    | '/_app/buckets/$bucket/'
     | '/_app/db/$db/'
   fileRoutesById: FileRoutesById
 }
@@ -303,6 +352,7 @@ export interface RootRouteChildren {
   ApiExportRoute: typeof ApiExportRoute
   ApiHealthRoute: typeof ApiHealthRoute
   ApiImportRoute: typeof ApiImportRoute
+  ApiObjectsRoute: typeof ApiObjectsRoute
   InviteTokenRoute: typeof InviteTokenRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
@@ -400,12 +450,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiImportRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/objects': {
+      id: '/api/objects'
+      path: '/api/objects'
+      fullPath: '/api/objects'
+      preLoaderRoute: typeof ApiObjectsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/invite/$token': {
       id: '/invite/$token'
       path: '/invite/$token'
       fullPath: '/invite/$token'
       preLoaderRoute: typeof InviteTokenRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/buckets/': {
+      id: '/_app/buckets/'
+      path: '/buckets'
+      fullPath: '/buckets/'
+      preLoaderRoute: typeof AppBucketsIndexRouteImport
+      parentRoute: typeof AppRoute
     }
     '/_app/db/$db': {
       id: '/_app/db/$db'
@@ -420,6 +484,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/auth/$'
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/buckets/$bucket/': {
+      id: '/_app/buckets/$bucket/'
+      path: '/buckets/$bucket'
+      fullPath: '/buckets/$bucket/'
+      preLoaderRoute: typeof AppBucketsBucketIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/buckets/$bucket/settings': {
+      id: '/_app/buckets/$bucket/settings'
+      path: '/buckets/$bucket/settings'
+      fullPath: '/buckets/$bucket/settings'
+      preLoaderRoute: typeof AppBucketsBucketSettingsRouteImport
+      parentRoute: typeof AppRoute
     }
     '/_app/db/$db/': {
       id: '/_app/db/$db/'
@@ -506,6 +584,9 @@ interface AppRouteChildren {
   AppTrashRoute: typeof AppTrashRoute
   AppIndexRoute: typeof AppIndexRoute
   AppDbDbRouteRoute: typeof AppDbDbRouteRouteWithChildren
+  AppBucketsIndexRoute: typeof AppBucketsIndexRoute
+  AppBucketsBucketSettingsRoute: typeof AppBucketsBucketSettingsRoute
+  AppBucketsBucketIndexRoute: typeof AppBucketsBucketIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -517,6 +598,9 @@ const AppRouteChildren: AppRouteChildren = {
   AppTrashRoute: AppTrashRoute,
   AppIndexRoute: AppIndexRoute,
   AppDbDbRouteRoute: AppDbDbRouteRouteWithChildren,
+  AppBucketsIndexRoute: AppBucketsIndexRoute,
+  AppBucketsBucketSettingsRoute: AppBucketsBucketSettingsRoute,
+  AppBucketsBucketIndexRoute: AppBucketsBucketIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
@@ -528,6 +612,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiExportRoute: ApiExportRoute,
   ApiHealthRoute: ApiHealthRoute,
   ApiImportRoute: ApiImportRoute,
+  ApiObjectsRoute: ApiObjectsRoute,
   InviteTokenRoute: InviteTokenRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }

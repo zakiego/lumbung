@@ -5,6 +5,7 @@ import { ErrorState, RowsSkeleton } from "@/components/app/states"
 import { CreateTokenDialog, type TokenNames, TokenTable } from "@/components/app/tokens"
 import { toast } from "@/components/ui/toast"
 import { createToken, listTokens, revokeToken } from "@/fns/admin"
+import { listBuckets } from "@/fns/buckets"
 import { getDatabase, listDatabases } from "@/fns/databases"
 import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
@@ -14,8 +15,12 @@ export const Route = createFileRoute("/_app/tokens")({
     if (!can(context.viewer.role, "admin")) throw redirect({ to: "/" })
   },
   loader: async () => {
-    const [tokens, databases] = await Promise.all([listTokens(), listDatabases()])
-    const names: TokenNames = { databases: Object.fromEntries(databases.map((d) => [d.id, d.name])), branches: {} }
+    const [tokens, databases, buckets] = await Promise.all([listTokens(), listDatabases(), listBuckets().catch(() => [])])
+    const names: TokenNames = {
+      databases: Object.fromEntries(databases.map((d) => [d.id, d.name])),
+      branches: {},
+      buckets: Object.fromEntries(buckets.map((b) => [b.id, b.name])),
+    }
     // Branch-limited tokens name a branch by id; look up the names of those databases' branches.
     const withBranch = [...new Set(tokens.filter((t) => t.branch_id && names.databases[t.database_id]).map((t) => names.databases[t.database_id]!))]
     const lists = await Promise.all(withBranch.map((db) => getDatabase({ data: { db } }).catch(() => null)))
