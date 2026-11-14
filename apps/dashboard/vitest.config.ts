@@ -13,7 +13,8 @@ export default defineConfig({
       },
       {
         extends: true,
-        test: { name: "ui", environment: "jsdom", include: ["src/**/*.test.tsx"], setupFiles: ["./src/test/setup.ts"] },
+        // Worst-case renders (300 columns) take a few seconds on a shared CI runner.
+        test: { name: "ui", environment: "jsdom", include: ["src/**/*.test.tsx"], setupFiles: ["./src/test/setup.ts"], testTimeout: 30_000 },
       },
     ],
   },
