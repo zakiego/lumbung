@@ -80,40 +80,50 @@ type mcpCall struct {
 
 type keyMCPCall struct{}
 
-// mcpGate does for /mcp what middleware does for REST: a request id,
-// authentication with the failed-attempt limit per address, the per-token
-// rate limit (for every MCP message, not only tool calls) and the actor
-// header for the service token. Failures are problem+json, as on REST.
+// gateRequest does for endpoints outside Huma (MCP, libSQL) what middleware
+// does for REST: a request id, authentication with the failed-attempt limit
+// per address, the per-token rate limit (for every request) and the actor
+// header for the service token. On failure it has set the response headers
+// and returns the error to send.
+func (s *Server) gateRequest(w http.ResponseWriter, r *http.Request) (auth.Principal, string, *apierr.Error) {
+	id := r.Header.Get("X-Request-Id")
+	if !requestIDRe.MatchString(id) {
+		id = newRequestID()
+	}
+	w.Header().Set("X-Request-Id", id)
+	p, err := s.authenticate(r.Context(), r.Header.Get("Authorization"))
+	if err != nil {
+		ae := apierr.As(err)
+		if ae.Code == apierr.Unauthorized {
+			if ok, wait := s.failures.Allow(s.clientIPFromRequest(r)); !ok {
+				w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+				ae = apierr.New(apierr.RateLimited, "too many failed authentications from this address")
+			}
+		} else {
+			s.log.Error("authenticate", "err", err, "request_id", id)
+			ae = apierr.New(apierr.Internal, "internal error")
+		}
+		w.Header().Set("WWW-Authenticate", `Bearer realm="lumbung"`)
+		return auth.Principal{}, id, ae
+	}
+	if ok, wait := s.perToken.Allow(p.TokenID); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		return auth.Principal{}, id, apierr.New(apierr.RateLimited, "too many requests for this token")
+	}
+	if a := r.Header.Get("X-Lumbung-Actor"); a != "" && p.Service && actorRe.MatchString(a) {
+		p.Actor = a
+	}
+	return p, id, nil
+}
+
+// mcpGate authenticates /mcp requests with gateRequest. Failures are
+// problem+json, as on REST.
 func (s *Server) mcpGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := r.Header.Get("X-Request-Id")
-		if !requestIDRe.MatchString(id) {
-			id = newRequestID()
-		}
-		w.Header().Set("X-Request-Id", id)
-		p, err := s.authenticate(r.Context(), r.Header.Get("Authorization"))
-		if err != nil {
-			ae := apierr.As(err)
-			if ae.Code == apierr.Unauthorized {
-				if ok, wait := s.failures.Allow(s.clientIPFromRequest(r)); !ok {
-					w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-					ae = apierr.New(apierr.RateLimited, "too many failed authentications from this address")
-				}
-			} else {
-				s.log.Error("authenticate", "err", err, "request_id", id)
-				ae = apierr.New(apierr.Internal, "internal error")
-			}
-			w.Header().Set("WWW-Authenticate", `Bearer realm="lumbung"`)
+		p, id, ae := s.gateRequest(w, r)
+		if ae != nil {
 			writeProblemHTTP(w, ae, id)
 			return
-		}
-		if ok, wait := s.perToken.Allow(p.TokenID); !ok {
-			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-			writeProblemHTTP(w, apierr.New(apierr.RateLimited, "too many requests for this token"), id)
-			return
-		}
-		if a := r.Header.Get("X-Lumbung-Actor"); a != "" && p.Service && actorRe.MatchString(a) {
-			p.Actor = a
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), keyMCPCall{}, mcpCall{p: p, requestID: id})))
 	})

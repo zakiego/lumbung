@@ -75,6 +75,8 @@ const (
 	IdempotencyMismatch   = "idempotency_mismatch"
 	TokenNotFound         = "token_not_found"
 	TransactionAborted    = "transaction_aborted"
+	InvalidBaton          = "invalid_baton"
+	TooManyStreams        = "too_many_streams"
 	Busy                  = "busy"
 	Unavailable           = "unavailable"
 	Internal              = "internal"
@@ -119,6 +121,8 @@ var Codes = []CodeInfo{
 	{IdempotencyMismatch, http.StatusUnprocessableEntity, "This `Idempotency-Key` was already used for a different request."},
 	{TokenNotFound, http.StatusNotFound, "No live token with that id."},
 	{TransactionAborted, http.StatusConflict, "The open transaction was rolled back: SQLite ended it after an error, or it hit a limit or the transaction timeout. Send ROLLBACK, then start again. Interactive transactions only."},
+	{InvalidBaton, http.StatusBadRequest, "The baton names no open stream: it was already used, belongs to another token or branch, or the stream was closed or expired and its transaction rolled back. libSQL protocol only."},
+	{TooManyStreams, http.StatusTooManyRequests, "The token or the instance already has the most open libSQL streams allowed. Close streams, or wait for idle ones to expire."},
 	{Busy, http.StatusServiceUnavailable, "The branch stayed locked longer than the busy timeout. Retry."},
 	{Unavailable, http.StatusServiceUnavailable, "The engine can't serve: for example meta.db is newer than this binary."},
 	{Internal, http.StatusInternalServerError, "Something failed inside the engine. The log has details."},

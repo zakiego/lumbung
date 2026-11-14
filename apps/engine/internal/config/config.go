@@ -50,6 +50,11 @@ type Config struct {
 	MaxOpenBranches  int
 	IdleConnTimeout  time.Duration
 	ConnMaxMemory    int64
+
+	LibSQLStreamIdle      time.Duration
+	LibSQLTxTimeout       time.Duration
+	LibSQLMaxStreams      int
+	LibSQLStreamsPerToken int
 }
 
 // Kind is how a setting's value is written.
@@ -146,6 +151,11 @@ var Settings = []Setting{
 	{"LUMBUNG_MAX_OPEN_BRANCHES", KindInt, "64", "Most branches with open connections at once. The least recently used idle branch is closed to make room.", integer(func(c *Config) *int { return &c.MaxOpenBranches })},
 	{"LUMBUNG_IDLE_CONN_TIMEOUT", KindDuration, "5m", "A branch unused this long has its connections closed.", dur(func(c *Config) *time.Duration { return &c.IdleConnTimeout })},
 	{"LUMBUNG_CONN_MAX_MEMORY", KindBytes, "128MiB", "Memory ceiling for each SQLite connection. A statement that needs more fails instead of growing the process.", bytesOf(func(c *Config) *int64 { return &c.ConnMaxMemory })},
+
+	{"LUMBUNG_LIBSQL_STREAM_IDLE_TIMEOUT", KindDuration, "10s", "A libSQL protocol stream with no request for this long is closed, and its open transaction rolled back.", dur(func(c *Config) *time.Duration { return &c.LibSQLStreamIdle })},
+	{"LUMBUNG_LIBSQL_TX_TIMEOUT", KindDuration, "60s", "Longest an interactive transaction over the libSQL protocol may stay open, from its BEGIN. Past it the transaction is rolled back and its stream closed. An open write transaction holds the branch's only writer, so other writes wait for it.", dur(func(c *Config) *time.Duration { return &c.LibSQLTxTimeout })},
+	{"LUMBUNG_LIBSQL_MAX_STREAMS", KindInt, "128", "Most open libSQL protocol streams on the instance. Past it new streams fail with `too_many_streams`.", integer(func(c *Config) *int { return &c.LibSQLMaxStreams })},
+	{"LUMBUNG_LIBSQL_MAX_STREAMS_PER_TOKEN", KindInt, "16", "Most open libSQL protocol streams per token.", integer(func(c *Config) *int { return &c.LibSQLStreamsPerToken })},
 }
 
 // Load resolves the configuration: each setting's environment value when

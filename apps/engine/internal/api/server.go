@@ -51,6 +51,7 @@ type Server struct {
 	touched map[string]time.Time
 
 	mcpServer *mcp.Server
+	libsql    *libsqlStreams
 }
 
 // Option changes a server at construction.
@@ -85,6 +86,7 @@ func New(eng *engine.Engine, log *slog.Logger, opts ...Option) *Server {
 	s.api.UseMiddleware(s.middleware)
 	s.register()
 	s.mountMCP()
+	s.mountLibSQL()
 	s.mux.HandleFunc("GET /health", s.health)
 	return s
 }

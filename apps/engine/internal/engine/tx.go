@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 
@@ -338,14 +339,51 @@ func (e *Engine) abortTxs(branchID string) {
 
 // QueryWith runs one statement in its own transaction, like Query, counting
 // its result against a budget shared with other statements of the request.
+// With write access, a statement that only reads runs on a read-only
+// connection, so it doesn't wait for an interactive transaction holding the
+// writer. It sees the same committed data either way.
 func (e *Engine) QueryWith(ctx context.Context, t Target, access Access, stmt Statement, b *Budget) (*Result, error) {
 	var res *Result
-	err := e.session(ctx, t, access, e.cfg.StatementTimeout, func(conn *sqlitex.Conn, _ target) error {
+	run := func(conn *sqlitex.Conn, _ target) error {
 		var err error
 		res, err = runOne(conn, stmt, &b.b)
 		return err
-	})
+	}
+	if access == Write {
+		needsWriter := false
+		err := e.session(ctx, t, Read, e.cfg.StatementTimeout, func(conn *sqlitex.Conn, tg target) error {
+			ro, err := readOnlyStatement(conn, stmt.SQL)
+			if err != nil {
+				return err
+			}
+			if !ro {
+				needsWriter = true
+				return errNeedsWriter
+			}
+			return run(conn, tg)
+		})
+		if !needsWriter {
+			return res, err
+		}
+	}
+	err := e.session(ctx, t, access, e.cfg.StatementTimeout, run)
 	return res, err
+}
+
+// errNeedsWriter sends a statement from the read-only try to the writer.
+var errNeedsWriter = errors.New("engine: statement writes")
+
+// readOnlyStatement prepares SQL to see whether it only reads. A statement
+// that fails to prepare here would fail the same way on the writer (same
+// file, same authorizer), so its error is final. Empty SQL goes to the
+// writer, which reports it.
+func readOnlyStatement(conn *sqlitex.Conn, sql string) (bool, error) {
+	stmt, _, err := conn.Prepare(sql)
+	if err != nil || stmt == nil {
+		return false, err
+	}
+	defer stmt.Close()
+	return stmt.ReadOnly(), nil
 }
 
 // Description is what preparing a statement tells about it.

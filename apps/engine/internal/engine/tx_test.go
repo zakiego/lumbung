@@ -328,3 +328,34 @@ func TestDescribe(t *testing.T) {
 	_, err = e.Describe(context.Background(), Target{Database: "app"}, "ATTACH 'x' AS y")
 	wantCode(t, err, apierr.StatementDenied, "describe attach")
 }
+
+// QueryWith runs a write token's reads on a reader, so they don't wait for
+// an interactive transaction holding the writer; writes still do.
+func TestQueryWithReadsBesideATransaction(t *testing.T) {
+	e := newEngine(t, nil)
+	mustCreate(t, e, "app")
+	mustQuery(t, e, "app", Write, "CREATE TABLE t(x)")
+	tx := beginTx(t, e, "app", Write)
+	txExec(t, e, tx, "INSERT INTO t VALUES (1)")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	r, err := e.QueryWith(ctx, Target{Database: "app"}, Write, stmt("SELECT count(*) FROM t"), e.NewBudget())
+	if err != nil {
+		t.Fatalf("read beside a transaction: %v", err)
+	}
+	if scalar(t, r).Int != 0 {
+		t.Fatal("the read saw uncommitted rows")
+	}
+	short, cancel2 := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel2()
+	_, err = e.QueryWith(short, Target{Database: "app"}, Write, stmt("INSERT INTO t VALUES (2)"), e.NewBudget())
+	wantCode(t, err, apierr.Busy, "write beside a transaction")
+	_, err = e.QueryWith(context.Background(), Target{Database: "app"}, Write, stmt("SELECT nope FROM t"), e.NewBudget())
+	wantCode(t, err, apierr.SQLError, "bad SQL")
+	tx.Rollback()
+	r, err = e.QueryWith(context.Background(), Target{Database: "app"}, Write, stmt("INSERT INTO t VALUES (3) RETURNING x"), e.NewBudget())
+	if err != nil || scalar(t, r).Int != 3 {
+		t.Fatalf("write: %v", err)
+	}
+}

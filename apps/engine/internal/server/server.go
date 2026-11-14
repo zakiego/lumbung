@@ -145,6 +145,7 @@ func (s *Server) flushStats() {
 }
 
 func (s *Server) close() {
+	s.API.Close()
 	s.flushStats()
 	if err := s.Engine.Close(); err != nil {
 		s.log.Error("close engine", "err", err)
