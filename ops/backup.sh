@@ -173,6 +173,38 @@ for f in m["files"]:
         sys.exit(f"{f['path']} doesn't match the manifest")
 print(f"{len(m['files'])} files match the manifest")
 PY
+# Object files never change, and docker cp copies hard links as separate
+# files: link each object file that the previous host copy holds with the
+# same sum, so a night only adds the objects that are new.
+prev=""
+shopt -s nullglob
+for path in "$OUT"/engine/[0-9]*T[0-9]*Z; do prev="$path"; done
+shopt -u nullglob
+if [ -n "$prev" ]; then
+  python3 - "$partial" "$prev" <<'PY'
+import json, os, sys
+new, prev = sys.argv[1:3]
+try:
+    old = {f["path"]: f["sha256"] for f in json.load(open(os.path.join(prev, "manifest.json")))["files"]}
+except (OSError, ValueError, KeyError):
+    sys.exit(0)
+linked = 0
+for f in json.load(open(os.path.join(new, "manifest.json")))["files"]:
+    p = f["path"]
+    if not p.startswith("objects/") or old.get(p) != f["sha256"]:
+        continue
+    src, dst = os.path.join(prev, p), os.path.join(new, p)
+    tmp = dst + ".link"
+    try:
+        os.link(src, tmp)
+        os.replace(tmp, dst)
+        linked += 1
+    except OSError:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+print(f"{linked} object files linked from {os.path.basename(prev)}")
+PY
+fi
 mv "$partial" "$dest"
 partial=""
 log "engine copy: $dest ($(du -sk "$dest" | cut -f1) KB)"
