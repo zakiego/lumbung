@@ -1,5 +1,6 @@
 import type { BucketOut, ObjectOut } from "@lumbung/client"
 import { Link } from "@tanstack/react-router"
+import { DrawerTrigger, createDrawerController } from "@ui-sdk/react/drawer"
 import { ArchiveIcon, DownloadIcon, FileIcon, FolderIcon, GlobeIcon, Trash2Icon, UploadIcon } from "lucide-react"
 import { type ReactNode, useRef, useState } from "react"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -7,9 +8,10 @@ import { Badge, Empty, Table, TableCell, TableHead, TableRow } from "@/component
 import { toast } from "@/components/ui/toast"
 import { TruncatedTip } from "@/components/ui/tooltip"
 import { formatBytes, number, timeAgo } from "@/lib/format"
-import { APP_BASE } from "@/lib/paths"
+import { objectURL } from "@/lib/objects"
 import { Confirm, errorText } from "./form-dialog"
 import { NameDialog } from "./name-dialog"
+import { type ObjectAccess, ObjectDetails } from "./object-details"
 
 export const BUCKET_PATTERN = "[a-z0-9][a-z0-9\\-]{1,61}[a-z0-9]"
 
@@ -87,9 +89,7 @@ export function prefixTrail(prefix: string): { label: string; prefix: string }[]
   return out
 }
 
-export function objectURL(bucket: string, key: string): string {
-  return `${APP_BASE}/api/objects?${new URLSearchParams({ bucket, key })}`
-}
+export { objectURL }
 
 /** Files larger than this go up in parts of this size. */
 export const PART_BYTES = 16 * 1024 * 1024
@@ -186,6 +186,7 @@ export function ObjectTable({
   objects,
   prefixes,
   canWrite,
+  access,
   onDelete,
   footer,
 }: {
@@ -194,9 +195,11 @@ export function ObjectTable({
   objects: ObjectOut[]
   prefixes: string[]
   canWrite: boolean
+  access?: ObjectAccess
   onDelete: (key: string) => Promise<unknown>
   footer?: ReactNode
 }) {
+  const [details] = useState(() => createDrawerController<ObjectOut>())
   // A key equal to the folder itself is a folder marker some S3 tools make:
   // it has no name of its own here, so it isn't listed.
   const rows: Row[] = [
@@ -245,14 +248,18 @@ export function ObjectTable({
                 <TableCell />
               </TableRow>
             ) : (
-              <TableRow key={`o:${r.object.key}`}>
+              <TableRow key={`o:${r.object.key}`} className="relative">
                 <TableCell className="max-w-0 w-1/2">
-                  <span className="flex min-w-0 items-center gap-2 font-mono">
+                  <DrawerTrigger
+                    controller={details}
+                    payload={r.object}
+                    aria-label={`Details of ${r.object.key}`}
+                    title={r.object.key.slice(prefix.length)}
+                    className="flex w-full min-w-0 items-center gap-2 text-left font-mono after:absolute after:inset-0"
+                  >
                     <FileIcon aria-hidden="true" className="size-4 shrink-0 text-faint" />
-                    <span className="truncate" title={r.object.key.slice(prefix.length)}>
-                      {r.object.key.slice(prefix.length)}
-                    </span>
-                  </span>
+                    <span className="truncate">{r.object.key.slice(prefix.length)}</span>
+                  </DrawerTrigger>
                 </TableCell>
                 <TableCell className="text-right whitespace-nowrap text-muted-foreground tabular-nums">{formatBytes(r.object.size)}</TableCell>
                 <TableCell className="hidden max-w-40 truncate text-muted-foreground md:table-cell">{r.object.content_type}</TableCell>
@@ -260,7 +267,7 @@ export function ObjectTable({
                   <span suppressHydrationWarning>{timeAgo(r.object.last_modified)}</span>
                 </TableCell>
                 <TableCell className="w-0 whitespace-nowrap text-right">
-                  <div className="flex justify-end gap-1">
+                  <div className="relative flex justify-end gap-1">
                     <a
                       href={objectURL(bucket, r.object.key)}
                       download
@@ -288,6 +295,7 @@ export function ObjectTable({
         </tbody>
       </Table>
       {footer}
+      <ObjectDetails controller={details} bucket={bucket} prefix={prefix} access={access} canWrite={canWrite} onDelete={onDelete} />
     </>
   )
 }

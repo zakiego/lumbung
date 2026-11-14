@@ -14,6 +14,13 @@ export function formatDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : day.format(d)
 }
 
+const dayTime = new Intl.DateTimeFormat("en-US", { month: "short", day: "2-digit", year: "numeric", hour: "numeric", minute: "2-digit" })
+
+export function formatDateTime(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : dayTime.format(d)
+}
+
 export function timeAgo(iso: string, now = Date.now()): string {
   const t = new Date(iso).getTime()
   if (Number.isNaN(t)) return iso

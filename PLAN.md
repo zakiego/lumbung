@@ -410,7 +410,7 @@ Limits (section 6.3 style, all settings): object size, bucket size, total object
 
 ### 16.8 Dashboard and docs
 
-- Dashboard: Buckets in the sidebar. List with size and object count, create. Bucket browser with folders from `/`, breadcrumbs, upload (streamed through the dashboard, not buffered), download, delete, empty and loading and error states. Settings: public read, CORS origins, delete with a typed confirmation. Read-only members browse and download; members upload and delete; owners change settings and create or delete buckets.
+- Dashboard: Buckets in the sidebar. List with size and object count, create. Bucket browser with folders from `/`, breadcrumbs, upload (streamed through the dashboard, not buffered), download, delete, empty and loading and error states. Clicking a file opens its details in a drawer (a bottom sheet on phones): an image preview, the public link with copy when the bucket is public, size, type, modified time, ETag, headers and metadata, with download and delete. Settings: public read, CORS origins, delete with a typed confirmation. Read-only members browse and download; members upload and delete; owners change settings and create or delete buckets.
 - Docs: Concepts: Buckets and objects; Tokens and scopes and Limits updated. Guides: Use an S3 client, Store files from Node, Browser uploads with presigned URLs. Reference: S3 API (operations, auth, error codes). Self-hosting: Backups updated. Samples run in `scripts/docs-test`; S3 samples run inside `examples/s3`.
 - `examples/s3`: the AWS SDK for JavaScript, unchanged, against a real engine in CI: put, get with a range, head, list with prefix and delimiter, copy, delete, multipart (by hand and with its upload helper), presigned GET and PUT.
 
