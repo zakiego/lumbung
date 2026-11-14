@@ -2,6 +2,7 @@
 import type { BranchOut, DatabaseOut, Diff, Schema, StatsOutBody } from "@lumbung/client"
 import { createServerFn } from "@tanstack/react-start"
 import { z } from "zod"
+import { WINDOWS, type WorkspaceStats, mergeStats } from "@/lib/stats"
 import { config } from "@/server/config"
 import { allPages, call, engineFor } from "@/server/engine"
 import { requireCan } from "@/server/session"
@@ -116,10 +117,32 @@ export const getSchema = createServerFn({ method: "GET" })
   })
 
 export const getStats = createServerFn({ method: "GET" })
-  .validator(z.object({ db: ref, branch: ref, window: z.enum(["1h", "6h", "24h", "48h"]).default("24h") }))
+  .validator(z.object({ db: ref, branch: ref, window: z.enum(WINDOWS).default("24h") }))
   .handler(async ({ data }): Promise<StatsOutBody> => {
     const viewer = await requireCan("read")
     return call(() => engineFor(viewer).branches.stats(data.db, data.branch, data.window))
+  })
+
+// Traffic on every database's default branch, added up. A database whose
+// stats fail is listed in `failed` instead of failing the whole call.
+export const getWorkspaceStats = createServerFn({ method: "GET" })
+  .validator(z.object({ window: z.enum(WINDOWS).default("24h"), databases: z.array(z.object({ name: ref, branch: ref })).max(1000) }))
+  .handler(async ({ data }): Promise<WorkspaceStats> => {
+    const viewer = await requireCan("read")
+    const e = engineFor(viewer)
+    const dbs = data.databases
+    const results: { db: string; stats: StatsOutBody | null }[] = []
+    const queue = [...dbs]
+    const worker = async () => {
+      for (let d = queue.shift(); d; d = queue.shift()) {
+        const stats = await e.branches.stats(d.name, d.branch, data.window).catch(() => null)
+        results.push({ db: d.name, stats })
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(8, dbs.length) }, worker))
+    const merged = mergeStats(results)
+    if (dbs.length > 0 && merged.failed.length === dbs.length) throw new Error("Couldn't load stats for any database.")
+    return merged
   })
 
 // The engine URL for connect snippets. Tokens never leave the server; snippets read $LUMBUNG_TOKEN.

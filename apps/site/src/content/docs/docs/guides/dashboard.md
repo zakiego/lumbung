@@ -42,6 +42,12 @@ An owner's bucket settings turn public read on or off, set the CORS origins for 
 
 Under **Account** (in the menu at the bottom of the sidebar), add a passkey, then use **Sign in with a passkey** next time. Passkeys are bound to the dashboard's address, `LUMBUNG_DASHBOARD_URL`, so set that to the address people really open before anyone adds one.
 
+## Overview and search
+
+The home page lists every database with its size, and its requests and errors over the last 1, 6, 24 or 48 hours. Requests and errors count each database's default branch. People who can write also see recent activity from the audit log.
+
+Press <kbd>⌘K</kbd> (<kbd>Ctrl+K</kbd> on Windows and Linux) to jump to a database or page, or to switch the theme.
+
 ## Who did what
 
 The dashboard calls the engine with its service token and names the signed-in person in `X-Lumbung-Actor`, so the audit log shows `dashboard:<email>` for every change made from the dashboard.

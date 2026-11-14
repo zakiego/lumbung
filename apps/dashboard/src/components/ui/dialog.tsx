@@ -10,7 +10,7 @@ import type { ReactNode } from "react"
 import { type Styled, cn } from "@/lib/utils"
 import { buttonVariants } from "./button"
 
-export { Dialog, DialogClose, DialogTrigger, createDialogController } from "@ui-sdk/react/dialog"
+export { Dialog, DialogClose, DialogShortcut, DialogTrigger, createDialogController } from "@ui-sdk/react/dialog"
 
 export const backdrop =
   "fixed inset-0 bg-overlay transition-opacity duration-180 data-starting-style:opacity-0 data-ending-style:opacity-0 motion-reduce:transition-none"
