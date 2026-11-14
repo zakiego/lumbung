@@ -82,22 +82,24 @@ func TestMCPTools(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := []string{"create_branch", "create_database", "create_snapshot", "delete_branch", "diff_branches", "execute",
-		"get_database", "get_schema", "list_branches", "list_databases", "list_snapshots", "query", "reset_branch"}
+	want := []string{"create_branch", "create_bucket", "create_database", "create_snapshot", "delete_branch", "delete_object",
+		"diff_branches", "execute", "get_database", "get_object", "get_schema", "list_branches", "list_buckets", "list_databases",
+		"list_objects", "list_snapshots", "presign_object", "put_object", "query", "reset_branch"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools: %v", names)
 	}
-	for _, n := range []string{"list_databases", "get_database", "list_branches", "diff_branches", "get_schema", "query", "list_snapshots"} {
+	for _, n := range []string{"list_databases", "get_database", "list_branches", "diff_branches", "get_schema", "query", "list_snapshots",
+		"list_buckets", "list_objects", "get_object"} {
 		if a := annotations[n]; a == nil || !a.ReadOnlyHint {
 			t.Errorf("%s should be read-only", n)
 		}
 	}
-	for _, n := range []string{"delete_branch", "reset_branch", "execute"} {
+	for _, n := range []string{"delete_branch", "reset_branch", "execute", "put_object", "delete_object"} {
 		if a := annotations[n]; a == nil || a.ReadOnlyHint || a.DestructiveHint == nil || !*a.DestructiveHint {
 			t.Errorf("%s should be destructive", n)
 		}
 	}
-	for _, n := range []string{"create_database", "create_branch", "create_snapshot"} {
+	for _, n := range []string{"create_database", "create_branch", "create_snapshot", "create_bucket", "presign_object"} {
 		if a := annotations[n]; a == nil || a.ReadOnlyHint || a.DestructiveHint == nil || *a.DestructiveHint {
 			t.Errorf("%s should be additive", n)
 		}

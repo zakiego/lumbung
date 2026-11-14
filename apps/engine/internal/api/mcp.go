@@ -41,7 +41,8 @@ func (s *Server) mountMCP() {
 	server := mcp.NewServer(&mcp.Implementation{Name: "lumbung", Title: "Lumbung", Version: version.Version}, &mcp.ServerOptions{
 		Instructions: "Lumbung holds SQLite databases, each with branches (full copies). Use list_databases first. " +
 			"query runs read-only SQL; execute runs writes and needs a write token. Branches never merge back: " +
-			"to test a schema change, create_branch, execute the migration there, diff_branches against main, then run the same SQL on main.",
+			"to test a schema change, create_branch, execute the migration there, diff_branches against main, then run the same SQL on main. " +
+			"Buckets hold files: list_buckets, list_objects, get_object and put_object work with them, and presign_object makes a URL to share one.",
 	})
 	s.addMCPTools(server)
 	s.mcpServer = server
@@ -76,6 +77,8 @@ func (s *Server) mountMCP() {
 type mcpCall struct {
 	p         auth.Principal
 	requestID string
+	// scheme and host clients reach the engine at, for presigned URLs.
+	scheme, host string
 }
 
 type keyMCPCall struct{}
@@ -125,7 +128,8 @@ func (s *Server) mcpGate(next http.Handler) http.Handler {
 			writeProblemHTTP(w, ae, id)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), keyMCPCall{}, mcpCall{p: p, requestID: id})))
+		scheme, host := s.requestBase(r.TLS != nil, r.RemoteAddr, r.Header.Get("X-Forwarded-Proto"), r.Host)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), keyMCPCall{}, mcpCall{p: p, requestID: id, scheme: scheme, host: host})))
 	})
 }
 
@@ -867,6 +871,8 @@ func (s *Server) addMCPTools(server *mcp.Server) {
 			}
 			return nil, out, nil
 		})
+
+	s.addObjectTools(server)
 }
 
 func results(r *engine.Result) []*engine.Result {
