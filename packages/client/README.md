@@ -29,6 +29,26 @@ Each `query` runs in its own transaction. Use `batch` for statements that must s
 
 Errors are thrown as `LumbungError`, which carries the API's error `code`.
 
+## Workspaces
+
+Databases, buckets and tokens live in workspaces. A token for a workspace acts in that workspace and needs nothing extra: the code above is all there is to it.
+
+An instance token belongs to no workspace. Give it one to work in, and use it to set a workspace up:
+
+```ts
+const admin = createClient({ url: process.env.LUMBUNG_URL!, token: process.env.LUMBUNG_ADMIN_TOKEN! })
+
+await admin.workspaces.create("agent", { maxDatabases: 20 })
+const { token } = await admin.workspace("agent").tokens.create({ name: "agent", access: "admin" })
+
+// The workspace's own token makes what it needs and sees nothing else.
+const agent = createClient({ url: process.env.LUMBUNG_URL!, token })
+await agent.databases.create("notes")
+await agent.database("notes").query("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)")
+```
+
+`CHANGELOG.md` lists what changed in each version.
+
 ## Drizzle
 
 `@lumbung/client/drizzle` runs Drizzle on a Lumbung branch. Install `drizzle-orm` next to it.
