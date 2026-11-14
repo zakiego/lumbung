@@ -133,7 +133,7 @@ func normETag(s string) string { return strings.ToLower(strings.Trim(strings.Tri
 
 // CompleteUpload assembles the listed parts, in order, into the object.
 // The ETag is the MD5 of the parts' MD5s with a -<count> suffix.
-func (e *Engine) CompleteUpload(ctx context.Context, uploadID, bucketID, key string, list []CompletedPart) (meta.Object, error) {
+func (e *Engine) CompleteUpload(ctx context.Context, uploadID, bucketID, key string, list []CompletedPart, cond *meta.WriteCond) (meta.Object, error) {
 	u, err := e.GetUpload(ctx, uploadID, bucketID, key)
 	if err != nil {
 		return meta.Object{}, err
@@ -188,7 +188,7 @@ func (e *Engine) CompleteUpload(ctx context.Context, uploadID, bucketID, key str
 		ETag:        fmt.Sprintf("%s-%d", hex.EncodeToString(digests.Sum(nil)), len(parts)),
 		ContentType: u.ContentType, Headers: u.Headers, Metadata: u.Metadata, Parts: len(parts)}
 	out, err := e.commitBlob(ctx, tmp, o, nil, func(o meta.Object) (meta.Object, error) {
-		return e.meta.CompleteUpload(ctx, u.ID, o, blobRel, e.gcAfter())
+		return e.meta.CompleteUpload(ctx, u.ID, o, blobRel, e.gcAfter(), cond)
 	})
 	if err != nil {
 		return meta.Object{}, err

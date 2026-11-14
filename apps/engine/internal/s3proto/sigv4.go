@@ -417,7 +417,21 @@ func Presign(in PresignInput) string {
 	q.Set("X-Amz-SignedHeaders", "host")
 	canonical := CanonicalRequest(in.Method, in.Path, q, http.Header{}, in.Host, []string{"host"}, UnsignedPayload)
 	sig := Sign(SigningKey(in.Secret, scope), StringToSign(in.Time, scope, canonical))
-	return in.Scheme + "://" + in.Host + URIEncode(in.Path, true) + "?" + CanonicalQuery(q) + "&X-Amz-Signature=" + sig
+	return in.Scheme + "://" + in.Host + urlPath(in.Path) + "?" + CanonicalQuery(q) + "&X-Amz-Signature=" + sig
+}
+
+// urlPath encodes a path for a URL a client will request. Segments that are
+// only dots are percent-encoded too, so clients that resolve . and .. can't
+// change the key; the server decodes them back before checking the
+// signature.
+func urlPath(p string) string {
+	segs := strings.Split(URIEncode(p, true), "/")
+	for i, s := range segs {
+		if s == "." || s == ".." {
+			segs[i] = strings.ReplaceAll(s, ".", "%2E")
+		}
+	}
+	return strings.Join(segs, "/")
 }
 
 // ErrNoBody is returned by readers that expect more bytes.

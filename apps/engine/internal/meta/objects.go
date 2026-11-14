@@ -336,18 +336,47 @@ func queueRemoval(ctx context.Context, tx *sql.Tx, rel string, after time.Time) 
 // engine-side, but keeping meta free of path building keeps it testable).
 type BlobRel func(bucketID, blobID string) string
 
+// WriteCond is a condition on the object a write replaces, checked in the
+// write's transaction.
+type WriteCond struct {
+	IfNoneMatch bool     // no object may exist (If-None-Match: *)
+	IfMatch     []string // the existing object's ETag must be one of these (* for any)
+}
+
+func (c *WriteCond) check(found bool, etag string) error {
+	if c == nil {
+		return nil
+	}
+	failed := apierr.New(apierr.PreconditionFailed, "at least one of the preconditions you specified did not hold")
+	if c.IfNoneMatch && found {
+		return failed
+	}
+	if len(c.IfMatch) > 0 {
+		if !found {
+			return failed
+		}
+		for _, e := range c.IfMatch {
+			if e == "*" || e == etag {
+				return nil
+			}
+		}
+		return failed
+	}
+	return nil
+}
+
 // PutObject records an object, replacing any object with the same key. The
 // replaced object's file is queued for removal after gcAfter. It fails with
 // bucket_not_found when the bucket was deleted meanwhile; the caller then
 // removes the new file. It returns the record as written; an error means
 // nothing was committed.
-func (s *Store) PutObject(ctx context.Context, o Object, rel BlobRel, gcAfter time.Time) (Object, error) {
+func (s *Store) PutObject(ctx context.Context, o Object, rel BlobRel, gcAfter time.Time, cond *WriteCond) (Object, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Object{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	out, err := s.putObjectTx(ctx, tx, o, rel, gcAfter)
+	out, err := s.putObjectTx(ctx, tx, o, rel, gcAfter, cond)
 	if err != nil {
 		return Object{}, err
 	}
@@ -355,7 +384,7 @@ func (s *Store) PutObject(ctx context.Context, o Object, rel BlobRel, gcAfter ti
 }
 
 // putObjectTx writes an object's rows and returns the record as written.
-func (s *Store) putObjectTx(ctx context.Context, tx *sql.Tx, o Object, rel BlobRel, gcAfter time.Time) (Object, error) {
+func (s *Store) putObjectTx(ctx context.Context, tx *sql.Tx, o Object, rel BlobRel, gcAfter time.Time, cond *WriteCond) (Object, error) {
 	ts := now()
 	o.ModifiedAt = *parseTime(sql.NullString{String: ts, Valid: true})
 	if o.Headers == nil {
@@ -364,21 +393,24 @@ func (s *Store) putObjectTx(ctx context.Context, tx *sql.Tx, o Object, rel BlobR
 	if o.Metadata == nil {
 		o.Metadata = map[string]string{}
 	}
-	return o, s.writeObjectRows(ctx, tx, o, ts, rel, gcAfter)
+	return o, s.writeObjectRows(ctx, tx, o, ts, rel, gcAfter, cond)
 }
 
-func (s *Store) writeObjectRows(ctx context.Context, tx *sql.Tx, o Object, ts string, rel BlobRel, gcAfter time.Time) error {
+func (s *Store) writeObjectRows(ctx context.Context, tx *sql.Tx, o Object, ts string, rel BlobRel, gcAfter time.Time, cond *WriteCond) error {
 	var one int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM buckets WHERE id = ?`, o.BucketID).Scan(&one); errors.Is(err, sql.ErrNoRows) {
 		return apierr.New(apierr.BucketNotFound, "the bucket was deleted")
 	} else if err != nil {
 		return err
 	}
-	var oldBlob string
+	var oldBlob, oldETag string
 	var oldSize int64
-	err := tx.QueryRowContext(ctx, `SELECT blob_id, size FROM objects WHERE bucket_id = ? AND key = ?`, o.BucketID, o.Key).Scan(&oldBlob, &oldSize)
+	err := tx.QueryRowContext(ctx, `SELECT blob_id, size, etag FROM objects WHERE bucket_id = ? AND key = ?`, o.BucketID, o.Key).Scan(&oldBlob, &oldSize, &oldETag)
 	found := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err := cond.check(found, oldETag); err != nil {
 		return err
 	}
 	if found {
@@ -680,7 +712,7 @@ func (s *Store) ListParts(ctx context.Context, uploadID string, after, limit int
 // CompleteUpload records the assembled object and ends the upload in one
 // transaction. It fails with upload_not_found when the upload already
 // ended, so two completions can't both win.
-func (s *Store) CompleteUpload(ctx context.Context, uploadID string, o Object, rel BlobRel, gcAfter time.Time) (Object, error) {
+func (s *Store) CompleteUpload(ctx context.Context, uploadID string, o Object, rel BlobRel, gcAfter time.Time, cond *WriteCond) (Object, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Object{}, err
@@ -693,7 +725,7 @@ func (s *Store) CompleteUpload(ctx context.Context, uploadID string, o Object, r
 	if n, _ := res.RowsAffected(); n == 0 {
 		return Object{}, apierr.New(apierr.UploadNotFound, "no such multipart upload")
 	}
-	out, err := s.putObjectTx(ctx, tx, o, rel, gcAfter)
+	out, err := s.putObjectTx(ctx, tx, o, rel, gcAfter, cond)
 	if err != nil {
 		return Object{}, err
 	}

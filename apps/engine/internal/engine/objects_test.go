@@ -358,14 +358,14 @@ func TestMultipart(t *testing.T) {
 	_, err = e.UploadPart(ctx, UploadPartInput{UploadID: u.ID, BucketID: other.ID, Key: "big", Number: 1, Size: 1, Body: strings.NewReader("x")})
 	wantCode(t, err, apierr.UploadNotFound, "other bucket")
 
-	_, err = e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{2, e2}, {1, e1}})
+	_, err = e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{2, e2}, {1, e1}}, nil)
 	wantCode(t, err, apierr.InvalidPart, "order")
-	_, err = e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{1, e1}, {2, e1}})
+	_, err = e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{1, e1}, {2, e1}}, nil)
 	wantCode(t, err, apierr.InvalidPart, "etag")
-	_, err = e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{1, e1}, {4, e3}})
+	_, err = e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{1, e1}, {4, e3}}, nil)
 	wantCode(t, err, apierr.InvalidPart, "missing part")
 
-	o, err := e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{1, `"` + e1 + `"`}, {2, e2}, {3, e3}})
+	o, err := e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{1, `"` + e1 + `"`}, {2, e2}, {3, e3}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,14 +380,14 @@ func TestMultipart(t *testing.T) {
 	if _, err := os.Stat(e.layout.UploadDir(u.ID)); !os.IsNotExist(err) {
 		t.Fatalf("upload folder left: %v", err)
 	}
-	_, err = e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{1, e1}})
+	_, err = e.CompleteUpload(ctx, u.ID, b.ID, "big", []CompletedPart{{1, e1}}, nil)
 	wantCode(t, err, apierr.UploadNotFound, "complete twice")
 
 	// Small parts before the last are refused; abort removes everything.
 	u2, _ := e.CreateUpload(ctx, b.ID, "small", ObjectAttrs{}, "")
 	s1, _ := e.UploadPart(ctx, UploadPartInput{UploadID: u2.ID, BucketID: b.ID, Key: "small", Number: 1, Size: 1, Body: strings.NewReader("a")})
 	s2, _ := e.UploadPart(ctx, UploadPartInput{UploadID: u2.ID, BucketID: b.ID, Key: "small", Number: 2, Size: 1, Body: strings.NewReader("b")})
-	_, err = e.CompleteUpload(ctx, u2.ID, b.ID, "small", []CompletedPart{{1, s1}, {2, s2}})
+	_, err = e.CompleteUpload(ctx, u2.ID, b.ID, "small", []CompletedPart{{1, s1}, {2, s2}}, nil)
 	wantCode(t, err, apierr.PartTooSmall, "small part")
 	if err := e.AbortUpload(ctx, u2.ID, b.ID, "small"); err != nil {
 		t.Fatal(err)

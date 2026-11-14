@@ -126,14 +126,14 @@ export interface ColumnOut {
 }
 
 export interface CopyInBody {
-  /** Set to replace the content type and metadata instead of copying them. */
+  /** Set this or metadata to give the copy new attributes instead of the source's. Without it the source's content type is kept. */
   content_type?: string;
   /** Source bucket name or id; defaults to this bucket. */
   from_bucket?: string;
   from_key: string;
   /** Key of the copy in this bucket. */
   key: string;
-  /** With content_type: the copy's metadata. */
+  /** The copy's metadata, replacing the source's. */
   metadata?: Record<string, string>;
 }
 

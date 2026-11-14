@@ -389,6 +389,8 @@ type PutObjectInput struct {
 	Body       io.Reader // exactly Size bytes
 	Attrs      ObjectAttrs
 	ContentMD5 []byte // optional; checked against the body
+	// Cond is checked in the transaction that records the object.
+	Cond *meta.WriteCond
 }
 
 // PutObject stores an object, replacing any with the same key.
@@ -427,7 +429,7 @@ func (e *Engine) PutObject(ctx context.Context, in PutObjectInput) (meta.Object,
 	o := meta.Object{BucketID: in.BucketID, Key: in.Key, Size: in.Size, ETag: hex.EncodeToString(sum),
 		ContentType: in.Attrs.ContentType, Headers: in.Attrs.Headers, Metadata: in.Attrs.Metadata}
 	return e.commitBlob(ctx, tmp, o, res, func(o meta.Object) (meta.Object, error) {
-		return e.meta.PutObject(ctx, o, blobRel, e.gcAfter())
+		return e.meta.PutObject(ctx, o, blobRel, e.gcAfter(), in.Cond)
 	})
 }
 
@@ -552,6 +554,9 @@ func (e *Engine) CopyObject(ctx context.Context, in CopyObjectInput) (meta.Objec
 	attrs := ObjectAttrs{ContentType: src.ContentType, Headers: src.Headers, Metadata: src.Metadata}
 	if in.Replace {
 		attrs = in.Attrs
+		if attrs.ContentType == "" {
+			attrs.ContentType = src.ContentType
+		}
 		if err := CheckAttrs(&attrs); err != nil {
 			return meta.Object{}, err
 		}
@@ -574,7 +579,7 @@ func (e *Engine) CopyObject(ctx context.Context, in CopyObjectInput) (meta.Objec
 	o := meta.Object{BucketID: in.BucketID, Key: in.Key, Size: src.Size, ETag: src.ETag, Parts: src.Parts,
 		ContentType: attrs.ContentType, Headers: attrs.Headers, Metadata: attrs.Metadata}
 	return e.commitBlob(ctx, tmp, o, res, func(o meta.Object) (meta.Object, error) {
-		return e.meta.PutObject(ctx, o, blobRel, e.gcAfter())
+		return e.meta.PutObject(ctx, o, blobRel, e.gcAfter(), nil)
 	})
 }
 

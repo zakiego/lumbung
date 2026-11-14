@@ -405,7 +405,7 @@
         "additionalProperties": false,
         "properties": {
           "content_type": {
-            "description": "Set to replace the content type and metadata instead of copying them.",
+            "description": "Set this or metadata to give the copy new attributes instead of the source's. Without it the source's content type is kept.",
             "type": "string"
           },
           "from_bucket": {
@@ -427,7 +427,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "With content_type: the copy's metadata.",
+            "description": "The copy's metadata, replacing the source's.",
             "type": "object"
           }
         },
@@ -3255,6 +3255,18 @@
       },
       "patch": {
         "operationId": "update-bucket",
+        "parameters": [
+          {
+            "description": "Bucket name or id.",
+            "in": "path",
+            "name": "bucket",
+            "required": true,
+            "schema": {
+              "description": "Bucket name or id.",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3446,6 +3458,18 @@
     "/v1/buckets/{bucket}/copy": {
       "post": {
         "operationId": "copy-object",
+        "parameters": [
+          {
+            "description": "Bucket name or id.",
+            "in": "path",
+            "name": "bucket",
+            "required": true,
+            "schema": {
+              "description": "Bucket name or id.",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3837,6 +3861,29 @@
         "operationId": "get-object",
         "parameters": [
           {
+            "description": "Bucket name or id.",
+            "in": "path",
+            "name": "bucket",
+            "required": true,
+            "schema": {
+              "description": "Bucket name or id.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Object key.",
+            "explode": false,
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "description": "Object key.",
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
             "description": "One byte range, bytes=start-end.",
             "in": "header",
             "name": "Range",
@@ -3863,7 +3910,7 @@
         "responses": {
           "200": {
             "content": {
-              "application/octet-stream": {
+              "*/*": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -3871,11 +3918,11 @@
                 }
               }
             },
-            "description": "The content."
+            "description": "The content, with its stored Content-Type."
           },
           "206": {
             "content": {
-              "application/octet-stream": {
+              "*/*": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -4276,6 +4323,16 @@
         "operationId": "list-objects",
         "parameters": [
           {
+            "description": "Bucket name or id.",
+            "in": "path",
+            "name": "bucket",
+            "required": true,
+            "schema": {
+              "description": "Bucket name or id.",
+              "type": "string"
+            }
+          },
+          {
             "description": "Only keys that start with this.",
             "explode": false,
             "in": "query",
@@ -4504,6 +4561,18 @@
       "post": {
         "description": "Signs a GET or PUT URL for one key with the calling token's access key, so the token must have one. GET needs read access, PUT needs write. The URL stops working when it expires or the token is revoked.",
         "operationId": "presign-object",
+        "parameters": [
+          {
+            "description": "Bucket name or id.",
+            "in": "path",
+            "name": "bucket",
+            "required": true,
+            "schema": {
+              "description": "Bucket name or id.",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

@@ -175,7 +175,9 @@ func (s *Server) s3Verify(req *s3Req, a *s3proto.Auth) *s3proto.Error {
 	}
 	p, err := auth.FromToken(rec, s.now())
 	if err != nil {
-		return s.s3AuthFailed(req, invalidKeyID("the access key's token is revoked or expired"))
+		// The same answer as an unknown key: the id alone mustn't tell
+		// whether its token was ever live.
+		return s.s3AuthFailed(req, invalidKeyID("the access key id you provided does not exist"))
 	}
 	secret, err := s.eng.Sealer().Open(rec.ID, rec.AccessSecret)
 	if err != nil {
@@ -323,6 +325,10 @@ func (s *Server) s3Dispatch(req *s3Req) {
 		}
 	case req.key == "":
 		switch {
+		case m == http.MethodPut && hasSubresource(q):
+			// PutBucketVersioning, PutBucketTagging and friends must never
+			// fall through to CreateBucket.
+			s.s3Fail(req, notImplemented("changing bucket settings over the S3 API"))
 		case m == http.MethodPut:
 			s.s3CreateBucket(req)
 		case m == http.MethodDelete:
@@ -377,6 +383,18 @@ func (s *Server) s3Dispatch(req *s3Req) {
 		return
 	}
 	s.s3Fail(req, s3proto.Errf("MethodNotAllowed", http.StatusMethodNotAllowed, "the specified method is not allowed against this resource"))
+}
+
+// hasSubresource reports whether a query names something besides the
+// signature, the SDKs' x-id hint and response overrides.
+func hasSubresource(q url.Values) bool {
+	for k := range q {
+		if strings.HasPrefix(k, "X-Amz-") || strings.HasPrefix(k, "x-amz-") || k == "x-id" || strings.HasPrefix(k, "response-") {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // ---- buckets and access
@@ -616,6 +634,19 @@ func (s *Server) s3Body(req *s3Req) (io.Reader, int64, *s3proto.Error) {
 	hash := s3proto.UnsignedPayload
 	if req.sig != nil {
 		hash = req.sig.PayloadHash
+	} else if v := r.Header.Get("X-Amz-Content-Sha256"); v != "" {
+		// A bearer-token client may still send a payload hash or an
+		// unsigned chunked body; signed chunks need a signature.
+		switch {
+		case v == s3proto.StreamingSigned || v == s3proto.StreamingSignedTrailer:
+			return nil, 0, s3proto.Errf("InvalidRequest", http.StatusBadRequest, "signed chunks need AWS Signature Version 4, not a bearer token")
+		case v == s3proto.UnsignedPayload || v == s3proto.StreamingUnsignedTrail:
+			hash = v
+		case len(v) == 64:
+			hash = strings.ToLower(v)
+		default:
+			return nil, 0, s3proto.Errf("InvalidArgument", http.StatusBadRequest, "x-amz-content-sha256 must be a SHA-256 hex digest or a known streaming mode")
+		}
 	}
 	size := r.ContentLength
 	sums, e := s3proto.HeaderChecksums(r.Header)
@@ -765,14 +796,24 @@ func setObjectHeaders(req *s3Req, o meta.Object) {
 	if o.Parts > 0 {
 		h.Set("x-amz-mp-parts-count", strconv.Itoa(o.Parts))
 	}
-	if req.anon {
-		return
-	}
-	for _, name := range []string{"content-type", "content-language", "expires", "cache-control", "content-disposition", "content-encoding"} {
-		if v := req.q.Get("response-" + name); v != "" {
-			h.Set(name, v)
+	if !req.anon {
+		for _, name := range []string{"content-type", "content-language", "expires", "cache-control", "content-disposition", "content-encoding"} {
+			if v := req.q.Get("response-" + name); v != "" {
+				h.Set(name, v)
+			}
 		}
 	}
+	setContentSafety(h)
+}
+
+// setContentSafety keeps object content inert in a browser: objects are
+// served from the engine's origin, which may be the dashboard's too, so
+// uploaded HTML or SVG must never run as that origin. The sandbox makes a
+// document opened directly a unique origin without scripts; nosniff stops
+// a browser from guessing a more active type.
+func setContentSafety(h http.Header) {
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'")
 }
 
 // checkConditions applies If-Match, If-Unmodified-Since, If-None-Match and
@@ -925,21 +966,39 @@ func (s *Server) s3PutObject(req *s3Req) {
 		s.s3Fail(req, e)
 		return
 	}
-	ctx := req.r.Context()
-	if v := req.r.Header.Get("If-None-Match"); v == "*" {
-		if _, err := s.eng.HeadObject(ctx, b.ID, req.key); err == nil {
-			s.s3Fail(req, s3proto.Errf("PreconditionFailed", http.StatusPreconditionFailed, "at least one of the preconditions you specified did not hold"))
-			return
-		}
+	cond, e := writeCond(req.r.Header)
+	if e != nil {
+		s.s3Fail(req, e)
+		return
 	}
-	o, err := s.eng.PutObject(ctx, engine.PutObjectInput{BucketID: b.ID, Key: req.key, Size: size, Body: body,
-		Attrs: s3Attrs(req.r.Header), ContentMD5: md5})
+	o, err := s.eng.PutObject(req.r.Context(), engine.PutObjectInput{BucketID: b.ID, Key: req.key, Size: size, Body: body,
+		Attrs: s3Attrs(req.r.Header), ContentMD5: md5, Cond: cond})
 	if err != nil {
 		s.s3Err(req, err)
 		return
 	}
 	req.w.Header().Set("ETag", quoteETag(o.ETag))
 	req.w.WriteHeader(http.StatusOK)
+}
+
+// writeCond reads If-None-Match: * and If-Match on a write. They are checked
+// in the transaction that records the object, so two writers can't both
+// pass.
+func writeCond(h http.Header) (*meta.WriteCond, *s3proto.Error) {
+	inm, im := h.Get("If-None-Match"), h.Get("If-Match")
+	if inm == "" && im == "" {
+		return nil, nil
+	}
+	if inm != "" && inm != "*" {
+		return nil, notImplemented("If-None-Match on a write with a value other than *")
+	}
+	c := &meta.WriteCond{IfNoneMatch: inm == "*"}
+	for _, e := range strings.Split(im, ",") {
+		if e = strings.TrimSpace(e); e != "" {
+			c.IfMatch = append(c.IfMatch, strings.Trim(strings.TrimPrefix(e, "W/"), `"`))
+		}
+	}
+	return c, nil
 }
 
 func (s *Server) s3DeleteObject(req *s3Req) {
@@ -1049,7 +1108,9 @@ func (s *Server) s3CopyObject(req *s3Req) {
 	o, err := s.eng.CopyObject(ctx, engine.CopyObjectInput{SrcBucketID: src.ID, SrcKey: srcKey, BucketID: dst.ID, Key: req.key,
 		Replace: directive == "REPLACE", Attrs: s3Attrs(req.r.Header),
 		Check: func(o meta.Object) error {
-			if checkConditions(cond, o, true) != 0 {
+			// Every copy condition that doesn't hold, If-Modified-Since
+			// and If-None-Match included, is a 412 on a copy.
+			if checkConditions(cond, o, false) != 0 {
 				return apierr.New(apierr.PreconditionFailed, "at least one of the preconditions you specified did not hold")
 			}
 			return nil
@@ -1221,7 +1282,12 @@ func (s *Server) s3CompleteUpload(req *s3Req) {
 	for i, p := range in.Parts {
 		parts[i] = engine.CompletedPart{Number: p.PartNumber, ETag: p.ETag}
 	}
-	o, err := s.eng.CompleteUpload(req.r.Context(), req.q.Get("uploadId"), b.ID, req.key, parts)
+	cond, e := writeCond(req.r.Header)
+	if e != nil {
+		s.s3Fail(req, e)
+		return
+	}
+	o, err := s.eng.CompleteUpload(req.r.Context(), req.q.Get("uploadId"), b.ID, req.key, parts, cond)
 	if err != nil {
 		s.s3Err(req, err)
 		return

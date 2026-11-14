@@ -118,8 +118,8 @@ type copyIn struct {
 		FromBucket  string            `json:"from_bucket,omitempty" doc:"Source bucket name or id; defaults to this bucket."`
 		FromKey     string            `json:"from_key" minLength:"1" maxLength:"1024"`
 		Key         string            `json:"key" minLength:"1" maxLength:"1024" doc:"Key of the copy in this bucket."`
-		ContentType string            `json:"content_type,omitempty" doc:"Set to replace the content type and metadata instead of copying them."`
-		Metadata    map[string]string `json:"metadata,omitempty" doc:"With content_type: the copy's metadata."`
+		ContentType string            `json:"content_type,omitempty" doc:"Set this or metadata to give the copy new attributes instead of the source's. Without it the source's content type is kept."`
+		Metadata    map[string]string `json:"metadata,omitempty" doc:"The copy's metadata, replacing the source's."`
 	}
 }
 
@@ -373,6 +373,11 @@ func (s *Server) registerBuckets(api huma.API) {
 			defer f.Close()
 			hctx.SetHeader("ETag", quoteETag(o.ETag))
 			hctx.SetHeader("Last-Modified", o.ModifiedAt.UTC().Format(http.TimeFormat))
+			safety := http.Header{}
+			setContentSafety(safety)
+			for k := range safety {
+				hctx.SetHeader(k, safety.Get(k))
+			}
 			if status == http.StatusNotModified {
 				hctx.SetStatus(http.StatusNotModified)
 				return
@@ -431,7 +436,7 @@ func (s *Server) registerBuckets(api huma.API) {
 				}
 			}
 			o, err := s.eng.CopyObject(ctx, engine.CopyObjectInput{SrcBucketID: src.ID, SrcKey: in.Body.FromKey, BucketID: dst.ID, Key: in.Body.Key,
-				Replace: in.Body.ContentType != "", Attrs: engine.ObjectAttrs{ContentType: in.Body.ContentType, Metadata: in.Body.Metadata}})
+				Replace: in.Body.ContentType != "" || in.Body.Metadata != nil, Attrs: engine.ObjectAttrs{ContentType: in.Body.ContentType, Metadata: in.Body.Metadata}})
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
