@@ -94,6 +94,8 @@ export const createToken = createServerFn({ method: "POST" })
       access: z.enum(["read", "write", "admin"]),
       database: ref.optional(),
       branch: ref.optional(),
+      bucket: ref.optional(),
+      accessKey: z.boolean().optional(),
       expiresInDays: z.number().int().min(1).max(3650).optional(),
     }),
   )

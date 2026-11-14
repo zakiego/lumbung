@@ -7,7 +7,7 @@ export function Checkbox({ className, ...props }: Omit<Styled<typeof CheckboxPar
   return (
     <CheckboxPart
       className={cn(
-        "inline-flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-input transition-[background-color,border-color] duration-100 data-checked:border-brand data-checked:bg-brand data-indeterminate:border-brand data-indeterminate:bg-brand data-disabled:opacity-50",
+        "inline-flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-input-strong transition-[background-color,border-color] duration-100 data-checked:border-brand data-checked:bg-brand data-indeterminate:border-brand data-indeterminate:bg-brand data-disabled:opacity-50",
         className,
       )}
       {...props}

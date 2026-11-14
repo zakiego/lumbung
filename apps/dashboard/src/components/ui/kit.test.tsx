@@ -8,6 +8,7 @@ import { ScrollArea } from "./layout"
 import { Menu, MenuContent, MenuItem, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./menu"
 import { Pagination } from "./pagination"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "./select"
+import { SelectEmpty, SelectList, SelectSearch } from "./select-search"
 import { Tabs, TabsList, TabsPanel, TabsTab } from "./tabs"
 import { Toaster, toast } from "./toast"
 import { SegmentedControl, SegmentedControlItem } from "./segmented-control"
@@ -189,4 +190,30 @@ test("the segmented indicator doesn't slide on its first placement, only after a
   expect(indicator.hasAttribute("data-moved")).toBe(false)
   await user.click(screen.getByRole("radio", { name: "SQL dump" }))
   expect(indicator.hasAttribute("data-moved")).toBe(true)
+})
+
+test("a searchable select's empty message takes no space until nothing matches", async () => {
+  const user = userEvent.setup()
+  render(
+    <Select items={["customers", "orders"]} defaultValue="customers">
+      <SelectTrigger aria-label="Table" />
+      <SelectContent>
+        <SelectSearch aria-label="Search tables" />
+        <SelectEmpty>No matches</SelectEmpty>
+        <SelectList>
+          <SelectItem value="customers">customers</SelectItem>
+          <SelectItem value="orders">orders</SelectItem>
+        </SelectList>
+      </SelectContent>
+    </Select>,
+  )
+  await user.click(screen.getByRole("combobox", { name: "Table" }))
+  const list = await screen.findByRole("listbox")
+  const empty = list.closest('[data-slot="select-content"]')!.querySelector<HTMLElement>('[data-slot="select-empty"]')!
+  // The padding lives on data-empty, so the element must stay bare while items match.
+  expect(empty.hasAttribute("data-empty")).toBe(false)
+  expect(empty.textContent).toBe("")
+  await user.type(screen.getByRole("combobox", { name: "Search tables" }), "zz")
+  await waitFor(() => expect(empty.hasAttribute("data-empty")).toBe(true))
+  expect(empty.textContent).toBe("No matches")
 })

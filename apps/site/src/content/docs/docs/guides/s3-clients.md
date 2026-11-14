@@ -20,7 +20,7 @@ lumbung bucket create photos
 lumbung token create --name s3 --bucket photos --access write --access-key --json > s3-key.json
 ```
 
-The id and secret are in `access_key_id` and `secret_access_key`. The secret is shown once.
+The id and secret are in `access_key_id` and `secret_access_key`. The secret is shown once. In the dashboard, open Tokens, pick the bucket under Reaches and tick S3 access key.
 
 ## The AWS SDK for JavaScript
 

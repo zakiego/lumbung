@@ -25,7 +25,7 @@ export const Route = createFileRoute("/_app/tokens")({
     const withBranch = [...new Set(tokens.filter((t) => t.branch_id && names.databases[t.database_id]).map((t) => names.databases[t.database_id]!))]
     const lists = await Promise.all(withBranch.map((db) => getDatabase({ data: { db } }).catch(() => null)))
     for (const l of lists) for (const b of l?.branches ?? []) names.branches[b.id] = b.name
-    return { tokens, names, databases: databases.map((d) => d.name) }
+    return { tokens, names, databases: databases.map((d) => d.name), buckets: buckets.map((b) => b.name) }
   },
   head: () => ({ meta: [{ title: pageTitle("Tokens") }] }),
   component: TokensPage,
@@ -53,7 +53,7 @@ function Frame({ children, actions }: { children: React.ReactNode; actions?: Rea
 }
 
 function TokensPage() {
-  const { tokens, names, databases } = Route.useLoaderData()
+  const { tokens, names, databases, buckets } = Route.useLoaderData()
   const router = useRouter()
   const loadBranches = useCallback(async (db: string) => (await getDatabase({ data: { db } })).branches.map((b) => b.name), [])
 
@@ -62,6 +62,7 @@ function TokensPage() {
       actions={
         <CreateTokenDialog
           databases={databases}
+          buckets={buckets}
           loadBranches={loadBranches}
           onCreate={async (t) => {
             const created = await createToken({ data: t })

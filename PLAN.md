@@ -145,7 +145,7 @@ A branch is a full copy of its parent at the moment it was made, taken with the 
 ### 6.8 Tokens
 
 - Format `lmb_<id>_<secret>`. Only a SHA-256 hash is stored. The full token is shown once.
-- Scopes: instance admin, or per database with read, write or admin, optionally limited to one branch. Optional expiry. Last-used time recorded.
+- Scopes: instance admin, per database with read, write or admin (optionally limited to one branch), or per bucket (section 16.4). Optional expiry and S3 access key. Last-used time recorded.
 - Constant-time comparison. Rate limit per token. Failed auth is rate limited by address.
 
 ### 6.9 Audit and stats
@@ -218,7 +218,7 @@ Added in milestone 11 (ADR 0005). The libSQL remote protocol over HTTP (Hrana v2
 - Typed errors that carry the API's `code`. Retries only on safe reads.
 - `@lumbung/client/drizzle`: adapter on Drizzle's `sqlite-proxy` driver, with a tested example.
 - Tests run against a real engine binary, not mocks.
-- Not published anywhere until Zaki says so.
+- Published to npm as `@lumbung/client` under MIT by `.github/workflows/release-client.yml` on a `client-vX.Y.Z` tag. Release steps are in `ops/README.md`.
 
 ### `lumbung` (CLI)
 
@@ -242,7 +242,7 @@ Built with `/zaki-design-ui` on ui-sdk components (ADR 0004; this said shadcn un
   - Branches: list, create, diff against parent, reset, promote, delete.
   - Snapshots: list, create, schedule, restore to a new branch.
   - Settings: rename, limits, import, export, delete.
-- Tokens, Members and invites, Audit log, Instance settings.
+- Tokens (for a database, a branch, a bucket or everything, with an optional S3 access key), Members and invites, Audit log, Instance settings.
 
 Destructive actions need a typed confirmation. Every list has empty, loading and error states. Run `break-ui` on anything that renders user data: long table names, a 300-column table, a 5 MB text cell, blobs, NULLs, zero rows.
 
@@ -314,12 +314,11 @@ Work top to bottom. Each one ends green in CI, with its docs pages written.
 
 Object storage continues with milestones 12 to 17 in section 16.9.
 
-Later, not scheduled: MCP OAuth for Claude on the web, publishing the SDK and CLI, the open-source checklist (license, security policy, contribution guide), read replicas.
+Later, not scheduled: MCP OAuth for Claude on the web, publishing the CLI, the open-source checklist (license, security policy, contribution guide), read replicas.
 
 ## 15. Open questions for Zaki
 
-- License for when the repo goes public.
-- Where to publish `@lumbung/client` (npm public, or GitHub Packages while private).
+- License for when the repo goes public. The SDK is already MIT.
 - Whether the public hostname stays `lumbung.zakiego.com` or moves to its own domain.
 
 ## 16. Object storage

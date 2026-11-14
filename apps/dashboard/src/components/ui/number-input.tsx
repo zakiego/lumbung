@@ -14,7 +14,7 @@ export function NumberInput({ className, placeholder, "aria-label": ariaLabel, .
     <NumberInputPart format={{ maximumFractionDigits: 0, useGrouping: false }} {...props}>
       <NumberInputGroup
         className={cn(
-          "flex h-8 w-full items-center rounded-md border border-input transition-[border-color] duration-100 has-focus-visible:border-ring data-disabled:opacity-50 data-invalid:border-destructive",
+          "flex h-8 w-full items-center rounded-md border border-input transition-[border-color] duration-100 hover:border-input-strong has-focus-visible:border-ring data-disabled:opacity-50 data-invalid:border-destructive",
           className,
         )}
       >

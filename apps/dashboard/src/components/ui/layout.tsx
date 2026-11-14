@@ -43,23 +43,29 @@ type ScrollAreaProps = {
   label?: string
   /** Fades the inline edges while there's more to scroll that way. */
   fade?: boolean
+  /** Draw no scrollbar, for rows where the fade already says there's more. */
+  bare?: boolean
 }
 
 const bar =
   "flex touch-none p-0.5 opacity-0 transition-opacity duration-150 select-none data-visible:opacity-100 data-[orientation=horizontal]:h-2 data-[orientation=horizontal]:flex-col data-[orientation=vertical]:w-2"
 
-export function ScrollArea({ className, viewportClassName, children, axis = "y", label, fade }: ScrollAreaProps) {
+// Contain only the axis that scrolls, so a vertical swipe that starts on a
+// sideways row still moves the page.
+const overscroll = { x: "overscroll-x-contain", y: "overscroll-y-contain", both: "overscroll-contain" }
+
+export function ScrollArea({ className, viewportClassName, children, axis = "y", label, fade, bare }: ScrollAreaProps) {
   return (
     <ScrollAreaPart type="hover" data-fade-x={fade ? "" : undefined} className={cn("relative overflow-hidden", className)}>
-      <ScrollAreaViewport aria-label={label} className={cn("size-full overscroll-contain [scrollbar-width:none]", viewportClassName)}>
+      <ScrollAreaViewport aria-label={label} className={cn("size-full [scrollbar-width:none]", overscroll[axis], viewportClassName)}>
         <ScrollAreaContent className={axis === "y" ? undefined : "w-max min-w-full"}>{children}</ScrollAreaContent>
       </ScrollAreaViewport>
-      {axis !== "x" && (
+      {!bare && axis !== "x" && (
         <ScrollAreaScrollbar orientation="vertical" className={cn(bar, "absolute top-0 right-0 bottom-0")}>
           <ScrollAreaThumb className="flex-1 rounded-full bg-foreground/25" />
         </ScrollAreaScrollbar>
       )}
-      {axis !== "y" && (
+      {!bare && axis !== "y" && (
         <ScrollAreaScrollbar orientation="horizontal" className={cn(bar, "absolute right-0 bottom-0 left-0")}>
           <ScrollAreaThumb className="flex-1 rounded-full bg-foreground/25" />
         </ScrollAreaScrollbar>

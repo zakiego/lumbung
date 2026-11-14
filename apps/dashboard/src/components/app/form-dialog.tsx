@@ -147,15 +147,23 @@ export function Confirm({ trigger, triggerStyle = {}, title, description, action
   )
 }
 
-export function ShownOnce({ title, value, copyLabel, note }: { title: string; value: string; copyLabel: string; note: string }) {
+type ShownOnceProps = { title: string; note: string } & ({ value: string; copyLabel: string; children?: never } | { children: ReactNode; value?: never; copyLabel?: never })
+
+export function ShownOnce({ title, note, value, copyLabel, children }: ShownOnceProps) {
   return (
     <>
       <DialogTitle className="[overflow-wrap:anywhere]">{title}</DialogTitle>
       <DialogDescription>{note}</DialogDescription>
-      <div data-agent-hidden className="relative rounded-lg border bg-code">
-        <code className="block py-3 pr-12 pl-3 font-mono text-[13px] leading-[1.6] break-all text-foreground/90 select-all">{value}</code>
-        <CopyButton text={value} label={copyLabel} className="absolute top-1.5 right-1.5" />
-      </div>
+      {children ?? <SecretValue value={value ?? ""} copyLabel={copyLabel ?? ""} />}
     </>
+  )
+}
+
+export function SecretValue({ value, copyLabel }: { value: string; copyLabel: string }) {
+  return (
+    <div data-agent-hidden className="relative rounded-lg border bg-code">
+      <code className="block py-3 pr-12 pl-3 font-mono text-[13px] leading-[1.6] break-all text-foreground/90 select-all">{value}</code>
+      <CopyButton text={value} label={copyLabel} className="absolute top-1.5 right-1.5" />
+    </div>
   )
 }
