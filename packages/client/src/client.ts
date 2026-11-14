@@ -503,14 +503,23 @@ export class Bucket {
 
   /** An object's record, or null when there's no object with that key (or no such bucket). */
   async head(key: string, o: { signal?: AbortSignal } = {}): Promise<ObjectOut | null> {
-    const res = await this.#fetch(this.#objectURL(key), {
-      method: "HEAD",
-      headers: { authorization: `Bearer ${this.#token}`, ...this.#headers },
-      signal: o.signal,
-    })
+    let res: Response
+    try {
+      res = await this.#fetch(this.#objectURL(key), {
+        method: "HEAD",
+        headers: { authorization: `Bearer ${this.#token}`, ...this.#headers },
+        signal: o.signal,
+      })
+    } catch (err) {
+      if (o.signal?.aborted) throw err
+      throw new LumbungError("network_error", 0, `request to ${new URL(this.#url).origin} failed`, { cause: err })
+    }
     if (res.status === 404) return null
-    // A HEAD response has no body, so the error carries only its status.
-    if (!res.ok) throw await toError(res)
+    if (!res.ok) {
+      // A HEAD response has no body to read the code from; name it by status.
+      const code = HEAD_CODES[res.status] ?? "http_error"
+      throw new LumbungError(code, res.status, `HTTP ${res.status}`, { requestId: res.headers.get("x-request-id") ?? undefined })
+    }
     const headers: Record<string, string> = {}
     for (const h of ["cache-control", "content-disposition", "content-encoding", "content-language", "expires"]) {
       const v = res.headers.get(h)
@@ -540,7 +549,11 @@ export class Bucket {
     return { objects: r.data, prefixes: r.prefixes ?? [], nextCursor: r.next_cursor }
   }
 
-  /** Copies an object into this bucket, from this bucket or another. */
+  /**
+   * Copies an object into this bucket, from this bucket or another. Pass
+   * contentType or metadata to give the copy new attributes instead of the
+   * source's.
+   */
   copy(o: { fromKey: string; key: string; fromBucket?: string; contentType?: string; metadata?: Record<string, string> }): Promise<ObjectOut> {
     return this.#client.request<ObjectOut>("POST", this.#path("copy"), {
       body: { from_bucket: o.fromBucket, from_key: o.fromKey, key: o.key, content_type: o.contentType, metadata: o.metadata },
@@ -557,6 +570,14 @@ export class Bucket {
     })
     return { url: r.url, method: r.method, expiresAt: new Date(r.expires_at) }
   }
+}
+
+const HEAD_CODES: Record<number, string> = {
+  401: "unauthorized",
+  403: "forbidden",
+  412: "precondition_failed",
+  429: "rate_limited",
+  503: "unavailable",
 }
 
 function metadataOf(h: Headers): Record<string, string> {
