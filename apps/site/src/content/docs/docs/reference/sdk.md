@@ -25,6 +25,7 @@ const { rows } = await db.query("SELECT id, email FROM users WHERE id = ?", [1])
 |---|---|---|---|
 | `url` | string | required | The engine's base URL. |
 | `token` | string | required | A Lumbung token. |
+| `workspace` | string | the token's own | The [workspace](/docs/concepts/workspaces/) to act in, by name or id. Only an instance token needs it; without it, an instance token acts in the default workspace. |
 | `database` | string | | Database name or id for `query` and `batch`. |
 | `branch` | string | the default branch | Branch name or id. |
 | `intMode` | `"number"`, `"bigint"`, `"string"` | `"number"` | How integers come back. `"number"` throws a `RangeError` for an integer past 2^53 instead of rounding it. |
@@ -32,7 +33,7 @@ const { rows } = await db.query("SELECT id, email FROM users WHERE id = ?", [1])
 | `headers` | object | | Extra headers on every request. |
 | `retries` | number | `2` | Retries for safe reads only (see below). |
 
-`client.branch(name)` and `client.database(name, branch?)` return a client bound to another branch or database, sharing the same options.
+`client.branch(name)`, `client.database(name, branch?)` and `client.workspace(name)` return a client bound to another branch, database or workspace, sharing the same options.
 
 ## Queries
 
@@ -133,9 +134,47 @@ console.log(diff.changes.length, ci.token.slice(0, 4), agent.grants.length)
 | `databases` | `list`, `trash`, `get`, `create`, `rename`, `delete`, `restore` |
 | `branches` | `list`, `get`, `create`, `update`, `delete`, `reset`, `promote`, `diff`, `schema`, `stats` |
 | `snapshots` | `list`, `create`, `restore`, `delete`, `schedule.get`, `schedule.set`, `schedule.delete` |
-| `tokens` | `list`, `create` (with `bucket` and `accessKey` for bucket tokens and S3 access keys, or `grants` for one token that reaches several databases and buckets), `revoke` |
-| `audit` | `list` |
-| `buckets` | `list`, `get`, `create`, `update` (`name`, `publicRead`, `corsOrigins`), `delete` |
+| `tokens` | `list`, `create` (with `bucket` and `accessKey` for bucket tokens and S3 access keys, or `grants` for one token that reaches several databases and buckets; without a target, a token for the whole workspace), `revoke` |
+| `audit` | `list` (the workspace's log) |
+| `buckets` | `list`, `get`, `create`, `update` (`name`, `publicRead`, `corsOrigins`), `delete`, `move` |
+| `workspaces` | `current`, `list`, `trash`, `get`, `create`, `update`, `delete`, `restore` |
+| `instance` | `tokens.list`, `tokens.create`, `tokens.revoke`, `audit.list` |
+
+`databases` also has `move`, to put a database in another workspace.
+
+## Workspaces
+
+Every call above acts in one [workspace](/docs/concepts/workspaces/): the token's own. Code that uses a workspace token needs nothing extra, and its `databases.create` and `buckets.create` make things only that workspace sees.
+
+An instance token belongs to no workspace. It sets workspaces up, and names one to work inside it:
+
+```ts
+import { createClient } from "@lumbung/client"
+
+const admin = createClient({ url: "http://127.0.0.1:4870", token: process.env.LUMBUNG_TOKEN! })
+
+await admin.workspaces.create("agent", { maxDatabases: 20, maxObjectBytes: 5 * 1024 ** 3 })
+// The workspace's first token, made by naming the workspace.
+const made = await admin.workspace("agent").tokens.create({ name: "agent", access: "admin" })
+
+// The workspace's own token: no workspace option, and nothing else in reach.
+const agent = createClient({ url: "http://127.0.0.1:4870", token: made.token })
+await agent.databases.create("notes")
+await agent.database("notes").query("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)")
+const mine = await agent.workspaces.current()
+console.log(mine.name, mine.usage?.databases, (await agent.databases.list()).data.map((d) => d.name))
+```
+
+| Call | What it does |
+|---|---|
+| `createClient({ workspace })`, `client.workspace(name)` | Act in a workspace by name or id. A workspace token can only name its own; any other answers `workspace_not_found`. |
+| `workspaces.current()` | The workspace this client acts in. `limits` and `usage` are only there for a token that reaches the whole workspace. |
+| `workspaces.create(name, limits)`, `update`, `delete`, `restore`, `trash` | Need an instance admin token. `delete` moves the workspace to the trash with everything in it. |
+| `databases.move(db, workspace)`, `buckets.move(bucket, workspace)` | Need an instance admin token. Every token that reached the moved database or bucket is revoked. |
+| `instance.tokens.create({ name, access })` | An instance token. `tokens.create` never makes one. |
+| `instance.audit.list({ workspace })` | The log of every workspace and of the instance. |
+
+Upgrading from 0.1: `tokens.create` without a target used to make an instance token and now makes a workspace token, `audit.list` is the workspace's log, and `tokens.list` no longer holds instance tokens. The package's `CHANGELOG.md` has the full list.
 
 Lists return `{ data, nextCursor }`; pass `{ cursor: nextCursor }` for the next page. `import(db, branch, data, { format, mode })` and `download(db, branch, format)` move whole databases. The request and response types are generated from the [REST API](/docs/reference/rest-api/)'s OpenAPI document and exported from the package.
 

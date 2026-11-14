@@ -11,35 +11,29 @@ Every instance starts with one workspace, named `default`. If you never make ano
 
 ## Make a workspace and its first token
 
-Making a workspace takes an instance admin token, such as the one you logged in with. So does making the workspace's first token, through a URL that names the workspace:
+Making a workspace takes an instance admin token, such as the one you logged in with. So does making the workspace's first token, with `--workspace` to say where:
 
 ```sh
-curl -s -X POST http://127.0.0.1:4870/v1/workspaces \
-  -H "Authorization: Bearer $LUMBUNG_TOKEN" -H "Content-Type: application/json" \
-  -d '{"name": "palui"}'
-
-PALUI_TOKEN=$(curl -s -X POST http://127.0.0.1:4870/v1/workspaces/palui/tokens \
-  -H "Authorization: Bearer $LUMBUNG_TOKEN" -H "Content-Type: application/json" \
-  -d '{"name": "agent", "access": "admin"}' | jq -r .token)
-echo "$PALUI_TOKEN" > palui.token
+lumbung workspace create palui
+lumbung token create --name agent --access admin --workspace palui > palui.token
 ```
 
-From here the workspace runs itself. Its token creates what it needs on the usual URLs, with no workspace in them:
+From here the workspace runs itself. Its token creates what it needs with the usual commands and URLs, with no workspace in them:
 
 ```sh
-PALUI_TOKEN=$(cat palui.token)
-curl -s -X POST http://127.0.0.1:4870/v1/databases \
-  -H "Authorization: Bearer $PALUI_TOKEN" -H "Content-Type: application/json" \
-  -d '{"name": "notes"}' | jq -r .name
-
-curl -s -X POST http://127.0.0.1:4870/v1/buckets \
-  -H "Authorization: Bearer $PALUI_TOKEN" -H "Content-Type: application/json" \
-  -d '{"name": "files"}' | jq -r .name
-
-curl -s http://127.0.0.1:4870/v1/databases -H "Authorization: Bearer $PALUI_TOKEN" | jq -r '.data[].name'
+export LUMBUNG_TOKEN=$(cat palui.token)
+lumbung db create notes
+lumbung bucket create files
+lumbung db list
 ```
 
-The last command prints `notes` and nothing else. The `app` database in the default workspace isn't in the list, and asking for it by name or by id answers `database_not_found`, the same as a database that doesn't exist.
+The list holds `notes` and nothing else. The `app` database in the default workspace isn't in it, and asking for it by name or by id answers `database_not_found`, the same as a database that doesn't exist.
+
+The same token works unchanged with the SDK, an S3 client, the libSQL client and MCP. Over REST:
+
+```sh
+curl -s http://127.0.0.1:4870/v1/databases -H "Authorization: Bearer $(cat palui.token)" | jq -r '.data[].name'
+```
 
 ## What a workspace token can do
 
@@ -81,25 +75,24 @@ To name a workspace, put `/v1/workspaces/<workspace>` in front. The name or the 
 | `/libsql/notes/main/` | `/v1/workspaces/palui/libsql/notes/main/` |
 | `/mcp` | `/v1/workspaces/palui/mcp` |
 
-An instance token uses these to work inside a workspace. A public link to a bucket outside the default workspace uses the S3 one. A workspace token may use them for its own workspace, where they mean the same as the short URL. For any other workspace it gets `workspace_not_found`, the answer a workspace that doesn't exist gets.
+An instance token uses these to work inside a workspace. The CLI's `--workspace` flag (or `LUMBUNG_WORKSPACE`) and the SDK's `workspace` option add the prefix for you. A public link to a bucket outside the default workspace uses the S3 one. A workspace token may use them for its own workspace, where they mean the same as the short URL. For any other workspace it gets `workspace_not_found`, the answer a workspace that doesn't exist gets.
 
 ## Limits
 
 Each workspace has its own limits, on top of the [instance limits](/docs/concepts/limits/): how many databases (counting its trash) and buckets it may hold, and how many bytes its databases and its buckets may take. `0` means no limit of its own.
 
 ```sh
-curl -s -X PATCH http://127.0.0.1:4870/v1/workspaces/palui \
-  -H "Authorization: Bearer $LUMBUNG_TOKEN" -H "Content-Type: application/json" \
-  -d '{"max_databases": 50, "max_buckets": 10}' | jq .limits
+lumbung workspace create reports --max-databases 5 --max-object-bytes 1GiB
+lumbung workspace update palui --max-databases 50 --max-buckets 10
 ```
 
 A new workspace gets the limits from the request, or from the `LUMBUNG_WORKSPACE_MAX_*` [settings](/docs/reference/configuration/). The default workspace starts with none. A workspace also holds at most `LUMBUNG_MAX_TOKENS_PER_WORKSPACE` live tokens. A write past a byte limit fails with `workspace_quota_exceeded`, and nothing of it is kept.
 
-`GET /v1/workspace` shows the workspace a token is in. A token for the whole workspace also gets its limits and what it uses now. A token for one database or bucket doesn't: the totals would tell it what else the workspace holds.
+`lumbung workspace show` (`GET /v1/workspace`) shows the workspace a token is in. A token for the whole workspace also gets its limits and what it uses now. A token for one database or bucket doesn't: the totals would tell it what else the workspace holds.
 
 ```sh
-PALUI_TOKEN=$(cat palui.token)
-curl -s http://127.0.0.1:4870/v1/workspace -H "Authorization: Bearer $PALUI_TOKEN" | jq '{name, limits, usage}'
+export LUMBUNG_TOKEN=$(cat palui.token)
+lumbung workspace show
 ```
 
 ## Deleting and restoring
@@ -107,21 +100,17 @@ curl -s http://127.0.0.1:4870/v1/workspace -H "Authorization: Bearer $PALUI_TOKE
 Deleting a workspace takes an instance admin and moves it to the trash:
 
 ```sh
-curl -s -X POST http://127.0.0.1:4870/v1/workspaces \
-  -H "Authorization: Bearer $LUMBUNG_TOKEN" -H "Content-Type: application/json" \
-  -d '{"name": "scratch"}' | jq -r .name
-curl -s -X DELETE http://127.0.0.1:4870/v1/workspaces/scratch \
-  -H "Authorization: Bearer $LUMBUNG_TOKEN" | jq -r .purge_after
+lumbung workspace create scratch
+lumbung workspace delete scratch --yes
 ```
 
 At once its tokens stop working, its databases and buckets stop answering (public links and presigned URLs too), and open connections are closed. A token of a deleted workspace gets the answer a token that doesn't exist gets. The name is free to reuse.
 
-Until the trash retention passes (`LUMBUNG_TRASH_RETENTION`, 7 days by default) it can be restored with everything in it, tokens included. Pass a `name` if the old one was taken in the meantime:
+Until the trash retention passes (`LUMBUNG_TRASH_RETENTION`, 7 days by default) it can be restored with everything in it, tokens included. Pass `--name` if the old one was taken in the meantime:
 
 ```sh
-curl -s "http://127.0.0.1:4870/v1/workspaces?trashed=true" -H "Authorization: Bearer $LUMBUNG_TOKEN" | jq -r '.data[].name'
-curl -s -X POST http://127.0.0.1:4870/v1/workspaces/scratch/restore \
-  -H "Authorization: Bearer $LUMBUNG_TOKEN" -H "Content-Type: application/json" -d '{}' | jq -r .name
+lumbung workspace trash
+lumbung workspace restore scratch
 ```
 
 After the retention the workspace is removed for good: its databases, snapshots, objects and tokens. Its audit entries stay in the instance log. The default workspace can't be deleted.
@@ -131,12 +120,10 @@ After the retention the workspace is removed for good: its databases, snapshots,
 An instance admin can move a database or a bucket into another workspace, for example to give something that started in the default workspace a workspace of its own:
 
 ```sh
-curl -s -X POST http://127.0.0.1:4870/v1/databases/app/move \
-  -H "Authorization: Bearer $LUMBUNG_TOKEN" -H "Content-Type: application/json" \
-  -d '{"workspace": "palui"}' | jq -r .workspace_id
+lumbung db move app --to palui --yes
 ```
 
-The URL names the database where it is now (here the default workspace; use `/v1/workspaces/<workspace>/databases/<db>/move` for another). `POST /v1/buckets/<bucket>/move` does the same for a bucket.
+The command acts where the database is now (here the default workspace; add `--workspace` for another). `lumbung bucket move` does the same for a bucket. Over REST they are `POST /v1/databases/<db>/move` and `POST /v1/buckets/<bucket>/move` with `{"workspace": "palui"}`.
 
 - The move fails if the name is taken in the new workspace, or one of its limits would be passed.
 - Every token that reached the database or bucket is revoked, whole: a token of the old workspace can't reach across. Make new ones in the new workspace.

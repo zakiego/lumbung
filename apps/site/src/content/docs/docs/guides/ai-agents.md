@@ -41,13 +41,8 @@ In the dashboard, the same thing is **Tokens**, **New token**, then **Add anothe
 An agent that should decide for itself what it keeps gets its own [workspace](/docs/concepts/workspaces/). With an admin token for it, the agent creates as many databases and buckets as it needs (`create_database`, `create_bucket`) and uses them, and nothing outside the workspace exists as far as it can tell. The workspace's limits bound how much it can take.
 
 ```sh
-curl -s -X POST http://127.0.0.1:4870/v1/workspaces \
-  -H "Authorization: Bearer $LUMBUNG_TOKEN" -H "Content-Type: application/json" \
-  -d '{"name": "agent", "max_databases": 20, "max_buckets": 5}' | jq -r .id
-
-curl -s -X POST http://127.0.0.1:4870/v1/workspaces/agent/tokens \
-  -H "Authorization: Bearer $LUMBUNG_TOKEN" -H "Content-Type: application/json" \
-  -d '{"name": "agent", "access": "admin"}' | jq -r .token
+lumbung workspace create agent --max-databases 20 --max-buckets 5 --max-database-bytes 2GiB --max-object-bytes 5GiB
+lumbung token create --name agent --access admin --workspace agent
 ```
 
 The token works on the same MCP URL as any other. The agent doesn't need to know its workspace's name. `get_workspace` tells it the limits and how much is used, `delete_database` moves a database to the trash (`restore_database` brings it back for 7 days), and `delete_bucket` removes an empty bucket.

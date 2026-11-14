@@ -11,6 +11,8 @@ description: What changed in each version of Lumbung.
 - **Workspace tokens**: read, write or admin on everything in one workspace. Admin creates and deletes databases and buckets, which used to need an instance admin.
 - **Addressing**: URLs don't change for a workspace token. `/v1/workspaces/{workspace}/...` names a workspace on REST, the S3 API, the libSQL endpoint and MCP.
 - **Deleting a workspace** moves it to the trash with everything in it, restorable for 7 days. **Moving** a database or a bucket to another workspace takes an instance admin and revokes the tokens that reached it.
+- **SDK** `@lumbung/client` 0.2.0: a `workspace` option, `client.workspaces`, `client.instance`, and `move` on databases and buckets. It has breaking changes, listed in the package's `CHANGELOG.md`.
+- **CLI**: `lumbung workspace list|show|create|update|delete|restore|trash`, `--workspace` (or `LUMBUNG_WORKSPACE`, or saved by `lumbung login --workspace`), `db move`, `bucket move`, and `--instance` on the token commands.
 - **MCP**: `get_workspace`, `delete_database`, `restore_database`, `delete_bucket`, `restore_snapshot` and `delete_snapshot`.
 - **Limits per workspace** on databases, buckets, the bytes its databases and its buckets take, and live tokens. An audit log per workspace.
 - The database list no longer tells a token limited to some branches about the branches it can't reach.
