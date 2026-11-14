@@ -82,10 +82,10 @@ func (a *app) printResult(r *client.Result, took time.Duration) {
 			rows[i] = cells
 		}
 		a.table(header, rows)
-		fmt.Fprintf(a.errOut, "%d rows (%s)\n", len(r.Rows), took.Round(time.Millisecond))
+		fmt.Fprintf(a.errOut, "%s (%s)\n", count(len(r.Rows), "row"), took.Round(time.Millisecond))
 		return
 	}
-	fmt.Fprintf(a.errOut, "OK, %d rows changed (%s)\n", r.RowsAffected, took.Round(time.Millisecond))
+	fmt.Fprintf(a.errOut, "OK, %s changed (%s)\n", count(int(r.RowsAffected), "row"), took.Round(time.Millisecond))
 }
 
 func (a *app) queryCmd() *cobra.Command {
@@ -450,4 +450,12 @@ func (a *app) migrateCmd() *cobra.Command {
 	}
 	cmd.AddCommand(apply, status)
 	return cmd
+}
+
+// count says "1 row" or "3 rows".
+func count(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s", noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
