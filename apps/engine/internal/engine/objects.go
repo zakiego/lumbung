@@ -220,21 +220,28 @@ type reservation struct {
 }
 
 // reserveObjectBytes claims room for n new bytes in a bucket and in the
-// instance's object storage. credit is space the write frees (the object it
-// replaces). Release the claim when the write fails, or record the write
-// with settle, which drops the claim in the same step so the bytes are
-// never counted twice.
-func (e *Engine) reserveObjectBytes(ctx context.Context, bucketID string, n, credit int64) (*reservation, error) {
+// instance's object storage. credit returns the space the write frees (the
+// object or part it replaces); it is read under the same lock as the usage,
+// so it can't be stale against it. Release the claim when the write fails,
+// or record the write with settle, which drops the claim in the same step so
+// the bytes are never counted twice.
+func (e *Engine) reserveObjectBytes(ctx context.Context, bucketID string, n int64, credit func() int64) (*reservation, error) {
 	e.objMu.Lock()
 	defer e.objMu.Unlock()
 	used, total, err := e.meta.ObjectUsage(ctx, bucketID)
 	if err != nil {
 		return nil, err
 	}
-	if used-credit+e.objReserved[bucketID]+n > e.cfg.MaxBucketBytes {
+	var freed int64
+	if credit != nil {
+		freed = credit()
+	}
+	used -= freed
+	total -= freed
+	if used+e.objReserved[bucketID]+n > e.cfg.MaxBucketBytes {
 		return nil, apierr.Newf(apierr.BucketSizeLimit, "%d more bytes would pass the %d byte bucket size limit", n, e.cfg.MaxBucketBytes)
 	}
-	if total-credit+e.objReservedTotal+n > e.cfg.MaxObjectStorageBytes {
+	if total+e.objReservedTotal+n > e.cfg.MaxObjectStorageBytes {
 		return nil, apierr.Newf(apierr.ObjectQuotaExceeded, "%d more bytes would pass the %d byte object storage quota", n, e.cfg.MaxObjectStorageBytes)
 	}
 	e.objReserved[bucketID] += n
@@ -279,13 +286,20 @@ func (r *reservation) settle(record func() error) error {
 }
 
 // checkDiskFor refuses a write of n bytes that would leave less free space
-// than the configured minimum.
-func (e *Engine) checkDiskFor(n int64) error {
+// than the configured minimum, counting the bytes other writes in flight
+// have claimed (own is this write's claim, already in the total).
+func (e *Engine) checkDiskFor(n int64, own *reservation) error {
 	free, err := e.freeBytes(e.layout.Root)
 	if err != nil {
 		return fmt.Errorf("engine: free disk: %w", err)
 	}
-	if free-n < e.cfg.MinFreeDiskBytes {
+	e.objMu.Lock()
+	others := e.objReservedTotal
+	if own != nil && !own.done {
+		others -= own.n
+	}
+	e.objMu.Unlock()
+	if free-others-n < e.cfg.MinFreeDiskBytes {
 		return apierr.Newf(apierr.DiskFull, "writing %d bytes would leave less than %d bytes free on the data disk", n, e.cfg.MinFreeDiskBytes)
 	}
 	return nil
@@ -346,13 +360,19 @@ func readErr(err error) error {
 	return apierr.New(apierr.IncompleteBody, "the body couldn't be read to the end").WithDetail(err.Error())
 }
 
-// place moves a finished temp file to its blob path, creating the folder.
+// place moves a finished temp file to its blob path, creating the folder,
+// and syncs the folder so the rename survives a power loss before the row
+// that points at it is committed.
 func (e *Engine) place(tmp, bucketID, blobID string) (string, error) {
 	final := e.layout.BlobFile(bucketID, blobID)
-	if err := os.MkdirAll(filepath.Dir(final), 0o700); err != nil {
+	dir := filepath.Dir(final)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	return final, os.Rename(tmp, final)
+	if err := os.Rename(tmp, final); err != nil {
+		return "", err
+	}
+	return final, syncDir(dir)
 }
 
 func (e *Engine) gcAfter() time.Time { return time.Now().Add(e.cfg.ObjectGCDelay) }
@@ -388,16 +408,12 @@ func (e *Engine) PutObject(ctx context.Context, in PutObjectInput) (meta.Object,
 	if in.Size > e.cfg.MaxObjectBytes {
 		return meta.Object{}, apierr.Newf(apierr.ObjectTooLarge, "the object is %d bytes; the limit is %d", in.Size, e.cfg.MaxObjectBytes)
 	}
-	var credit int64
-	if old, err := e.meta.GetObject(ctx, in.BucketID, in.Key); err == nil {
-		credit = old.Size
-	}
-	res, err := e.reserveObjectBytes(ctx, in.BucketID, in.Size, credit)
+	res, err := e.reserveObjectBytes(ctx, in.BucketID, in.Size, e.objectCredit(ctx, in.BucketID, in.Key))
 	if err != nil {
 		return meta.Object{}, err
 	}
 	defer res.release()
-	if err := e.checkDiskFor(in.Size); err != nil {
+	if err := e.checkDiskFor(in.Size, res); err != nil {
 		return meta.Object{}, err
 	}
 	tmp, sum, err := e.writeTemp(in.Body, in.Size)
@@ -415,10 +431,21 @@ func (e *Engine) PutObject(ctx context.Context, in PutObjectInput) (meta.Object,
 	})
 }
 
+// objectCredit returns the size of the object a write replaces, for the
+// quota check.
+func (e *Engine) objectCredit(ctx context.Context, bucketID, key string) func() int64 {
+	return func() int64 {
+		if old, err := e.meta.GetObject(ctx, bucketID, key); err == nil {
+			return old.Size
+		}
+		return 0
+	}
+}
+
 // commitBlob gives a finished file a blob id, moves it into place and runs
 // record. Placing and recording hold the commit lock shared, so the orphan
 // sweep never sees a placed file before its row. A failed record removes
-// the file.
+// the file; record must only fail when nothing was committed.
 func (e *Engine) commitBlob(ctx context.Context, tmp string, o meta.Object, res *reservation, record func(meta.Object) (meta.Object, error)) (meta.Object, error) {
 	o.BlobID = ids.New(ids.Blob)
 	e.objCommit.RLock()
@@ -534,16 +561,12 @@ func (e *Engine) CopyObject(ctx context.Context, in CopyObjectInput) (meta.Objec
 	if src.Size > e.cfg.MaxObjectBytes {
 		return meta.Object{}, apierr.Newf(apierr.ObjectTooLarge, "the object is %d bytes; the limit is %d", src.Size, e.cfg.MaxObjectBytes)
 	}
-	var credit int64
-	if old, err := e.meta.GetObject(ctx, in.BucketID, in.Key); err == nil {
-		credit = old.Size
-	}
-	res, err := e.reserveObjectBytes(ctx, in.BucketID, src.Size, credit)
+	res, err := e.reserveObjectBytes(ctx, in.BucketID, src.Size, e.objectCredit(ctx, in.BucketID, in.Key))
 	if err != nil {
 		return meta.Object{}, err
 	}
 	defer res.release()
-	tmp, err := e.cloneTemp(e.layout.BlobFile(src.BucketID, src.BlobID), src.Size)
+	tmp, err := e.cloneTemp(e.layout.BlobFile(src.BucketID, src.BlobID), src.Size, res)
 	if err != nil {
 		return meta.Object{}, err
 	}
@@ -557,12 +580,12 @@ func (e *Engine) CopyObject(ctx context.Context, in CopyObjectInput) (meta.Objec
 
 // cloneTemp makes a temp file with the same content as src: a hard link
 // when possible, otherwise a copy (which needs the disk space).
-func (e *Engine) cloneTemp(src string, size int64) (string, error) {
+func (e *Engine) cloneTemp(src string, size int64, res *reservation) (string, error) {
 	tmp := filepath.Join(e.layout.TmpDir(), "obj-"+ids.New(ids.Blob))
 	if err := os.Link(src, tmp); err == nil {
 		return tmp, nil
 	}
-	if err := e.checkDiskFor(size); err != nil {
+	if err := e.checkDiskFor(size, res); err != nil {
 		return "", err
 	}
 	in, err := os.Open(src)

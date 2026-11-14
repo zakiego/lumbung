@@ -127,7 +127,7 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*Engine, er
 	} else if err := e.removeOrphans(ctx); err != nil {
 		_ = e.meta.Close()
 		return nil, err
-	} else if err := e.sweepObjects(ctx, time.Now(), 0); err != nil {
+	} else if err := e.sweepObjects(ctx, time.Now(), cfg.ObjectGCDelay); err != nil {
 		_ = e.meta.Close()
 		return nil, err
 	}

@@ -514,8 +514,13 @@ func TestCrashLeftoversRemovedAtStart(t *testing.T) {
 	b := mustBucket(t, e, "files")
 	o := mustPut(t, e, b.ID, "k", "v")
 	orphan := e.layout.BlobFile(b.ID, "ob_bbbbbbbbbbbbbbbbbbbb")
+	young := e.layout.BlobFile(b.ID, "ob_cccccccccccccccccccc")
 	_ = os.MkdirAll(filepath.Dir(orphan), 0o700)
+	_ = os.MkdirAll(filepath.Dir(young), 0o700)
 	_ = os.WriteFile(orphan, []byte("x"), 0o600)
+	_ = os.WriteFile(young, []byte("x"), 0o600)
+	old := time.Now().Add(-2 * cfg.ObjectGCDelay)
+	_ = os.Chtimes(orphan, old, old)
 	if err := e.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +530,10 @@ func TestCrashLeftoversRemovedAtStart(t *testing.T) {
 	}
 	defer e.Close()
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
-		t.Fatal("orphan kept across restart")
+		t.Fatal("old orphan kept across restart")
+	}
+	if _, err := os.Stat(young); err != nil {
+		t.Fatal("an orphan younger than the GC delay was removed at start")
 	}
 	if _, err := os.Stat(e.layout.BlobFile(b.ID, o.BlobID)); err != nil {
 		t.Fatal("live file removed at start")

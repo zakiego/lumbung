@@ -339,23 +339,35 @@ type BlobRel func(bucketID, blobID string) string
 // PutObject records an object, replacing any object with the same key. The
 // replaced object's file is queued for removal after gcAfter. It fails with
 // bucket_not_found when the bucket was deleted meanwhile; the caller then
-// removes the new file.
+// removes the new file. It returns the record as written; an error means
+// nothing was committed.
 func (s *Store) PutObject(ctx context.Context, o Object, rel BlobRel, gcAfter time.Time) (Object, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Object{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.putObjectTx(ctx, tx, o, rel, gcAfter); err != nil {
+	out, err := s.putObjectTx(ctx, tx, o, rel, gcAfter)
+	if err != nil {
 		return Object{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return Object{}, err
-	}
-	return s.GetObject(ctx, o.BucketID, o.Key)
+	return out, tx.Commit()
 }
 
-func (s *Store) putObjectTx(ctx context.Context, tx *sql.Tx, o Object, rel BlobRel, gcAfter time.Time) error {
+// putObjectTx writes an object's rows and returns the record as written.
+func (s *Store) putObjectTx(ctx context.Context, tx *sql.Tx, o Object, rel BlobRel, gcAfter time.Time) (Object, error) {
+	ts := now()
+	o.ModifiedAt = *parseTime(sql.NullString{String: ts, Valid: true})
+	if o.Headers == nil {
+		o.Headers = map[string]string{}
+	}
+	if o.Metadata == nil {
+		o.Metadata = map[string]string{}
+	}
+	return o, s.writeObjectRows(ctx, tx, o, ts, rel, gcAfter)
+}
+
+func (s *Store) writeObjectRows(ctx context.Context, tx *sql.Tx, o Object, ts string, rel BlobRel, gcAfter time.Time) error {
 	var one int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM buckets WHERE id = ?`, o.BucketID).Scan(&one); errors.Is(err, sql.ErrNoRows) {
 		return apierr.New(apierr.BucketNotFound, "the bucket was deleted")
@@ -379,7 +391,7 @@ INSERT INTO objects (`+objectCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (bucket_id, key) DO UPDATE SET blob_id = excluded.blob_id, size = excluded.size, etag = excluded.etag,
   content_type = excluded.content_type, headers = excluded.headers, metadata = excluded.metadata,
   parts = excluded.parts, modified_at = excluded.modified_at`,
-		o.BucketID, o.Key, o.BlobID, o.Size, o.ETag, o.ContentType, jsonText(o.Headers), jsonText(o.Metadata), o.Parts, now()); err != nil {
+		o.BucketID, o.Key, o.BlobID, o.Size, o.ETag, o.ContentType, jsonText(o.Headers), jsonText(o.Metadata), o.Parts, ts); err != nil {
 		return err
 	}
 	count := int64(1)
@@ -681,13 +693,11 @@ func (s *Store) CompleteUpload(ctx context.Context, uploadID string, o Object, r
 	if n, _ := res.RowsAffected(); n == 0 {
 		return Object{}, apierr.New(apierr.UploadNotFound, "no such multipart upload")
 	}
-	if err := s.putObjectTx(ctx, tx, o, rel, gcAfter); err != nil {
+	out, err := s.putObjectTx(ctx, tx, o, rel, gcAfter)
+	if err != nil {
 		return Object{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return Object{}, err
-	}
-	return s.GetObject(ctx, o.BucketID, o.Key)
+	return out, tx.Commit()
 }
 
 // AbortUpload ends an upload and drops its parts. It reports whether the

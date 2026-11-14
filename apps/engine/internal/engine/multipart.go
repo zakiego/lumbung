@@ -8,8 +8,10 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -78,12 +80,18 @@ func (e *Engine) UploadPart(ctx context.Context, in UploadPartInput) (string, er
 	if in.Size > MaxPartBytes || in.Size > e.cfg.MaxObjectBytes {
 		return "", apierr.Newf(apierr.ObjectTooLarge, "the part is %d bytes; the limit is %d", in.Size, min(int64(MaxPartBytes), e.cfg.MaxObjectBytes))
 	}
-	res, err := e.reserveObjectBytes(ctx, u.BucketID, in.Size, 0)
+	credit := func() int64 {
+		if ps, err := e.meta.ListParts(ctx, u.ID, in.Number-1, 1); err == nil && len(ps) == 1 && ps[0].Number == in.Number {
+			return ps[0].Size // a part sent again replaces the old one
+		}
+		return 0
+	}
+	res, err := e.reserveObjectBytes(ctx, u.BucketID, in.Size, credit)
 	if err != nil {
 		return "", err
 	}
 	defer res.release()
-	if err := e.checkDiskFor(in.Size); err != nil {
+	if err := e.checkDiskFor(in.Size, res); err != nil {
 		return "", err
 	}
 	tmp, sum, err := e.writeTemp(in.Body, in.Size)
@@ -166,7 +174,7 @@ func (e *Engine) CompleteUpload(ctx context.Context, uploadID, bucketID, key str
 	if total > e.cfg.MaxObjectBytes {
 		return meta.Object{}, apierr.Newf(apierr.ObjectTooLarge, "the object would be %d bytes; the limit is %d", total, e.cfg.MaxObjectBytes)
 	}
-	if err := e.checkDiskFor(total); err != nil {
+	if err := e.checkDiskFor(total, nil); err != nil {
 		return meta.Object{}, err
 	}
 	tmp, err := e.concatParts(ctx, u.ID, parts, total)
@@ -198,7 +206,9 @@ func (e *Engine) concatParts(ctx context.Context, uploadID string, parts []meta.
 	}()
 	for _, p := range parts {
 		f, err := os.Open(filepath.Join(e.layout.UploadDir(uploadID), filepath.Base(p.File)))
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", apierr.New(apierr.UploadNotFound, "the multipart upload was aborted or expired meanwhile")
+		} else if err != nil {
 			return "", fmt.Errorf("engine: part %d of %s: %w", p.Number, uploadID, err)
 		}
 		files = append(files, f)
@@ -316,6 +326,7 @@ func (e *Engine) runRemovals(ctx context.Context, now time.Time) {
 			e.log.Error("list due removals", "err", err)
 			return
 		}
+		progress := 0
 		for _, rel := range due {
 			if validRemoval(rel) {
 				if err := os.Remove(filepath.Join(e.layout.Root, filepath.FromSlash(rel))); err != nil && !os.IsNotExist(err) {
@@ -329,8 +340,11 @@ func (e *Engine) runRemovals(ctx context.Context, now time.Time) {
 				e.log.Error("forget removal", "path", rel, "err", err)
 				return
 			}
+			progress++
 		}
-		if len(due) < 500 || ctx.Err() != nil {
+		// A full batch that only failed would come back unchanged: try again
+		// on the next tick instead of spinning.
+		if len(due) < 500 || progress == 0 || ctx.Err() != nil {
 			return
 		}
 	}

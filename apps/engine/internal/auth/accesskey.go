@@ -108,12 +108,30 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
+	// Synced before and after the rename: a torn key file would make every
+	// access key secret unreadable.
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(hex.EncodeToString(key)+"\n"), 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := f.WriteString(hex.EncodeToString(key) + "\n"); err != nil {
+		f.Close()
+		return nil, err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return nil, err
+	}
+	if err := f.Close(); err != nil {
 		return nil, err
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return nil, err
+	}
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = d.Sync()
+		d.Close()
 	}
 	return key, nil
 }
