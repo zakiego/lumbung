@@ -21,7 +21,7 @@ export class AccessError extends Error {
 }
 
 export async function viewerFromRequest(request: Request): Promise<Viewer | null> {
-  const auth = await getAuth()
+  const auth = await getAuth(request)
   const session = await auth.api.getSession({ headers: request.headers })
   if (!session) return null
   const u = session.user as { id: string; name: string; email: string; role?: unknown }

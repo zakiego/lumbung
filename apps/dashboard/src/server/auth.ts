@@ -14,8 +14,11 @@ import { getDb, migrateOwn } from "./db"
 export const COOKIE_PREFIX = "lumbung"
 const CLIENT_IP_HEADER = "x-lumbung-client-ip"
 
-function create() {
-  const url = new URL(config().publicUrl)
+function create(origin: string) {
+  const url = new URL(origin)
+  // Passkeys always belong to the dashboard URL. On an extra origin the
+  // passkey endpoints are refused before they get here (see handleAuth).
+  const main = new URL(config().publicUrl)
   return betterAuth({
     appName: "Lumbung",
     baseURL: url.origin,
@@ -50,40 +53,75 @@ function create() {
         "/passkey/generate-register-options": { window: 60, max: 10 },
       },
     },
-    plugins: [passkey({ rpID: url.hostname, rpName: "Lumbung", origin: url.origin }), tanstackStartCookies()],
+    plugins: [passkey({ rpID: main.hostname, rpName: "Lumbung", origin: main.origin }), tanstackStartCookies()],
   })
 }
 
 export type Auth = ReturnType<typeof create>
 export type SessionUser = Auth["$Infer"]["Session"]["user"]
 
-let instance: Auth | undefined
-let ready: Promise<Auth> | undefined
+// One instance per origin, since Better Auth fixes the cookie names and the
+// Secure flag per instance: an http extra origin can't use the __Secure-
+// cookie the https dashboard URL sets. They all share one database, and the
+// memory rate limiter is module-wide, keyed by client address and path.
+const instances = new Map<string, Auth>()
+let ready: Promise<void> | undefined
 
-/** The auth instance, after its tables exist. Migrations run once per process. */
-export function getAuth(): Promise<Auth> {
+function instanceFor(origin: string): Auth {
+  let auth = instances.get(origin)
+  if (!auth) {
+    auth = create(origin)
+    instances.set(origin, auth)
+  }
+  return auth
+}
+
+/**
+ * The auth instance for the origin a request was sent to (the dashboard URL
+ * when there's no request), after its tables exist. Migrations run once per
+ * process.
+ */
+export async function getAuth(request?: Request): Promise<Auth> {
   ready ??= (async () => {
-    const auth = create()
-    const { runMigrations } = await getMigrations(auth.options)
+    const { runMigrations } = await getMigrations(instanceFor(config().publicUrl).options)
     await runMigrations()
     migrateOwn(getDb())
-    instance = auth
-    return auth
   })().catch((e) => {
     ready = undefined
     throw e
   })
-  return ready
+  await ready
+  return instanceFor(request ? requestOrigin(request) : config().publicUrl)
 }
 
 /** Only for tests. */
 export function resetAuth() {
-  instance = undefined
+  instances.clear()
   ready = undefined
 }
 
-export function authInstance(): Auth | undefined {
-  return instance
+/**
+ * The origin a request was sent to, by its Host header: the extra origin with
+ * that host, otherwise the dashboard URL. X-Forwarded-Host is never read.
+ */
+export function requestOrigin(request: Request): string {
+  const cfg = config()
+  if (cfg.extraOrigins.length === 0) return cfg.publicUrl
+  let host = request.headers.get("host")
+  if (!host) {
+    try {
+      host = new URL(request.url).host
+    } catch {
+      return cfg.publicUrl
+    }
+  }
+  host = host.toLowerCase()
+  return cfg.extraOrigins.find((o) => new URL(o).host === host) ?? cfg.publicUrl
+}
+
+/** Passkeys are bound to the dashboard URL, so they only work on a request sent there. */
+export function passkeysAvailable(request: Request): boolean {
+  return requestOrigin(request) === config().publicUrl
 }
 
 // Endpoints the browser may reach. Everything else, sign-up included, is 404.
@@ -97,25 +135,30 @@ const ALLOWED = [
   /^\/error$/,
 ]
 
-export function blockedAuthPath(request: Request): boolean {
+/** The endpoint under AUTH_BASE, normalized, or null for a path outside it. */
+function authEndpoint(request: Request): string | null {
   let path = new URL(request.url).pathname
   try {
     path = decodeURIComponent(path)
   } catch {
-    return true
+    return null
   }
   path = path.replace(/\/{2,}/g, "/").toLowerCase()
-  if (!path.startsWith(`${AUTH_BASE}/`)) return true
-  const rest = path.slice(AUTH_BASE.length).replace(/\/$/, "")
-  return !ALLOWED.some((re) => re.test(rest))
+  if (!path.startsWith(`${AUTH_BASE}/`)) return null
+  return path.slice(AUTH_BASE.length).replace(/\/$/, "")
 }
 
-/** True for a write from another site. Better Auth, server functions and the transfer routes all use this one check. */
+export function blockedAuthPath(request: Request): boolean {
+  const rest = authEndpoint(request)
+  return rest === null || !ALLOWED.some((re) => re.test(rest))
+}
+
+/** True for a write from another site, or from an origin other than the one it was sent to. Better Auth, server functions and the transfer routes all use this one check. */
 export function crossOriginWrite(request: Request): boolean {
   if (request.method === "GET" || request.method === "HEAD" || request.method === "OPTIONS") return false
   if (request.headers.get("sec-fetch-site") === "cross-site") return true
   const origin = request.headers.get("origin")
-  return !!origin && origin !== config().publicUrl
+  return !!origin && origin !== requestOrigin(request)
 }
 
 /** The socket address, as the Node server (srvx) puts it on the request. Same source as Start's getRequestIP. */
@@ -168,7 +211,11 @@ async function withClientIp(request: Request): Promise<Request> {
 export async function handleAuth(request: Request): Promise<Response> {
   if (blockedAuthPath(request)) return Response.json({ code: "NOT_FOUND", message: "Not found" }, { status: 404 })
   if (crossOriginWrite(request)) return Response.json({ code: "INVALID_ORIGIN", message: "Invalid origin" }, { status: 403 })
-  const auth = await getAuth()
+  if (authEndpoint(request)?.startsWith("/passkey/") && !passkeysAvailable(request)) {
+    const message = `Passkeys only work on ${config().publicUrl}. Sign in with your password here.`
+    return Response.json({ code: "PASSKEY_UNAVAILABLE", message }, { status: 403 })
+  }
+  const auth = await getAuth(request)
   return auth.handler(await withClientIp(request))
 }
 
