@@ -3,14 +3,14 @@ import { AppShell } from "@/components/app/shell"
 import { listBuckets } from "@/fns/buckets"
 import { listDatabases } from "@/fns/databases"
 import { APP_BASE } from "@/lib/paths"
-import { loadSession } from "@/lib/session-cache"
+import { loadSession, primeSession } from "@/lib/session-cache"
 
 export const Route = createFileRoute("/_app")({
   beforeLoad: async ({ location }) => {
     const session = await loadSession()
     if (session.needsSetup) throw redirect({ to: "/setup" })
     if (!session.viewer) throw redirect({ to: "/login", search: { next: `${APP_BASE}${location.href}` } })
-    return { viewer: session.viewer }
+    return { viewer: session.viewer, engineUrl: session.engineUrl ?? "" }
   },
   // The sidebar still renders when the engine is down; pages show their own errors.
   loader: async () => {
@@ -21,8 +21,9 @@ export const Route = createFileRoute("/_app")({
 })
 
 function AppLayout() {
-  const { viewer } = Route.useRouteContext()
+  const { viewer, engineUrl } = Route.useRouteContext()
   const { databases, buckets } = Route.useLoaderData()
+  primeSession({ viewer, needsSetup: false, engineUrl })
   return (
     <AppShell viewer={viewer} databases={databases} buckets={buckets}>
       <Outlet />
