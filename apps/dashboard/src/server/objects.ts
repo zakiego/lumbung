@@ -78,14 +78,18 @@ export async function downloadObject(request: Request, deps: ObjectDeps = defaul
   }
   const base = t.key.split("/").pop() || "download"
   const ascii = base.replace(/[^\w.-]/g, "_")
+  // RFC 5987 leaves ' ( ) * out of attr-char too.
+  const encoded = encodeURIComponent(base).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
   const headers = new Headers({
     "content-type": "application/octet-stream",
-    "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(base)}`,
+    "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`,
     "content-security-policy": "sandbox; default-src 'none'",
     "x-content-type-options": "nosniff",
     "cache-control": "no-store",
   })
+  // fetch decodes a stored Content-Encoding (gzip, br), so the engine's
+  // length is the encoded one; only pass it on for bodies left as they are.
   const length = obj.response.headers.get("content-length")
-  if (length) headers.set("content-length", length)
+  if (length && !obj.response.headers.get("content-encoding")) headers.set("content-length", length)
   return new Response(obj.response.body, { status: 200, headers })
 }

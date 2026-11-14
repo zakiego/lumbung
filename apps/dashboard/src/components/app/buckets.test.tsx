@@ -73,6 +73,11 @@ test("object table: read-only sees no delete, empty states, 1000 rows", async ()
   expect(many.container.querySelectorAll("tbody tr")).toHaveLength(1000)
 })
 
+test("object table: a folder marker key isn't listed", async () => {
+  await render(<ObjectTable bucket="docs" prefix="reports/" objects={[obj("reports/"), obj("reports/a.pdf")]} prefixes={[]} canWrite onDelete={noop} />)
+  expect(document.querySelectorAll("tbody tr")).toHaveLength(1)
+})
+
 test("breadcrumb trail", () => {
   expect(prefixTrail("")).toEqual([])
   expect(prefixTrail("a/b/")).toEqual([

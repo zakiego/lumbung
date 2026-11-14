@@ -17,8 +17,17 @@ import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
 
 export const Route = createFileRoute("/_app/buckets/$bucket/")({
-  validateSearch: z.object({ prefix: z.string().max(1024).optional() }),
+  // A prefix always ends at a folder: "a/b" means the folder "a/".
+  validateSearch: z.object({
+    prefix: z
+      .string()
+      .max(1024)
+      .optional()
+      .transform((p) => (p ? p.slice(0, p.lastIndexOf("/") + 1) || undefined : undefined)),
+  }),
   loaderDeps: ({ search }) => ({ prefix: search.prefix ?? "" }),
+  // A new folder is a new page: no state, or a late "Load more", carries over.
+  remountDeps: ({ search }) => ({ prefix: search.prefix ?? "" }),
   loader: ({ params, deps }) => getBucketPage({ data: { bucket: params.bucket, prefix: deps.prefix } }),
   head: ({ params }) => ({ meta: [{ title: pageTitle(params.bucket, "Buckets") }] }),
   component: BucketPage,
@@ -112,8 +121,13 @@ function BucketPage() {
 
   // Later pages load in place, under the first one the loader brought.
   const [more, setMore] = useState<{ objects: ObjectOut[]; prefixes: string[]; cursor: string }>({ objects: [], prefixes: [], cursor: page.nextCursor })
+  const [removed, setRemoved] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(false)
-  useEffect(() => setMore({ objects: [], prefixes: [], cursor: page.nextCursor }), [page])
+  // A reload (after an upload) starts the listing over.
+  useEffect(() => {
+    setMore({ objects: [], prefixes: [], cursor: page.nextCursor })
+    setRemoved(new Set())
+  }, [page])
 
   async function loadMore() {
     setLoading(true)
@@ -127,10 +141,11 @@ function BucketPage() {
     }
   }
 
+  // A delete drops the row in place, so pages loaded with "Load more" stay.
   async function remove(key: string) {
     await deleteObject({ data: { bucket: name, key } })
     toast.success(`Deleted ${key.slice(prefix.length)}`)
-    await router.invalidate()
+    setRemoved((r) => new Set(r).add(key))
   }
 
   const actions = (
@@ -156,7 +171,7 @@ function BucketPage() {
       <ObjectTable
         bucket={name}
         prefix={prefix}
-        objects={[...page.objects, ...more.objects]}
+        objects={[...page.objects, ...more.objects].filter((o) => !removed.has(o.key))}
         prefixes={[...page.prefixes, ...more.prefixes]}
         canWrite={canWrite}
         onDelete={remove}

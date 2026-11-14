@@ -34,7 +34,7 @@ Read-only SQL from the dashboard runs on a read-only connection, the same as a t
 
 ## Buckets
 
-Buckets are in the sidebar under Buckets. A bucket page lists its objects with folders rolled up at `/`; click a folder to go in, and the breadcrumb to go back. Upload sends files into the folder you're in, streamed through the dashboard to the engine, so their size is limited by the [object limits](/docs/concepts/limits/#object-storage), not by the dashboard. Downloads always save as files: the dashboard never shows an object's content in the page.
+Buckets are in the sidebar under Buckets. A bucket page lists its objects with folders rolled up at `/`; click a folder to go in, and the breadcrumb to go back. Upload sends files into the folder you're in, streamed through the dashboard to the engine without being held in memory. The [object limits](/docs/concepts/limits/#object-storage) apply, and an upload must finish within the dashboard server's request timeout (Node's default is 5 minutes), so send very large files with an S3 client or `lumbung object put`, which upload in parts or without that limit. Downloads always save as files: the dashboard never shows an object's content in the page.
 
 An owner's bucket settings turn public read on or off, set the CORS origins for browser uploads, show the S3 endpoint, and delete the bucket once it is empty.
 

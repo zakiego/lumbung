@@ -111,16 +111,18 @@ export function UploadButton({ bucket, prefix, onDone }: { bucket: string; prefi
     if (files.length === 0) return
     setLeft(files.length)
     let ok = 0
+    let uploaded = ""
     for (const f of files) {
       try {
         await uploadFile(bucket, prefix, f)
         ok++
+        uploaded = f.name
       } catch (e) {
         toast.error({ title: `Couldn't upload ${f.name}`, description: errorText(e) })
       }
       setLeft((n) => n - 1)
     }
-    if (ok) toast.success(ok === 1 ? `Uploaded ${files.find(Boolean)!.name}` : `Uploaded ${ok} files`)
+    if (ok) toast.success(ok === 1 ? `Uploaded ${uploaded}` : `Uploaded ${ok} files`)
     await onDone()
   }
 
@@ -166,7 +168,12 @@ export function ObjectTable({
   onDelete: (key: string) => Promise<unknown>
   footer?: ReactNode
 }) {
-  const rows: Row[] = [...prefixes.map((p): Row => ({ kind: "folder", prefix: p })), ...objects.map((o): Row => ({ kind: "object", object: o }))]
+  // A key equal to the folder itself is a folder marker some S3 tools make:
+  // it has no name of its own here, so it isn't listed.
+  const rows: Row[] = [
+    ...prefixes.map((p): Row => ({ kind: "folder", prefix: p })),
+    ...objects.filter((o) => o.key !== prefix).map((o): Row => ({ kind: "object", object: o })),
+  ]
   if (rows.length === 0) {
     return <Empty icon={<FolderIcon />} title={prefix ? "This folder is empty" : "No objects yet"} description="Upload files here, or put them with an S3 client, the CLI or the SDK." />
   }

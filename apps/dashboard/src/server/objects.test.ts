@@ -91,3 +91,13 @@ describe("download", () => {
     expect(res.status).toBe(404)
   })
 })
+
+test("a stored Content-Encoding drops the encoded length, and filenames follow RFC 5987", async () => {
+  const { d } = deps("owner", {
+    get: vi.fn(async () => ({ response: new Response("decoded body", { headers: { "content-length": "5", "content-encoding": "gzip" } }) })),
+  })
+  const res = await downloadObject(new Request(url("bucket=photos&key=" + encodeURIComponent("it's (final)*.js"))), d)
+  expect(res.headers.get("content-length")).toBeNull()
+  expect(res.headers.get("content-disposition")).toContain("filename*=UTF-8''it%27s%20%28final%29%2A.js")
+  expect(await res.text()).toBe("decoded body")
+})

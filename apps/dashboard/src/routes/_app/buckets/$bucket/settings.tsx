@@ -1,10 +1,10 @@
-import { Link, createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
+import { Link, createFileRoute, redirect, useNavigate, useRouter } from "@tanstack/react-router"
 import { Trash2Icon } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import { SettingsSection } from "@/components/app/db-settings"
 import { errorText } from "@/components/app/form-dialog"
 import { PageBody, PageHeader } from "@/components/app/shell"
-import { ErrorState } from "@/components/app/states"
+import { ErrorState, RowsSkeleton } from "@/components/app/states"
 import { TypedConfirm } from "@/components/ui/alert-dialog"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Switch } from "@/components/ui/checkbox"
@@ -15,9 +15,18 @@ import { TruncatedTip } from "@/components/ui/tooltip"
 import { deleteBucket, getBucket, updateBucket } from "@/fns/buckets"
 import { number } from "@/lib/format"
 import { pageTitle } from "@/lib/paths"
+import { can } from "@/lib/roles"
 
 export const Route = createFileRoute("/_app/buckets/$bucket/settings")({
+  beforeLoad: ({ context, params }) => {
+    if (!can(context.viewer.role, "admin")) throw redirect({ to: "/buckets/$bucket", params })
+  },
   loader: ({ params }) => getBucket({ data: { bucket: params.bucket } }),
+  pendingComponent: () => (
+    <Frame>
+      <RowsSkeleton />
+    </Frame>
+  ),
   head: ({ params }) => ({ meta: [{ title: pageTitle("Settings", params.bucket) }] }),
   component: SettingsPage,
   errorComponent: ({ error }) => (

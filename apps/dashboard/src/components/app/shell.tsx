@@ -151,7 +151,12 @@ function NavGroup({ label, to, onNavigate, children }: { label: string; to?: Lin
     <div className="flex flex-col gap-0.5">
       <h2 className="flex h-7 items-center px-2 text-xs font-[510] text-muted-foreground sidebar-collapsed:sr-only">
         {to ? (
-          <Link to={to} onClick={onNavigate} activeOptions={{ exact: true }} className="rounded-sm transition-colors duration-150 hover:text-foreground hover:duration-0">
+          <Link
+            to={to}
+            onClick={onNavigate}
+            activeOptions={{ exact: true }}
+            className="rounded-sm transition-colors duration-150 hover:text-foreground hover:duration-0 sidebar-collapsed:invisible"
+          >
             {label}
           </Link>
         ) : (
