@@ -44,6 +44,8 @@ export async function uploadURL(userId: string, fileName: string) {
 }
 ```
 
+The URL uses the scheme and host your server reached the engine at. Behind a proxy that terminates TLS, the engine trusts `X-Forwarded-Proto` only from addresses in `LUMBUNG_TRUSTED_PROXIES`; add the proxy's address there, or presigned URLs come back as `http://` and the browser refuses them on an HTTPS page. See [Reverse proxy and TLS](/docs/self-hosting/reverse-proxy/).
+
 ## 3. Upload from the page
 
 <!-- docs-test: skip runs in a browser -->
@@ -63,7 +65,7 @@ const res = await fetch(url, { method: "PUT", body: new Uint8Array([137, 80, 78,
 console.log(res.status, key)
 ```
 
-The object gets the content type the browser sends. Size limits still apply: an upload past `LUMBUNG_MAX_OBJECT_BYTES` or the bucket's limit fails with `EntityTooLarge` or `QuotaExceeded`.
+The object gets the content type the browser sends. That's safe to show: downloads carry a sandboxing `Content-Security-Policy`, so a user who uploads an HTML file with a script can't run it on your engine's origin. Size limits still apply: an upload past `LUMBUNG_MAX_OBJECT_BYTES` or the bucket's limit fails with `EntityTooLarge` or `QuotaExceeded`.
 
 ## Showing files
 

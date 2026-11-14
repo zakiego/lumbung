@@ -41,7 +41,7 @@ const file = await photos.get("notes/hello.txt")
 console.log(await file.text(), file.metadata.author)
 ```
 
-`put` takes a string, a `Uint8Array`, an `ArrayBuffer`, a `Blob` or a `ReadableStream`. A stream needs `contentLength`, since Lumbung checks the size against the bucket's limit before it stores anything. Uploading to a key that exists replaces the object.
+`put` takes a string, a `Uint8Array`, an `ArrayBuffer`, a `Blob` or a `ReadableStream`. A stream needs `contentLength`, since Lumbung checks the size against the bucket's limit before it stores anything, and works on servers (Node, Bun, Workers): browsers can't stream a request body with a length. In a browser, pass the `File` itself, or use a [presigned URL](/docs/guides/browser-uploads/). Uploading to a key that exists replaces the object.
 
 Read part of an object with a range. Both ends are inclusive:
 
@@ -68,6 +68,8 @@ console.log(page.prefixes)                  // ["notes/2026/"]
 A page holds at most `limit` entries (default 100, at most 1000). Pass `nextCursor` back as `cursor` until it is empty.
 
 ## Copy, check and delete
+
+A copy keeps the source's content type and metadata, unless you pass `contentType` or `metadata` to give it new ones.
 
 <!-- docs-test: continue -->
 ```ts

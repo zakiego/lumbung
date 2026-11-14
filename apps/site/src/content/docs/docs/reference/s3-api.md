@@ -7,7 +7,7 @@ sidebar:
 
 The engine serves an S3-compatible API at `/v1/s3`, path-style: `/v1/s3/<bucket>/<key>`. It's what the AWS SDKs, boto3, rclone and other S3 clients speak. For using it from code, see [Use an S3 client](/docs/guides/s3-clients/).
 
-A Lumbung bearer token works on it too, which is handy with curl:
+A Lumbung bearer token works on it too, which is handy with curl. With a bearer token, `x-amz-content-sha256` may still carry the body's SHA-256 or `STREAMING-UNSIGNED-PAYLOAD-TRAILER`; signed chunks need a signature:
 
 ```sh
 lumbung bucket create docs
@@ -64,12 +64,13 @@ curl -s -H "Authorization: Bearer <token>" "http://127.0.0.1:4870/v1/s3/docs?lis
 Details:
 
 - **GetObject** takes one `Range` (`bytes=a-b`, `bytes=a-`, `bytes=-n`); several ranges or another unit return the whole object. `If-Match`, `If-None-Match`, `If-Modified-Since` and `If-Unmodified-Since` work as in HTTP. Signed requests may override response headers with `response-content-type`, `response-content-disposition`, `response-cache-control`, `response-content-encoding`, `response-content-language` and `response-expires`.
-- **PutObject** stores `Content-Type`, `Cache-Control`, `Content-Disposition`, `Content-Encoding` (without `aws-chunked`), `Content-Language`, `Expires` and `x-amz-meta-*`. `If-None-Match: *` refuses to overwrite.
-- **CopyObject** takes `x-amz-metadata-directive` `COPY` (default) or `REPLACE`, and the `x-amz-copy-source-if-*` conditions. Copying an object onto itself needs `REPLACE`.
+- **PutObject** stores `Content-Type`, `Cache-Control`, `Content-Disposition`, `Content-Encoding` (without `aws-chunked`), `Content-Language`, `Expires` and `x-amz-meta-*`. `If-None-Match: *` refuses to overwrite and `If-Match` requires the current ETag; both are checked in the same step that records the object, so of two writers racing with `If-None-Match: *`, exactly one wins. CompleteMultipartUpload takes the same two headers.
+- **Responses** to GetObject and HeadObject always carry `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`, so stored HTML or SVG can't run scripts in a browser.
+- **CopyObject** takes `x-amz-metadata-directive` `COPY` (default) or `REPLACE`, and the `x-amz-copy-source-if-*` conditions; any that doesn't hold answers `PreconditionFailed`. Copying an object onto itself needs `REPLACE`.
 - **ListObjectsV2** takes `prefix`, `delimiter`, `max-keys` (at most 1000), `continuation-token`, `start-after`, `fetch-owner` and `encoding-type=url`. Keys are listed in UTF-8 byte order.
 - **Multipart:** part numbers run from 1 to 10,000, every part but the last is at least 5 MiB, and the ETag of the result is the MD5 of the parts' MD5s with `-<parts>`. Parts not named in the completion are discarded. Unfinished uploads are aborted after `LUMBUNG_MULTIPART_EXPIRY`.
 
-Not supported, answering `NotImplemented`: versioning and object versions, ACLs, bucket policies, tagging, lifecycle rules, object lock, website hosting, logging, replication, encryption settings, S3 Select, UploadPartCopy and reading one part with `partNumber`. Storage class is always `STANDARD`.
+Not supported, answering `NotImplemented`: changing bucket settings over the S3 API (use the REST API, the CLI or the dashboard), versioning and object versions, ACLs, bucket policies, tagging, lifecycle rules, object lock, website hosting, logging, replication, encryption settings, S3 Select, UploadPartCopy and reading one part with `partNumber`. Storage class is always `STANDARD`.
 
 ## Errors
 

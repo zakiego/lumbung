@@ -38,6 +38,8 @@ An object has a key, its content, a size, an ETag, a content type, the standard 
 - Custom metadata travels as `x-amz-meta-*` headers, at most 2 KB in total. Names are stored lowercase.
 - A write is atomic. Readers see the old object or the new one, never a partial file. The last write wins.
 
+Objects are served inert. Every download carries `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`, so an uploaded HTML or SVG file opened in a browser can't run scripts, even though it comes from the same origin as the engine (and, behind a single hostname, the dashboard). Images, video and downloads work as usual. Lumbung doesn't host websites from buckets.
+
 There is no versioning: replacing or deleting an object is final. Lumbung keeps the old file for `LUMBUNG_OBJECT_GC_DELAY` (an hour) only so a backup running at that moment can still copy it.
 
 ## Ways in
