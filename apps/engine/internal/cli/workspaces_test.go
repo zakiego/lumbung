@@ -157,3 +157,72 @@ func TestWorkspaces(t *testing.T) {
 		t.Fatalf("restored under a new name: %s", o.stdout)
 	}
 }
+
+// TestWorkspaceRefsAndPrompts: a workspace that isn't a name or an id never
+// reaches the wire (".." would be resolved away and land in the default
+// workspace), a saved workspace only goes with the saved token, and a
+// destructive prompt says which workspace it acts in.
+func TestWorkspaceRefsAndPrompts(t *testing.T) {
+	cfg := loggedIn(t, "")
+	must(t, lumbung(t, cfg, "", "workspace", "create", "ref-ws"))
+	must(t, lumbung(t, cfg, "", "db", "create", "ref-default"))
+	must(t, lumbung(t, cfg, "", "db", "create", "ref-other", "-w", "ref-ws"))
+
+	for _, bad := range []string{"..", ".", "a/b", "../default", "ref-ws/../default", "Ref-Ws", " ", "%2e%2e"} {
+		fails(t, lumbung(t, cfg, "", "db", "list", "-w", bad), "can't name a workspace")
+		fails(t, lumbung(t, cfg, "", "db", "delete", "ref-default", "-w", bad, "--yes"), "can't name a workspace")
+		fails(t, lumbung(t, cfg, "", "token", "create", "--name", "x", "--access", "admin", "-w", bad), "can't name a workspace")
+	}
+	fails(t, lumbung(t, cfg, "", "db", "list", "-w", ""), "--workspace is empty")
+	saved := filepath.Join(t.TempDir(), "config.json")
+	fails(t, lumbung(t, saved, adminTok+"\n", "login", "--url", baseURL, "-w", ".."), "can't name a workspace")
+	fails(t, lumbung(t, saved, adminTok+"\n", "login", "--url", baseURL, "-w", ""), "--workspace is empty")
+	if o := must(t, lumbung(t, cfg, "", "db", "list")); !strings.Contains(o.stdout, "ref-default") {
+		t.Fatalf("the default workspace lost its database: %s", o.stdout)
+	}
+
+	// A database name of ".." stays inside the databases path.
+	fails(t, lumbung(t, cfg, "", "db", "restore", "..", "-w", "ref-ws"), "")
+	fails(t, lumbung(t, cfg, "", "db", "delete", "..", "--yes"), "")
+
+	// Prompts name the workspace a profile, a flag or the environment chose.
+	must(t, lumbung(t, saved, adminTok+"\n", "login", "--url", baseURL, "-w", "ref-ws"))
+	o := lumbung(t, saved, "no\n", "db", "delete", "ref-other")
+	fails(t, o, "not confirmed")
+	if !strings.Contains(o.stderr, "move database ref-other to the trash in workspace ref-ws") {
+		t.Fatalf("the delete prompt doesn't name the workspace: %s", o.stderr)
+	}
+	o = lumbung(t, saved, "no\n", "db", "move", "ref-other", "--to", "default")
+	fails(t, o, "not confirmed")
+	if !strings.Contains(o.stderr, "from workspace ref-ws to workspace default") {
+		t.Fatalf("the move prompt doesn't name the source: %s", o.stderr)
+	}
+	o = lumbung(t, cfg, "no\n", "db", "delete", "ref-default")
+	fails(t, o, "not confirmed")
+	if strings.Contains(o.stderr, "in workspace") {
+		t.Fatalf("a prompt names a workspace nobody named: %s", o.stderr)
+	}
+	o = lumbung(t, saved, "no\n", "workspace", "delete", "ref-ws")
+	fails(t, o, "not confirmed")
+	if strings.Contains(o.stderr, "in workspace ref-ws") {
+		t.Fatalf("deleting a workspace isn't inside one: %s", o.stderr)
+	}
+
+	// The saved workspace goes with the saved token only.
+	var other struct {
+		Token string `json:"token"`
+	}
+	made := must(t, lumbung(t, cfg, "", "token", "create", "--instance", "--name", "ref-other-admin", "--access", "admin", "--json"))
+	if err := json.Unmarshal([]byte(made.stdout), &other); err != nil || other.Token == "" {
+		t.Fatalf("instance token: %s", made.stdout)
+	}
+	if o := must(t, lumbung(t, saved, "", "db", "list")); !strings.Contains(o.stdout, "ref-other") || strings.Contains(o.stdout, "ref-default") {
+		t.Fatalf("the saved profile acts in its workspace: %s", o.stdout)
+	}
+	if o := must(t, lumbung(t, saved, "", "db", "list", "--token", other.Token)); strings.Contains(o.stdout, "ref-other") || !strings.Contains(o.stdout, "ref-default") {
+		t.Fatalf("another token inherited the saved workspace: %s", o.stdout)
+	}
+	if o := must(t, lumbung(t, saved, "", "db", "list", "--token", other.Token, "-w", "ref-ws")); !strings.Contains(o.stdout, "ref-other") {
+		t.Fatalf("another token with its own --workspace: %s", o.stdout)
+	}
+}

@@ -216,7 +216,7 @@ func (a *app) workspaceCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.confirm("move workspace "+args[0]+" and everything in it to the trash", args[0]); err != nil {
+			if err := a.confirmPlain("move workspace "+args[0]+" and everything in it to the trash", args[0]); err != nil {
 				return err
 			}
 			var w client.Workspace
@@ -299,7 +299,11 @@ func (a *app) moveCmd(what string, path func(name string) string) *cobra.Command
 			if err != nil {
 				return err
 			}
-			if err := a.confirm("move "+what+" "+args[0]+" to workspace "+to+" and revoke the tokens that reach it", args[0]); err != nil {
+			from := ""
+			if a.workspace != "" {
+				from = " from workspace " + a.workspace
+			}
+			if err := a.confirmPlain("move "+what+" "+args[0]+from+" to workspace "+to+" and revoke the tokens that reach it", args[0]); err != nil {
 				return err
 			}
 			var moved struct {

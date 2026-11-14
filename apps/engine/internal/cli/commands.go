@@ -55,9 +55,14 @@ func (a *app) loginCmd() *cobra.Command {
 				}
 				tok = strings.TrimSpace(line)
 			}
-			ws := a.flagWorkspace
-			if ws == "" {
-				ws = a.getenv("LUMBUNG_WORKSPACE")
+			ws, err := a.workspaceArg()
+			if err != nil {
+				return err
+			}
+			if ws != "" {
+				if err := client.ValidWorkspace(ws); err != nil {
+					return err
+				}
 			}
 			c := client.New(u, tok)
 			c.Workspace = ws
@@ -622,7 +627,11 @@ func (a *app) tokenCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.confirm("revoke token "+args[0], args[0]); err != nil {
+			ask := a.confirm
+			if instance {
+				ask = a.confirmPlain
+			}
+			if err := ask("revoke token "+args[0], args[0]); err != nil {
 				return err
 			}
 			if err := c.Do(cmd.Context(), http.MethodDelete, tokensPath()+"/"+url.PathEscape(args[0]), nil, nil, nil); err != nil {

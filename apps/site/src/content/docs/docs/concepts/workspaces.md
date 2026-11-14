@@ -15,7 +15,7 @@ Making a workspace takes an instance admin token, such as the one you logged in 
 
 ```sh
 lumbung workspace create palui
-lumbung token create --name agent --access admin --workspace palui > palui.token
+(umask 077; lumbung token create --name agent --access admin --workspace palui > palui.token)
 ```
 
 From here the workspace runs itself. Its token creates what it needs with the usual commands and URLs, with no workspace in them:
@@ -75,7 +75,7 @@ To name a workspace, put `/v1/workspaces/<workspace>` in front. The name or the 
 | `/libsql/notes/main/` | `/v1/workspaces/palui/libsql/notes/main/` |
 | `/mcp` | `/v1/workspaces/palui/mcp` |
 
-An instance token uses these to work inside a workspace. The CLI's `--workspace` flag (or `LUMBUNG_WORKSPACE`) and the SDK's `workspace` option add the prefix for you. A public link to a bucket outside the default workspace uses the S3 one. A workspace token may use them for its own workspace, where they mean the same as the short URL. For any other workspace it gets `workspace_not_found`, the answer a workspace that doesn't exist gets.
+An instance token uses these to work inside a workspace. The CLI's `--workspace` flag (or `LUMBUNG_WORKSPACE`) and the SDK's `workspace` option add the prefix for you. `lumbung login --workspace` saves it in the profile, where it goes with the saved token only: a command run with another `--token` doesn't inherit it. Before a delete or a move, the CLI's prompt names the workspace it acts in. A public link to a bucket outside the default workspace uses the S3 one. A workspace token may use them for its own workspace, where they mean the same as the short URL. For any other workspace it gets `workspace_not_found`, the answer a workspace that doesn't exist gets.
 
 ## Limits
 

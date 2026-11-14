@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -34,6 +35,19 @@ type Client struct {
 // /v1/instance are about the instance and never do.
 var scoped = map[string]bool{"databases": true, "trash": true, "buckets": true, "tokens": true, "audit": true, "workspace": true, "s3": true}
 
+// workspaceRef is a workspace name or id. Anything else never goes in a
+// path: ".." and an empty segment are resolved away on the way, and the
+// request would land in another workspace.
+var workspaceRef = regexp.MustCompile(`^(?:[a-z0-9][a-z0-9-]{0,62}|ws_[a-z0-9]{20})$`)
+
+// ValidWorkspace reports whether ref can name a workspace.
+func ValidWorkspace(ref string) error {
+	if !workspaceRef.MatchString(ref) {
+		return fmt.Errorf("%q can't name a workspace: use its name (lowercase letters, digits and dashes) or its id", ref)
+	}
+	return nil
+}
+
 // path names the client's workspace in a path that acts inside one.
 func (c *Client) path(p string) string {
 	if c.Workspace == "" {
@@ -54,7 +68,10 @@ func (c *Client) path(p string) string {
 func New(baseURL, token string) *Client {
 	// No overall timeout: imports and downloads can take as long as they
 	// take. Requests end with their context (Ctrl-C).
-	return &Client{URL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: &http.Client{}, UserAgent: "lumbung-cli"}
+	// Redirects are never followed: the API doesn't use them, and following
+	// one would send the token and the body to a path nobody asked for.
+	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Client{URL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: &http.Client{CheckRedirect: noRedirect}, UserAgent: "lumbung-cli"}
 }
 
 // Error is a problem response from the API.
@@ -99,6 +116,11 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 // Upload PUTs a body of a known length with extra headers and decodes the
 // JSON response into out.
 func (c *Client) Upload(ctx context.Context, path string, query url.Values, body io.Reader, size int64, contentType string, h http.Header, out any) error {
+	if c.Workspace != "" {
+		if err := ValidWorkspace(c.Workspace); err != nil {
+			return err
+		}
+	}
 	u := c.URL + c.path(path)
 	if len(query) > 0 {
 		u += "?" + query.Encode()
@@ -120,7 +142,7 @@ func (c *Client) Upload(ctx context.Context, path string, query url.Values, body
 		return fmt.Errorf("can't reach %s: %w", c.URL, err)
 	}
 	defer res.Body.Close()
-	if res.StatusCode >= 400 {
+	if res.StatusCode >= 300 {
 		e := &Error{Status: res.StatusCode}
 		if json.NewDecoder(res.Body).Decode(e) != nil || e.Code == "" {
 			e.Code, e.Title = "http_error", res.Status
@@ -140,6 +162,11 @@ func (c *Client) Raw(ctx context.Context, method, path string, query url.Values,
 }
 
 func (c *Client) send(ctx context.Context, method, path string, query url.Values, body io.Reader, contentType string) (*http.Response, error) {
+	if c.Workspace != "" {
+		if err := ValidWorkspace(c.Workspace); err != nil {
+			return nil, err
+		}
+	}
 	u := c.URL + c.path(path)
 	if len(query) > 0 {
 		u += "?" + query.Encode()
@@ -158,7 +185,7 @@ func (c *Client) send(ctx context.Context, method, path string, query url.Values
 	if err != nil {
 		return nil, fmt.Errorf("can't reach %s: %w", c.URL, err)
 	}
-	if res.StatusCode >= 400 {
+	if res.StatusCode >= 300 {
 		defer res.Body.Close()
 		e := &Error{Status: res.StatusCode}
 		if json.NewDecoder(res.Body).Decode(e) != nil || e.Code == "" {

@@ -16,6 +16,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/zakiego/lumbung/apps/engine/internal/client"
 	"github.com/zakiego/lumbung/apps/engine/internal/version"
@@ -47,6 +48,10 @@ type app struct {
 
 	flagURL, flagToken, flagProfile, flagDB, flagBranch, flagWorkspace string
 	json, yes                                                          bool
+	workspaceFlag                                                      *pflag.Flag
+	// workspace is the workspace the running command acts in, when one was
+	// named. Prompts show it.
+	workspace string
 }
 
 // Options configure Root for tests.
@@ -92,6 +97,7 @@ func Root(o Options) *cobra.Command {
 	pf.StringVar(&a.flagToken, "token", "", "API token (or LUMBUNG_TOKEN)")
 	pf.StringVar(&a.flagProfile, "profile", "", "saved profile to use")
 	pf.StringVarP(&a.flagWorkspace, "workspace", "w", "", "workspace to act in, by name or id (or LUMBUNG_WORKSPACE); only an instance token needs it")
+	a.workspaceFlag = pf.Lookup("workspace")
 	pf.BoolVar(&a.json, "json", false, "print JSON instead of tables")
 	pf.BoolVarP(&a.yes, "yes", "y", false, "don't ask before destructive actions")
 
@@ -165,7 +171,8 @@ func (a *app) profile() (Profile, error) {
 	p := Profile{URL: override(a.flagURL, "LUMBUNG_URL"), Token: override(a.flagToken, "LUMBUNG_TOKEN"), Database: a.getenv("LUMBUNG_DATABASE")}
 	// The saved token only goes to the saved URL, so a --url pointing
 	// elsewhere (or a typo) never receives it.
-	if p.Token == "" {
+	savedToken := p.Token == ""
+	if savedToken {
 		if p.URL != "" && strings.TrimRight(p.URL, "/") != strings.TrimRight(saved.URL, "/") {
 			return Profile{}, errors.New("--url or LUMBUNG_URL points somewhere other than the saved profile: pass --token or LUMBUNG_TOKEN for it too")
 		}
@@ -177,13 +184,38 @@ func (a *app) profile() (Profile, error) {
 	if p.Database == "" {
 		p.Database = saved.Database
 	}
-	if p.Workspace = override(a.flagWorkspace, "LUMBUNG_WORKSPACE"); p.Workspace == "" {
-		p.Workspace = saved.Workspace
+	ws, err := a.workspaceArg()
+	if err != nil {
+		return Profile{}, err
 	}
+	// The saved workspace goes with the saved token. Another token, or
+	// another instance, never inherits it.
+	if ws == "" && savedToken {
+		ws = saved.Workspace
+	}
+	if ws != "" {
+		if err := client.ValidWorkspace(ws); err != nil {
+			return Profile{}, err
+		}
+	}
+	p.Workspace = ws
 	if p.URL == "" || p.Token == "" {
 		return Profile{}, errors.New("not logged in: run `lumbung login`, or set LUMBUNG_URL and LUMBUNG_TOKEN")
 	}
 	return p, nil
+}
+
+// workspaceArg is --workspace, or else LUMBUNG_WORKSPACE. An empty
+// --workspace is refused: it would quietly mean "whatever the profile or the
+// token says" to someone who meant to name one.
+func (a *app) workspaceArg() (string, error) {
+	if a.workspaceFlag != nil && a.workspaceFlag.Changed {
+		if a.flagWorkspace == "" {
+			return "", errors.New("--workspace is empty: name a workspace (the first one is called default)")
+		}
+		return a.flagWorkspace, nil
+	}
+	return a.getenv("LUMBUNG_WORKSPACE"), nil
 }
 
 func (a *app) client() (*client.Client, Profile, error) {
@@ -194,6 +226,7 @@ func (a *app) client() (*client.Client, Profile, error) {
 	c := client.New(p.URL, p.Token)
 	c.UserAgent = "lumbung-cli/" + version.Version
 	c.Workspace = p.Workspace
+	a.workspace = p.Workspace
 	return c, p, nil
 }
 
@@ -232,9 +265,19 @@ func (a *app) dbFlags(cmd *cobra.Command, branch bool) {
 	}
 }
 
-// confirm asks before a destructive action, unless --yes. The user must
-// type the name back.
+// confirm asks before a destructive action inside a workspace, unless
+// --yes. It names the workspace the command acts in when one was named, by
+// a flag, the environment or the profile, and the user must type the name
+// back.
 func (a *app) confirm(what, name string) error {
+	if a.workspace != "" {
+		what += " in workspace " + a.workspace
+	}
+	return a.confirmPlain(what, name)
+}
+
+// confirmPlain is confirm for an action that isn't inside a workspace.
+func (a *app) confirmPlain(what, name string) error {
 	if a.yes {
 		return nil
 	}
