@@ -81,7 +81,7 @@ A push to `main` deploys (once allowlisted). By hand:
 ~/.agents/skills/zaki-selfhost/scripts/deploy.sh lumbung
 ```
 
-`deploy.sh` runs `scripts/pre-deploy.sh` (cheap checks: docker answers, `meta.db` is one the running engine can serve, the nightly backup is installed), then `scripts/deploy-up.sh`: it builds the engine, then the dashboard, backs up `meta.db` and `dashboard.db` right before the swap with the old images, swaps, and rolls back to `:prev` when health fails.
+`deploy.sh` runs `scripts/pre-deploy.sh` (cheap checks: docker answers, `meta.db` is one the running engine can serve, the nightly backup is installed), then `scripts/deploy-up.sh`: it builds the engine, then the dashboard, backs up `meta.db` and `dashboard.db` right before the swap with the old images, and swaps.
 
 A `meta.db` backup must be one the old engine can restore: its manifest's `meta_version` can't be higher than the migrations that engine knows. When it is (a `meta.db` already migrated past the running engine), the copy is removed and the deploy stops before the swap. `LUMBUNG_ALLOW_NO_ROLLBACK=1` deploys anyway, for when the new engine is the fix.
 
@@ -90,15 +90,38 @@ Going back one image after a healthy deploy:
 ```bash
 docker tag lumbung-engine:prev lumbung-engine:latest
 docker tag lumbung-dashboard:prev lumbung-dashboard:latest
+./ops/rollback-meta.sh
 docker compose up -d --no-build --wait
 ```
 
-If the new engine migrated `meta.db`, the old one answers 503 on `/health`. Put back the pre-deploy copy with the engine stopped (the image's entrypoint is `lumbungd`, so the arguments start at `restore`):
+`rollback-meta.sh` changes nothing when the engine image can serve `meta.db` as it is. When it can't, it stops both services, takes a full backup of every branch to `lumbung_data:/data/backups/pre-rollback/<time>` (kept until you remove it), and restores `meta.db` from the newest pre-deploy copy that image knows. `--from /data/backups/pre-deploy/<time>-meta` picks a copy. The `meta.db` it replaced stays next to it as `meta.db.before-restore-<time>`.
+
+### What a meta-only rollback loses
+
+`meta.db` goes back to the moment of the copy, and the engine forgets everything recorded after it:
+
+- Databases, branches and snapshots created after the copy. Their files have no record any more, and the engine deletes them from the data folder when it starts.
+- Changes to records after the copy: renames, deletions, tokens created or revoked, settings.
+
+Rows written to databases that existed at the copy stay: their branch files aren't touched. After an automatic rollback only what the failed engine wrote is lost, since the copy is from right before the swap. A rollback by hand days after a deploy can lose much more, so check what changed first.
+
+### Getting data back
+
+The full backup in `pre-rollback/<time>` holds every branch file (`dbs/<database id>/<branch id>.db`) and the `meta.db` from before the rollback, which names them. Copy it out of the volume (it holds the service token, so not into the checkout), find what was lost and import its branch file into a new database with the `lumbung` CLI, logged in to the engine:
 
 ```bash
-docker compose stop engine
-docker compose run --rm --no-deps engine restore --meta-only --from /data/backups/pre-deploy
-docker compose up -d --no-build --wait
+docker compose cp engine:/data/backups/pre-rollback/<time> ~/selfhost/lumbung-pre-rollback
+sqlite3 -readonly ~/selfhost/lumbung-pre-rollback/meta.db \
+  "SELECT d.name, b.name, 'dbs/' || d.id || '/' || b.id || '.db' FROM databases d JOIN branches b ON b.database_id = d.id"
+lumbung db create <name>
+lumbung import ~/selfhost/lumbung-pre-rollback/dbs/<database id>/<branch id>.db --db <name>
+rm -rf ~/selfhost/lumbung-pre-rollback
+```
+
+Once a fixed engine is deployed, the whole full backup can also go back into a fresh volume (Full restore, below), which drops everything written after the rollback instead. Remove the folder when you're done with it:
+
+```bash
+docker run --rm --network none --user 65532 -v lumbung_data:/data --entrypoint rm lumbung-dashboard:latest -rf /data/backups/pre-rollback/<time>
 ```
 
 ## Backups
@@ -107,6 +130,7 @@ docker compose up -d --no-build --wait
 |---|---|---|
 | Pre-deploy `meta.db` | `lumbung_data:/data/backups/pre-deploy/<time>-meta` | 5 good ones |
 | Pre-deploy `dashboard.db` | `lumbung_dashboard:/data/backups/pre-deploy-<time>.db` | 5 |
+| Before a meta-only rollback, every branch | `lumbung_data:/data/backups/pre-rollback/<time>` | until removed by hand |
 | Nightly, full engine | `lumbung_data:/data/backups/nightly/<time>` and `~/selfhost/lumbung-backups/engine/<time>` | 7 each |
 | Nightly `dashboard.db` | `lumbung_dashboard:/data/backups/nightly-dashboard-<time>.db` and `~/selfhost/lumbung-backups/dashboard/` | 7 each |
 

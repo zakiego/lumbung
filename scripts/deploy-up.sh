@@ -159,8 +159,7 @@ if docker compose up -d --no-build --wait --wait-timeout "$WAIT_TIMEOUT"; then
   log "rolled back to the previous images"
 else
   log "rollback also failed. If the new engine migrated meta.db, the old one refuses it:"
-  log "  docker compose stop engine"
-  log "  docker compose run --rm --no-deps engine restore --meta-only --from ${META_BACKUP:-$META_BACKUPS}"
+  log "  ./ops/rollback-meta.sh${META_BACKUP:+ --from $META_BACKUP}"
   log "  docker compose up -d --no-build --wait"
   log "(run from $(pwd) with COMPOSE_FILE=$COMPOSE_FILE)"
 fi
