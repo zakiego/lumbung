@@ -176,7 +176,7 @@ test("a wide result draws a few rows at a time", WIDE, async () => {
   expect(screen.getByText("First 50 of 120 rows")).toBeTruthy()
   await user.click(screen.getByRole("button", { name: "Show more rows of Result 1" }))
   expect(within(grid).getAllByRole("row")).toHaveLength(101)
-}, 20_000)
+})
 
 test("planTree nests by parent", () => {
   expect(planTree([{ id: 1, parent: 0, detail: "a" }, { id: 2, parent: 1, detail: "b" }, { id: 3, parent: 0, detail: "c" }]).map((n) => [n.detail, n.children.map((c) => c.detail)])).toEqual([
