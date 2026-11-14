@@ -146,6 +146,7 @@ A branch is a full copy of its parent at the moment it was made, taken with the 
 
 - Format `lmb_<id>_<secret>`. Only a SHA-256 hash is stored. The full token is shown once.
 - Scopes: instance admin, per database with read, write or admin (optionally limited to one branch), or per bucket (section 16.4). Optional expiry and S3 access key. Last-used time recorded.
+- Grants (ADR 0007): one token may hold up to 20 grants, each a database (optionally one branch) or a bucket with its own level, for an app or agent that needs its own database and bucket and nothing else. Such a token has the scope `grants`. Every check is per grant, minting and managing a token needs admin on every grant it has, and deleting anything a grant names revokes the whole token.
 - Constant-time comparison. Rate limit per token. Failed auth is rate limited by address.
 
 ### 6.9 Audit and stats
@@ -242,7 +243,7 @@ Built with `/zaki-design-ui` on ui-sdk components (ADR 0004; this said shadcn un
   - Branches: list, create, diff against parent, reset, promote, delete.
   - Snapshots: list, create, schedule, restore to a new branch.
   - Settings: rename, limits, import, export, delete.
-- Tokens (for a database, a branch, a bucket or everything, with an optional S3 access key), Members and invites, Audit log, Instance settings.
+- Tokens (for a database, a branch, a bucket, several of them with a level each, or everything, with an optional S3 access key; a new token is shown once with the MCP URL), Members and invites, Audit log, Instance settings.
 
 Destructive actions need a typed confirmation. Every list has empty, loading and error states. Run `break-ui` on anything that renders user data: long table names, a 300-column table, a 5 MB text cell, blobs, NULLs, zero rows.
 
@@ -357,15 +358,15 @@ POST                 /v1/buckets/{bucket}/copy             (from another bucket 
 POST                 /v1/buckets/{bucket}/presign          (a presigned URL, signed with the token's access key)
 ```
 
-`POST /v1/tokens` takes `bucket` (instead of `database`) and `access_key: true`, which returns an S3 access key id and secret once.
+`POST /v1/tokens` takes `bucket` (instead of `database`) and `access_key: true`, which returns an S3 access key id and secret once. It also takes `grants` (instead of `database`, `branch`, `bucket` and `access`) for a token that reaches several databases and buckets (section 6.8).
 
 - SDK: `client.buckets` (list, create, get, update, delete) and `client.bucket(name)` (put, get with range, head, delete, list, copy, presign). Same rules as section 9: no runtime dependencies, tests against a real engine.
-- CLI: `bucket list|create|delete|update`, `object ls|put|get|rm|cp|presign`, and `token create --bucket --access-key`.
+- CLI: `bucket list|create|delete|update`, `object ls|put|get|rm|cp|presign`, and `token create --bucket --access-key`, or `--grant` (repeatable) for several databases and buckets.
 - MCP tools: `list_buckets`, `create_bucket`, `list_objects`, `get_object` (text up to the context cap, metadata only for binary), `put_object` (text or base64, capped), `delete_object`, `presign_object`. Same annotations and caps as section 8.
 
 ### 16.4 Tokens and access keys
 
-- New token scope `bucket`: read, write or admin on one bucket. Instance tokens reach every bucket at their level. Database tokens never reach a bucket, and bucket tokens never reach a database.
+- New token scope `bucket`: read, write or admin on one bucket. Instance tokens reach every bucket at their level. Database tokens never reach a bucket, and bucket tokens never reach a database. A token that needs both holds a grant for each (section 6.8): it reaches exactly what its grants name, each at its own level.
 - read: list, GET, HEAD, presign GET. write: also PUT, DELETE, copy into the bucket, multipart, presign PUT. admin: also bucket settings and tokens for the bucket. Creating and deleting buckets needs an instance admin.
 - An access key belongs to one token: id `LMB` + the token's id in capitals, secret 40 random characters. It has the token's scope, expiry, rate limit and audit identity, and revoking the token revokes the key and every URL it signed. SigV4 needs the secret on the server, so it is stored encrypted (AES-256-GCM, key in `secrets/access-key-encryption-key`, mode 600, made on first start).
 - Failed signatures count against the per-address failed-auth limit. Anonymous public reads have their own per-address limit.
@@ -381,6 +382,7 @@ Each row is a named test through the real HTTP handlers, for both the S3 API and
 | Read token: PUT, DELETE, DeleteObjects, copy, any multipart step, presign PUT, bucket settings | denied |
 | Write token: bucket settings, delete bucket, create bucket, tokens | denied |
 | Database token on any bucket operation; bucket token on databases, `/libsql`, SQL MCP tools | denied |
+| A token with grants on a database or bucket it has no grant for, past a grant's own level (write on the database, read on the bucket), on another branch of a branch-limited grant, or minting or managing a token it isn't admin of on every grant | denied, a missing grant the same answer as something that doesn't exist |
 | A multipart upload id from bucket B used under bucket A, or by another bucket's token | `NoSuchUpload` |
 | Presigned URL with its path, method, expiry or headers changed; expired; signed by a revoked token | denied |
 | Signed payload hash or chunk signature that doesn't match the body; wrong secret; clock skew past 15 minutes | denied, nothing stored |

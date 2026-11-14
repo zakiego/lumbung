@@ -15,7 +15,7 @@ A token looks like `lmb_<id>_<secret>`. Lumbung stores only a SHA-256 hash of it
 
 ## Scope and access
 
-A token has a **scope**, the whole instance, one database (optionally one branch of it) or one bucket, and an **access** level: `read`, `write` or `admin`.
+A token has a **scope**, the whole instance, one database (optionally one branch of it) or one bucket, and an **access** level: `read`, `write` or `admin`. A token can also hold [several grants](#tokens-with-several-grants), each a database or a bucket with its own level.
 
 | Can it... | read | write | admin |
 |---|---|---|---|
@@ -48,6 +48,39 @@ A bucket token reaches one [bucket](/docs/concepts/buckets/) and nothing else: o
 
 Creating and deleting buckets needs an instance admin token. Copying from another bucket needs read on that bucket too, in the same token. When a bucket is deleted, its tokens are revoked.
 
+### Tokens with several grants
+
+One token can reach more than one thing. Each **grant** names a database (or one branch of it) or a bucket, with its own access level. It suits an app or an agent that keeps rows in a database and files in a bucket: one credential, and nothing else on the instance in reach.
+
+```sh
+lumbung db create notes
+lumbung bucket create files
+lumbung token create --name agent --grant db=notes:write --grant bucket=files:read
+```
+
+`--grant` takes `db=NAME:ACCESS`, `db=NAME/BRANCH:ACCESS` or `bucket=NAME:ACCESS`, and repeats. Over REST, send `grants` in place of `database`, `branch`, `bucket` and `access`:
+
+```json
+{
+  "name": "agent",
+  "grants": [
+    { "database": "notes", "access": "write" },
+    { "bucket": "files", "access": "read" }
+  ]
+}
+```
+
+The rules are the ones above, grant by grant:
+
+- Each grant keeps its own level. Write on a database gives nothing on a bucket the token only reads.
+- Everything outside the grants answers `database_not_found` or `bucket_not_found`, as if it didn't exist.
+- A grant limited to a branch reaches only that branch, next to grants for other databases.
+- Creating and revoking tokens needs admin on **every** grant the other token has. Admin on one database isn't enough to manage a token that also reaches a bucket.
+- When a branch or bucket that a grant names is deleted, the whole token is revoked, and when a database is purged from the trash the token is removed. Whoever may delete the branch or bucket ends those tokens with it, including ones they couldn't list or revoke.
+- While a database sits in the trash its grant answers `database_not_found`, the token's other grants keep working, and restoring the database brings the grant back.
+
+A token holds up to 20 grants, and no two for the same database, branch or bucket. A grant for a whole database already reaches its branches, so it can't sit next to a grant for one of them: grant the branches one by one instead. One grant is stored as a plain database or bucket token. In a token listing, `grants` names what each token reaches; for a token with several, `scope` is `grants` and `access` is the highest level among them.
+
 ## Access keys
 
 S3 clients don't send a token; they sign each request with an access key id and a secret. Ask for an access key when you create a token (or tick S3 access key in the dashboard), and both come back once, next to the token:
@@ -57,7 +90,7 @@ lumbung bucket create photos
 lumbung token create --name uploads --bucket photos --access write --access-key
 ```
 
-The access key id is `LMB` followed by the token's id in capitals. The key has the token's scope, access, expiry and rate limit, and revoking the token ends the key and every presigned URL it signed. Lumbung needs the secret to check signatures, so unlike tokens it is stored, encrypted with a key kept in `secrets/access-key-encryption-key` in the data folder. A copy of `meta.db` alone doesn't reveal any secret.
+The access key id is `LMB` followed by the token's id in capitals. The key has the token's scope (or its bucket grants), access, expiry and rate limit, and revoking the token ends the key and every presigned URL it signed. Lumbung needs the secret to check signatures, so unlike tokens it is stored, encrypted with a key kept in `secrets/access-key-encryption-key` in the data folder. A copy of `meta.db` alone doesn't reveal any secret.
 
 ## Expiry and limits
 

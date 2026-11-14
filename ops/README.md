@@ -129,6 +129,16 @@ Once a fixed engine is deployed, the whole full backup can also go back into a f
 docker run --rm --network none --user 65532 -v lumbung_data:/data --entrypoint rm lumbung-dashboard:latest -rf /data/backups/pre-rollback/<time>
 ```
 
+## Palui's agent
+
+Palui's agent keeps its own rows and files here through MCP, with one token that reaches only its database and its bucket (ADR 0007).
+
+1. In the dashboard: **Tokens**, **New token**. Pick the agent's database with **Read and write**, **Add another**, pick its bucket, then create. Skip either one if the agent only needs the other.
+2. In Palui: add an **MCP server** connector with the MCP URL and the token shown after creating, and bearer auth.
+3. Pick which tools Palui may use. `execute`, `put_object`, `delete_object` and the branch tools change data, so Palui asks before running them.
+
+Palui treats MCP servers as external, so a turn that read from Lumbung asks before it writes anywhere.
+
 ## Backups
 
 | Kind | Where | Kept |

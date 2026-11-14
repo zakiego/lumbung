@@ -3,22 +3,15 @@ import { KeyRoundIcon } from "lucide-react"
 import { ConnectDetails, SnippetTabs } from "@/components/app/connect"
 import { DbFrame, useDb } from "@/components/app/db-frame"
 import { SettingsSection } from "@/components/app/db-settings"
-import { ErrorState, RowsSkeleton } from "@/components/app/states"
+import { ErrorState } from "@/components/app/states"
 import { buttonVariants } from "@/components/ui/button"
-import { getConnectInfo } from "@/fns/databases"
 import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
 import { dbSnippets, libsqlUrl } from "@/lib/snippets"
 
 export const Route = createFileRoute("/_app/db/$db/connect")({
-  loader: () => getConnectInfo(),
   head: ({ params }) => ({ meta: [{ title: pageTitle("Connect", params.db) }] }),
   component: ConnectPage,
-  pendingComponent: () => (
-    <DbFrame section="connect">
-      <RowsSkeleton />
-    </DbFrame>
-  ),
   errorComponent: ({ error }) => (
     <DbFrame section="connect">
       <ErrorState error={error} title="Couldn't load connection details" />
@@ -28,8 +21,8 @@ export const Route = createFileRoute("/_app/db/$db/connect")({
 
 function ConnectPage() {
   const { database, branch, branchParam } = useDb()
-  const { engineUrl: url } = Route.useLoaderData()
-  const { viewer } = Route.useRouteContext()
+  // The session carries the engine URL, so the page needs no request of its own.
+  const { viewer, engineUrl: url } = Route.useRouteContext()
   const db = database.name
 
   return (

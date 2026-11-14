@@ -192,22 +192,34 @@ type Snapshot struct {
 
 // Token is a token without its secret; Secret is set once, on create.
 type Token struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
-	Scope      string     `json:"scope"`
-	DatabaseID string     `json:"database_id"`
-	BranchID   string     `json:"branch_id"`
-	BucketID   string     `json:"bucket_id"`
-	Access     string     `json:"access"`
-	Service    bool       `json:"service"`
-	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt  *time.Time `json:"expires_at"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-	Secret     string     `json:"token,omitempty"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Scope      string `json:"scope"`
+	DatabaseID string `json:"database_id"`
+	BranchID   string `json:"branch_id"`
+	BucketID   string `json:"bucket_id"`
+	// Grants is everything the token reaches below the instance, each with
+	// its own level. A grants token has several.
+	Grants     []TokenGrant `json:"grants"`
+	Access     string       `json:"access"`
+	Service    bool         `json:"service"`
+	CreatedAt  time.Time    `json:"created_at"`
+	ExpiresAt  *time.Time   `json:"expires_at"`
+	LastUsedAt *time.Time   `json:"last_used_at"`
+	Secret     string       `json:"token,omitempty"`
 	// AccessKeyID and SecretAccessKey are the token's S3 access key; the
 	// secret only comes back when the token is created.
 	AccessKeyID     string `json:"access_key_id,omitempty"`
 	SecretAccessKey string `json:"secret_access_key,omitempty"`
+}
+
+// TokenGrant is one thing a token reaches: a database (or one branch of it)
+// or a bucket.
+type TokenGrant struct {
+	DatabaseID string `json:"database_id"`
+	BranchID   string `json:"branch_id"`
+	BucketID   string `json:"bucket_id"`
+	Access     string `json:"access"`
 }
 
 // Bucket is a bucket.

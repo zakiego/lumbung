@@ -142,6 +142,7 @@ func (s *Store) DeleteBranch(ctx context.Context, branchID string) error {
 	defer func() { _ = tx.Rollback() }()
 	for _, q := range []string{
 		`UPDATE tokens SET revoked_at = '` + now() + `' WHERE branch_id = ? AND revoked_at IS NULL`,
+		`UPDATE tokens SET revoked_at = '` + now() + `' WHERE revoked_at IS NULL AND id IN (SELECT token_id FROM token_grants WHERE branch_id = ?)`,
 		`DELETE FROM stats_minute WHERE branch_id = ?`,
 		`DELETE FROM slow_queries WHERE branch_id = ?`,
 		`DELETE FROM branches WHERE id = ?`,
@@ -300,6 +301,7 @@ func (s *Store) PurgeDatabase(ctx context.Context, dbID string) (bool, error) {
 	}
 	for _, q := range []string{
 		`DELETE FROM tokens WHERE database_id = ?`,
+		`DELETE FROM tokens WHERE id IN (SELECT token_id FROM token_grants WHERE database_id = ?)`,
 		`DELETE FROM stats_minute WHERE branch_id IN (SELECT id FROM branches WHERE database_id = ?)`,
 		`DELETE FROM slow_queries WHERE branch_id IN (SELECT id FROM branches WHERE database_id = ?)`,
 		`DELETE FROM snapshot_schedules WHERE database_id = ?`,
@@ -383,6 +385,7 @@ func (s *Store) DropMissing(ctx context.Context, p Present) error {
 		for _, q := range []string{
 			`DELETE FROM snapshot_schedules WHERE branch_id = ?`,
 			`DELETE FROM tokens WHERE branch_id = ?`,
+			`DELETE FROM tokens WHERE id IN (SELECT token_id FROM token_grants WHERE branch_id = ?)`,
 			`DELETE FROM stats_minute WHERE branch_id = ?`,
 			`DELETE FROM slow_queries WHERE branch_id = ?`,
 			`UPDATE branches SET parent_id = NULL WHERE parent_id = ?`,
@@ -414,6 +417,7 @@ func (s *Store) DropMissing(ctx context.Context, p Present) error {
 			`DELETE FROM snapshots WHERE database_id = ?`,
 			`DELETE FROM snapshot_schedules WHERE database_id = ?`,
 			`DELETE FROM tokens WHERE database_id = ?`,
+			`DELETE FROM tokens WHERE id IN (SELECT token_id FROM token_grants WHERE database_id = ?)`,
 			`DELETE FROM stats_minute WHERE branch_id IN (SELECT id FROM branches WHERE database_id = ?)`,
 			`DELETE FROM slow_queries WHERE branch_id IN (SELECT id FROM branches WHERE database_id = ?)`,
 			`UPDATE branches SET parent_id = NULL WHERE database_id = ?`,

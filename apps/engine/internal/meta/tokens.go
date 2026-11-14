@@ -8,17 +8,32 @@ import (
 	"time"
 )
 
+// Grant is one thing a token reaches: a database (or one branch of it) or a
+// bucket, at one access level. Exactly one of DatabaseID and BucketID is set.
+type Grant struct {
+	DatabaseID string
+	BranchID   string
+	BucketID   string
+	Access     string // read, write or admin
+}
+
 // Token is a stored token. Only the SHA-256 of the full token is kept.
 type Token struct {
 	ID         string
 	Name       string
 	SecretHash []byte
-	Scope      string // instance, database or bucket
+	Scope      string // instance, database, bucket or grants
 	DatabaseID string
 	BranchID   string
 	BucketID   string
-	Access     string // read, write or admin
-	Service    bool
+	// Access is the level of an instance, database or bucket token. For a
+	// grants token it is the highest level among its grants, kept for
+	// display only: what the token may do is decided by Grants.
+	Access string
+	// Grants is what a token with the scope grants reaches. Empty for the
+	// other scopes.
+	Grants  []Grant
+	Service bool
 	// AccessSecret is the S3 access key secret, encrypted (ADR 0006). Empty
 	// when the token has no access key.
 	AccessSecret []byte
@@ -47,13 +62,36 @@ func scanToken(r scanner) (Token, error) {
 	return t, nil
 }
 
-// CreateToken stores a token record.
+// ScopeGrants is the scope of a token that reaches several databases and
+// buckets, listed in its Grants.
+const ScopeGrants = "grants"
+
+// CreateToken stores a token record, with its grants when it has the scope
+// grants.
 func (s *Store) CreateToken(ctx context.Context, t Token) (Token, error) {
-	_, err := s.db.ExecContext(ctx,
+	if (t.Scope == ScopeGrants) != (len(t.Grants) > 0) {
+		return Token{}, errors.New("meta: only a grants token has grants, and it needs at least one")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Token{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO tokens (id, name, secret_hash, scope, database_id, branch_id, bucket_id, access, service, access_secret, created_at, expires_at)
 		 VALUES (?, ?, ?, ?, nullif(?, ''), nullif(?, ''), nullif(?, ''), ?, ?, ?, ?, ?)`,
 		t.ID, t.Name, t.SecretHash, t.Scope, t.DatabaseID, t.BranchID, t.BucketID, t.Access, t.Service, nilIfEmpty(t.AccessSecret), now(), fmtTime(t.ExpiresAt))
 	if err != nil {
+		return Token{}, err
+	}
+	for i, g := range t.Grants {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO token_grants (token_id, position, database_id, branch_id, bucket_id, access) VALUES (?, ?, nullif(?, ''), nullif(?, ''), nullif(?, ''), ?)`,
+			t.ID, i, g.DatabaseID, g.BranchID, g.BucketID, g.Access); err != nil {
+			return Token{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return Token{}, err
 	}
 	return s.GetToken(ctx, t.ID)
@@ -65,7 +103,36 @@ func (s *Store) GetToken(ctx context.Context, id string) (Token, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return Token{}, ErrNoToken
 	}
-	return t, err
+	if err != nil || t.Scope != ScopeGrants {
+		return t, err
+	}
+	grants, err := s.tokenGrants(ctx, `WHERE token_id = ?`, id)
+	if err != nil {
+		return Token{}, err
+	}
+	t.Grants = grants[id]
+	return t, nil
+}
+
+// tokenGrants reads grants by token id, each token's in the order they were
+// given.
+func (s *Store) tokenGrants(ctx context.Context, where string, args ...any) (map[string][]Grant, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT token_id, coalesce(database_id, ''), coalesce(branch_id, ''), coalesce(bucket_id, ''), access FROM token_grants `+where+` ORDER BY token_id, position`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]Grant{}
+	for rows.Next() {
+		var id string
+		var g Grant
+		if err := rows.Scan(&id, &g.DatabaseID, &g.BranchID, &g.BucketID, &g.Access); err != nil {
+			return nil, err
+		}
+		out[id] = append(out[id], g)
+	}
+	return out, rows.Err()
 }
 
 // ListTokens returns tokens that aren't revoked, newest first, after the
@@ -85,14 +152,26 @@ func (s *Store) ListTokens(ctx context.Context, afterCreated, afterID string, li
 	}
 	defer rows.Close()
 	out := []Token{}
+	withGrants := false
 	for rows.Next() {
 		t, err := scanToken(rows)
 		if err != nil {
 			return nil, err
 		}
+		withGrants = withGrants || t.Scope == ScopeGrants
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil || !withGrants {
+		return out, err
+	}
+	grants, err := s.tokenGrants(ctx, `WHERE token_id IN (SELECT id FROM tokens WHERE revoked_at IS NULL)`)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Grants = grants[out[i].ID]
+	}
+	return out, nil
 }
 
 // RevokeToken marks a token revoked. It reports whether a live token was

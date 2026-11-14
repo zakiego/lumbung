@@ -510,6 +510,7 @@
         "additionalProperties": false,
         "properties": {
           "access": {
+            "description": "The token's level. Required unless grants is set.",
             "enum": [
               "read",
               "write",
@@ -540,6 +541,14 @@
             "minimum": 0,
             "type": "integer"
           },
+          "grants": {
+            "description": "Reach several databases and buckets with one token, each at its own level. Use it instead of database, branch, bucket and access.",
+            "items": {
+              "$ref": "#/components/schemas/GrantIn"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "name": {
             "maxLength": 100,
             "minLength": 1,
@@ -547,8 +556,7 @@
           }
         },
         "required": [
-          "name",
-          "access"
+          "name"
         ],
         "type": "object"
       },
@@ -556,6 +564,7 @@
         "additionalProperties": false,
         "properties": {
           "access": {
+            "description": "The token's level. For a grants token, the highest level among its grants; each grant has its own.",
             "enum": [
               "read",
               "write",
@@ -590,6 +599,13 @@
               "null"
             ]
           },
+          "grants": {
+            "description": "Everything the token reaches below the instance: one entry for a database or bucket token, several for a grants token, none for an instance token.",
+            "items": {
+              "$ref": "#/components/schemas/GrantOut"
+            },
+            "type": "array"
+          },
           "id": {
             "type": "string"
           },
@@ -607,7 +623,8 @@
             "enum": [
               "instance",
               "database",
-              "bucket"
+              "bucket",
+              "grants"
             ],
             "type": "string"
           },
@@ -632,6 +649,7 @@
           "database_id",
           "branch_id",
           "bucket_id",
+          "grants",
           "access_key_id",
           "access",
           "service",
@@ -768,6 +786,67 @@
           "changes",
           "branch_ddl",
           "against_ddl"
+        ],
+        "type": "object"
+      },
+      "GrantIn": {
+        "additionalProperties": false,
+        "properties": {
+          "access": {
+            "enum": [
+              "read",
+              "write",
+              "admin"
+            ],
+            "type": "string"
+          },
+          "branch": {
+            "description": "Branch name or id, to limit the grant to one branch of the database.",
+            "type": "string"
+          },
+          "bucket": {
+            "description": "Bucket name or id. Not with database.",
+            "type": "string"
+          },
+          "database": {
+            "description": "Database name or id. Not with bucket.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access"
+        ],
+        "type": "object"
+      },
+      "GrantOut": {
+        "additionalProperties": false,
+        "properties": {
+          "access": {
+            "enum": [
+              "read",
+              "write",
+              "admin"
+            ],
+            "type": "string"
+          },
+          "branch_id": {
+            "description": "When set, the grant only reaches this branch.",
+            "type": "string"
+          },
+          "bucket_id": {
+            "description": "The bucket this grant reaches. Empty for a database grant.",
+            "type": "string"
+          },
+          "database_id": {
+            "description": "The database this grant reaches. Empty for a bucket grant.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "database_id",
+          "branch_id",
+          "bucket_id",
+          "access"
         ],
         "type": "object"
       },
@@ -2079,6 +2158,7 @@
         "additionalProperties": false,
         "properties": {
           "access": {
+            "description": "The token's level. For a grants token, the highest level among its grants; each grant has its own.",
             "enum": [
               "read",
               "write",
@@ -2113,6 +2193,13 @@
               "null"
             ]
           },
+          "grants": {
+            "description": "Everything the token reaches below the instance: one entry for a database or bucket token, several for a grants token, none for an instance token.",
+            "items": {
+              "$ref": "#/components/schemas/GrantOut"
+            },
+            "type": "array"
+          },
           "id": {
             "type": "string"
           },
@@ -2130,7 +2217,8 @@
             "enum": [
               "instance",
               "database",
-              "bucket"
+              "bucket",
+              "grants"
             ],
             "type": "string"
           },
@@ -2146,6 +2234,7 @@
           "database_id",
           "branch_id",
           "bucket_id",
+          "grants",
           "access_key_id",
           "access",
           "service",

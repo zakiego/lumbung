@@ -12,7 +12,9 @@ declare module "vitest" {
 
 export default async function setup(project: TestProject) {
   const bin = engineBinary()
-  const engine = await startEngine(bin)
+  // Every test file shares this engine and its admin token, so the per-token
+  // rate limit is raised: together they can pass the default burst.
+  const engine = await startEngine(bin, { LUMBUNG_RATE_LIMIT: "100000", LUMBUNG_RATE_BURST: "100000" })
   project.provide("url", engine.url)
   project.provide("token", engine.token)
   project.provide("bin", bin)

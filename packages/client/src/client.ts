@@ -5,6 +5,7 @@ import type {
   BucketOut,
   DatabaseOut,
   Diff,
+  GrantIn,
   ObjectOut,
   Problem,
   ResultOut,
@@ -296,16 +297,17 @@ export class Client {
      * Creates a token. The full token is in `token` and is only shown here.
      * With `accessKey`, the token also gets an S3 access key; its secret is
      * in `secret_access_key`, also shown only here.
+     *
+     * Pass `grants` instead of `access`, `database`, `branch` and `bucket`
+     * for one token that reaches several databases and buckets, each at its
+     * own level.
      */
-    create: (o: {
-      name: string
-      access: "read" | "write" | "admin"
-      database?: string
-      branch?: string
-      bucket?: string
-      accessKey?: boolean
-      expiresInDays?: number
-    }) =>
+    create: (
+      o: { name: string; accessKey?: boolean; expiresInDays?: number } & (
+        | { access: "read" | "write" | "admin"; database?: string; branch?: string; bucket?: string; grants?: undefined }
+        | { grants: GrantIn[]; access?: undefined; database?: undefined; branch?: undefined; bucket?: undefined }
+      ),
+    ) =>
       this.request<TokenOut & { token: string; secret_access_key?: string }>("POST", "/v1/tokens", {
         body: {
           name: o.name,
@@ -313,6 +315,7 @@ export class Client {
           database: o.database,
           branch: o.branch,
           bucket: o.bucket,
+          grants: o.grants,
           access_key: o.accessKey || undefined,
           expires_in_days: o.expiresInDays,
         },

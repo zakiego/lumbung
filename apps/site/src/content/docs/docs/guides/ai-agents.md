@@ -5,7 +5,7 @@ sidebar:
   order: 9
 ---
 
-The engine serves the Model Context Protocol at `/mcp` (streamable HTTP). Agents get tools to list databases and branches, read schemas, run read-only queries, run writes, branch, diff and snapshot. The [MCP tools reference](/docs/reference/mcp-tools/) lists them all.
+The engine serves the Model Context Protocol at `/mcp` (streamable HTTP). Agents get tools to list databases and branches, read schemas, run read-only queries, run writes, branch, diff and snapshot, and to list, read, write and presign objects in buckets. The [MCP tools reference](/docs/reference/mcp-tools/) lists them all.
 
 ## 1. Make a token for the agent
 
@@ -22,7 +22,23 @@ lumbung branch create agent-sandbox --db app
 lumbung token create --name agent --db app --branch agent-sandbox --access write
 ```
 
+### A database and a bucket for one agent
+
+An agent that keeps its own rows and its own files needs both, and nothing else. Give it one token with a [grant](/docs/concepts/tokens/#tokens-with-several-grants) for each, at the level each needs:
+
+```sh
+lumbung db create agent-notes
+lumbung bucket create agent-files
+lumbung token create --name agent --grant db=agent-notes:write --grant bucket=agent-files:write
+```
+
+Leave out either grant for an agent that only needs a database or only needs files. Other databases and buckets on the instance don't exist as far as this token can tell.
+
+In the dashboard, the same thing is **Tokens**, **New token**, then **Add another** for each extra database or bucket. The new token is shown once, with the MCP URL to paste next to it.
+
 ## 2. Connect the client
+
+A client asks for two things: the server URL, which is the engine's address followed by `/mcp`, and the token, sent as a bearer token.
 
 Claude Code:
 
@@ -48,6 +64,7 @@ Any client that reads an `mcpServers` config:
 ## What the agent can and can't do
 
 - `query` always runs on a read-only connection, whatever the token allows. Writes go through `execute`, which needs a write token.
+- Object tools follow the token's level on that bucket: `list_objects`, `get_object` and `presign_object` for a GET need read, and `put_object` and `delete_object` need write.
 - Every statement follows the same [security model](/docs/concepts/security-model/) as the REST API: no ATTACH, no VACUUM INTO, no extension loading, no reaching outside the branch.
 - Results are capped for a model's context: at most 100 rows by default (`max_rows` up to 1,000) and about 64 KB, measured after long text (2,000 characters shown) and blobs (48 bytes shown) are shortened. A cut result says so and suggests narrowing the query. Rows returned by a write are capped the same way, and the write still applies to every row.
 - Lists (databases, branches, schema changes) stop at 200 items. `get_schema` takes a `table` to show one table, and a schema over about 64 KB comes back as names only.
