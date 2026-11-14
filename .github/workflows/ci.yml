@@ -138,3 +138,7 @@ jobs:
       # The script talks to the engine through the SDK's built output.
       - run: pnpm --filter @lumbung/client build
       - run: pnpm e2e
+      # PLAN 17: a workspace token makes its own databases and a bucket
+      # through MCP, and another workspace's token can't see or touch them
+      # through MCP, REST, libSQL or S3.
+      - run: pnpm proof:workspaces

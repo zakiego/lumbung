@@ -32,7 +32,7 @@ function InvitePage() {
     <AuthLayout title="Join Lumbung">
       <InviteForm
         email={invite.email}
-        role={invite.role}
+        owner={invite.owner}
         onAccept={async (values) => {
           await acceptInvite({ data: { token, ...values } })
           forgetSession()

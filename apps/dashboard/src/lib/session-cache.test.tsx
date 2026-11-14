@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const getSession = vi.fn()
 vi.mock("@/fns/session", () => ({ getSession: () => getSession() }))
 
-const viewer = { id: "u1", name: "Ana", email: "ana@example.com", role: "owner" as const }
-const signedIn = { viewer, needsSetup: false, engineUrl: "https://engine.example.com", passkeys: true, dashboardUrl: "https://db.example.com" }
-const signedOut = { viewer: null, needsSetup: false, engineUrl: null, passkeys: true, dashboardUrl: "https://db.example.com" }
+const viewer = { id: "u1", name: "Ana", email: "ana@example.com", owner: true }
+const workspaces = [{ id: "ws_aaaaaaaaaaaaaaaaaaaa", name: "default", default: true, role: "owner" as const }]
+const signedIn = { viewer, workspaces, lastWorkspace: "ws_aaaaaaaaaaaaaaaaaaaa", needsSetup: false, engineUrl: "https://engine.example.com", passkeys: true, dashboardUrl: "https://db.example.com" }
+const signedOut = { viewer: null, workspaces: [], lastWorkspace: null, needsSetup: false, engineUrl: null, passkeys: true, dashboardUrl: "https://db.example.com" }
 
 async function freshCache() {
   vi.resetModules()
@@ -68,6 +69,16 @@ describe("session cache", () => {
     await vi.advanceTimersByTimeAsync(0)
     getSession.mockResolvedValue(signedOut)
     expect(await loadSession()).toEqual(signedOut)
+  })
+
+  it("doesn't keep a session read while the engine was down", async () => {
+    const { loadSession } = await freshCache()
+    const engineDown = { ...signedIn, workspaces: null }
+    getSession.mockResolvedValue(engineDown)
+    expect(await loadSession()).toEqual(engineDown)
+    getSession.mockResolvedValue(signedIn)
+    expect(await loadSession()).toEqual(signedIn)
+    expect(getSession).toHaveBeenCalledTimes(2)
   })
 
   it("is primed once per page load and a sign-out isn't undone by a later prime", async () => {

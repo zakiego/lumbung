@@ -4,7 +4,9 @@ export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`
   if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`
-  return `${(n / 1024 ** 3).toFixed(2)} GB`
+  if (n < 1024 ** 4) return `${(n / 1024 ** 3).toFixed(2)} GB`
+  if (n < 1024 ** 5) return `${(n / 1024 ** 4).toFixed(2)} TB`
+  return `${(n / 1024 ** 5).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} PB`
 }
 
 const day = new Intl.DateTimeFormat("en-US", { month: "short", day: "2-digit", year: "numeric" })

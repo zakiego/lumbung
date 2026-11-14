@@ -1,32 +1,29 @@
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router"
-import { AppShell } from "@/components/app/shell"
-import { listBuckets } from "@/fns/buckets"
-import { listDatabases } from "@/fns/databases"
 import { APP_BASE } from "@/lib/paths"
 import { loadSession, primeSession } from "@/lib/session-cache"
 
+// Signed-in pages. The layouts below pick the workspace: /w/$ws from the URL,
+// and the pages outside a workspace from the one last opened.
 export const Route = createFileRoute("/_app")({
   beforeLoad: async ({ location }) => {
     const session = await loadSession()
     if (session.needsSetup) throw redirect({ to: "/setup" })
     if (!session.viewer) throw redirect({ to: "/login", search: { next: `${APP_BASE}${location.href}` } })
-    return { viewer: session.viewer, engineUrl: session.engineUrl ?? "", passkeys: session.passkeys, dashboardUrl: session.dashboardUrl }
-  },
-  // The sidebar still renders when the engine is down; pages show their own errors.
-  loader: async () => {
-    const [databases, buckets] = await Promise.all([listDatabases().catch(() => null), listBuckets().catch(() => null)])
-    return { databases, buckets }
+    return {
+      account: session.viewer,
+      // Null when the engine didn't answer.
+      workspaces: session.workspaces,
+      lastWorkspace: session.lastWorkspace,
+      engineUrl: session.engineUrl ?? "",
+      passkeys: session.passkeys,
+      dashboardUrl: session.dashboardUrl,
+    }
   },
   component: AppLayout,
 })
 
 function AppLayout() {
-  const { viewer, engineUrl, passkeys, dashboardUrl } = Route.useRouteContext()
-  const { databases, buckets } = Route.useLoaderData()
-  primeSession({ viewer, needsSetup: false, engineUrl, passkeys, dashboardUrl })
-  return (
-    <AppShell viewer={viewer} databases={databases} buckets={buckets}>
-      <Outlet />
-    </AppShell>
-  )
+  const { account, workspaces, lastWorkspace, engineUrl, passkeys, dashboardUrl } = Route.useRouteContext()
+  primeSession({ viewer: account, workspaces, lastWorkspace, needsSetup: false, engineUrl, passkeys, dashboardUrl })
+  return <Outlet />
 }

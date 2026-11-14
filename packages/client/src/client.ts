@@ -15,6 +15,7 @@ import type {
   StatsOutBody,
   TokenOut,
   WireParam,
+  WorkspaceOut,
 } from "./generated.ts"
 import { decodeValue, encodeValue, type InValue, type IntMode, type Value } from "./values.ts"
 
@@ -23,6 +24,12 @@ export interface ClientOptions {
   url: string
   /** A Lumbung token, lmb_<id>_<secret>. */
   token: string
+  /**
+   * The workspace to act in, by name or id. Leave it out with a workspace
+   * token, which always acts in its own workspace. An instance token
+   * without it acts in the default workspace.
+   */
+  workspace?: string
   /** Database name or id for query and batch. Optional for management-only use. */
   database?: string
   /** Branch name or id. Defaults to the database's default branch. */
@@ -100,6 +107,41 @@ function toStatement(sql: Statement, args?: InValue[] | Record<string, InValue>)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+// The parts of the API that act inside a workspace. Only these take the
+// /v1/workspaces/<workspace> prefix; /v1/workspaces and /v1/instance are
+// about the instance and never do.
+const scoped = new Set(["databases", "trash", "buckets", "tokens", "audit", "workspace", "s3"])
+
+const workspaceRef = /^(?:[a-z0-9][a-z0-9-]{0,62}|ws_[a-z0-9]{20})$/
+
+/**
+ * A workspace option must be a name or an id. An empty one would quietly
+ * mean "no workspace", and ".." is resolved away when the URL is parsed:
+ * either way the request would act in the default workspace instead.
+ */
+function checkWorkspace(workspace: unknown): void {
+  if (workspace === undefined) return
+  if (typeof workspace !== "string" || !workspaceRef.test(workspace)) {
+    throw new TypeError(`${JSON.stringify(workspace)} can't name a workspace: use its name (lowercase letters, digits and dashes) or its id, or leave the option out`)
+  }
+}
+
+/**
+ * Every request path goes through here. A name of "." or ".." is resolved
+ * away when the URL is parsed and an empty one shifts what follows, so the
+ * request would reach another endpoint than the one the method is for.
+ */
+function scopePath(workspace: string | undefined, path: string): string {
+  for (const segment of path.split("?", 1)[0]!.split("/").slice(1)) {
+    if (segment === "" || segment === "." || segment === "..") throw new TypeError(`a name or an id in ${JSON.stringify(path)} is empty, "." or ".."`)
+  }
+  if (workspace === undefined) return path
+  checkWorkspace(workspace)
+  const head = /^\/v1\/([a-z0-9]+)(?=[/?]|$)/.exec(path)?.[1]
+  if (!head || !scoped.has(head)) return path
+  return `/v1/workspaces/${encodeURIComponent(workspace)}${path.slice("/v1".length)}`
+}
+
 /** The Lumbung client. Create one with `createClient`. */
 export class Client {
   readonly #opts: Required<Pick<ClientOptions, "url" | "token" | "intMode" | "retries">> & ClientOptions
@@ -108,6 +150,7 @@ export class Client {
   constructor(opts: ClientOptions) {
     if (!opts.url) throw new TypeError("createClient: url is required")
     if (!opts.token) throw new TypeError("createClient: token is required")
+    checkWorkspace(opts.workspace)
     this.#opts = { intMode: "number", retries: 2, ...opts, url: opts.url.replace(/\/+$/, "") }
     this.#fetch = opts.fetch ?? globalThis.fetch.bind(globalThis)
   }
@@ -122,10 +165,18 @@ export class Client {
     return new Client({ ...this.#opts, database: name, branch })
   }
 
+  /**
+   * A client that acts in another workspace, by name or id. For an instance
+   * token, which belongs to none. A workspace token can only name its own.
+   */
+  workspace(name: string): Client {
+    return new Client({ ...this.#opts, workspace: name })
+  }
+
   // ---- transport
 
   async request<T>(method: string, path: string, opts: { body?: unknown; query?: Record<string, string | number | undefined>; safe?: boolean; signal?: AbortSignal; headers?: Record<string, string> } = {}): Promise<T> {
-    const url = new URL(this.#opts.url + path)
+    const url = new URL(this.#opts.url + scopePath(this.#opts.workspace, path))
     for (const [k, v] of Object.entries(opts.query ?? {})) {
       if (v !== undefined && v !== "") url.searchParams.set(k, String(v))
     }
@@ -181,7 +232,7 @@ export class Client {
   }
 
   async raw(method: string, path: string, opts: { body?: BodyInit; query?: Record<string, string>; contentType?: string; signal?: AbortSignal } = {}): Promise<Response> {
-    const url = new URL(this.#opts.url + path)
+    const url = new URL(this.#opts.url + scopePath(this.#opts.workspace, path))
     for (const [k, v] of Object.entries(opts.query ?? {})) url.searchParams.set(k, v)
     const headers: Record<string, string> = { authorization: `Bearer ${this.#opts.token}`, ...this.#opts.headers }
     if (opts.contentType) headers["content-type"] = opts.contentType
@@ -198,8 +249,8 @@ export class Client {
   #target(): string {
     const db = this.#opts.database
     if (!db) throw new TypeError("this client has no database; pass database to createClient or use client.database(name)")
-    const base = `/v1/databases/${encodeURIComponent(db)}`
-    return this.#opts.branch ? `${base}/branches/${encodeURIComponent(this.#opts.branch)}` : base
+    const base = `/v1/databases/${enc(db)}`
+    return this.#opts.branch ? `${base}/branches/${enc(this.#opts.branch)}` : base
   }
 
   #decode(r: ResultOut): Result {
@@ -249,6 +300,11 @@ export class Client {
     rename: (db: string, name: string) => this.request<DatabaseOut>("PATCH", `/v1/databases/${enc(db)}`, { body: { name } }),
     delete: (db: string) => this.request<DatabaseOut>("DELETE", `/v1/databases/${enc(db)}`),
     restore: (db: string, name?: string) => this.request<DatabaseOut>("POST", `/v1/databases/${enc(db)}/restore`, { body: name ? { name } : {} }),
+    /**
+     * Moves a database to another workspace. Needs an instance admin token.
+     * Every token that reached the database is revoked.
+     */
+    move: (db: string, workspace: string) => this.request<DatabaseOut>("POST", `/v1/databases/${enc(db)}/move`, { body: { workspace } }),
   }
 
   readonly branches = {
@@ -294,9 +350,13 @@ export class Client {
   readonly tokens = {
     list: (o: ListOptions = {}) => this.#page<TokenOut>("/v1/tokens", o),
     /**
-     * Creates a token. The full token is in `token` and is only shown here.
-     * With `accessKey`, the token also gets an S3 access key; its secret is
-     * in `secret_access_key`, also shown only here.
+     * Creates a token in the workspace. The full token is in `token` and is
+     * only shown here. With `accessKey`, the token also gets an S3 access
+     * key; its secret is in `secret_access_key`, also shown only here.
+     *
+     * Without `database`, `bucket` or `grants` the token reaches the whole
+     * workspace at `access`, including what is created later. It is never
+     * an instance token: those are made with `instance.tokens.create`.
      *
      * Pass `grants` instead of `access`, `database`, `branch` and `bucket`
      * for one token that reaches several databases and buckets, each at its
@@ -323,8 +383,48 @@ export class Client {
     revoke: (id: string) => this.request<void>("DELETE", `/v1/tokens/${enc(id)}`),
   }
 
+  /** The workspace's audit log. `instance.audit` is the whole instance's. */
   readonly audit = {
     list: (o: ListOptions = {}) => this.#page<AuditOut>("/v1/audit", o),
+  }
+
+  /**
+   * Workspaces. A workspace token sees only its own; creating, changing,
+   * deleting and restoring one need an instance admin token.
+   */
+  readonly workspaces = {
+    /** The workspace this client acts in. Limits and usage are only there for a token that reaches the whole workspace. */
+    current: () => this.request<WorkspaceOut>("GET", "/v1/workspace"),
+    list: (o: ListOptions = {}) => this.#page<WorkspaceOut>("/v1/workspaces", o),
+    /** Workspaces in the trash. */
+    trash: (o: ListOptions = {}) => this.#page<WorkspaceOut>("/v1/workspaces", o, { trashed: "true" }),
+    get: (workspace: string) => this.request<WorkspaceOut>("GET", `/v1/workspaces/${enc(workspace)}`),
+    /** Limits left out take the instance's settings for new workspaces; 0 means no limit of its own. */
+    create: (name: string, o: WorkspaceLimits & { idempotencyKey?: string } = {}) =>
+      this.request<WorkspaceOut>("POST", "/v1/workspaces", { body: { name, ...limitsBody(o) }, headers: idem(o.idempotencyKey) }),
+    update: (workspace: string, o: WorkspaceLimits & { name?: string }) =>
+      this.request<WorkspaceOut>("PATCH", `/v1/workspaces/${enc(workspace)}`, { body: { name: o.name, ...limitsBody(o) } }),
+    /** Moves a workspace to the trash. Everything in it stops answering at once and can be restored until the trash retention passes. */
+    delete: (workspace: string) => this.request<WorkspaceOut>("DELETE", `/v1/workspaces/${enc(workspace)}`),
+    restore: (workspace: string, name?: string) =>
+      this.request<WorkspaceOut>("POST", `/v1/workspaces/${enc(workspace)}/restore`, { body: name ? { name } : {} }),
+  }
+
+  /** What belongs to the instance and no workspace. Needs an instance admin token. */
+  readonly instance = {
+    tokens: {
+      list: (o: ListOptions = {}) => this.#page<TokenOut>("/v1/instance/tokens", o),
+      /** Creates an instance token, which belongs to no workspace and can act in any. */
+      create: (o: { name: string; access: "read" | "write" | "admin"; accessKey?: boolean; expiresInDays?: number }) =>
+        this.request<TokenOut & { token: string; secret_access_key?: string }>("POST", "/v1/instance/tokens", {
+          body: { name: o.name, access: o.access, access_key: o.accessKey || undefined, expires_in_days: o.expiresInDays },
+        }),
+      revoke: (id: string) => this.request<void>("DELETE", `/v1/instance/tokens/${enc(id)}`),
+    },
+    audit: {
+      /** Every workspace's entries and the instance's own. `workspace` keeps one workspace's, by name or id. */
+      list: (o: ListOptions & { workspace?: string } = {}) => this.#page<AuditOut>("/v1/instance/audit", o, { workspace: o.workspace }),
+    },
   }
 
   readonly buckets = {
@@ -338,11 +438,16 @@ export class Client {
       }),
     /** Deletes an empty bucket. */
     delete: (bucket: string) => this.request<void>("DELETE", `/v1/buckets/${enc(bucket)}`),
+    /**
+     * Moves a bucket to another workspace. Needs an instance admin token.
+     * Every token that reached the bucket is revoked.
+     */
+    move: (bucket: string, workspace: string) => this.request<BucketOut>("POST", `/v1/buckets/${enc(bucket)}/move`, { body: { workspace } }),
   }
 
   /** Object operations on one bucket. */
   bucket(name: string): Bucket {
-    return new Bucket(this, name, this.#fetch, this.#opts.url, this.#opts.token, this.#opts.headers)
+    return new Bucket(this, name, this.#fetch, this.#opts.url, this.#opts.token, this.#opts.headers, this.#opts.workspace)
   }
 
   /** Imports a SQLite file (format "db") or SQL dump (format "sql") into a branch. */
@@ -361,9 +466,29 @@ export class Client {
     return this.raw("GET", `${branchPath(db, branch)}/export`, { query: { format } })
   }
 
-  async #page<T>(path: string, o: ListOptions): Promise<Page<T>> {
-    const r = await this.request<{ data: T[]; next_cursor: string }>("GET", path, { query: { limit: o.limit, cursor: o.cursor } })
+  async #page<T>(path: string, o: ListOptions, query: Record<string, string | undefined> = {}): Promise<Page<T>> {
+    const r = await this.request<{ data: T[]; next_cursor: string }>("GET", path, { query: { ...query, limit: o.limit, cursor: o.cursor } })
     return { data: r.data, nextCursor: r.next_cursor }
+  }
+}
+
+/** A workspace's own limits. 0 means no limit of its own; the instance limits always apply on top. */
+export interface WorkspaceLimits {
+  /** Most databases, counting the trash. */
+  maxDatabases?: number
+  maxBuckets?: number
+  /** Most bytes its databases' branches may take together. */
+  maxDatabaseBytes?: number
+  /** Most bytes its buckets may hold together. */
+  maxObjectBytes?: number
+}
+
+function limitsBody(o: WorkspaceLimits) {
+  return {
+    max_databases: o.maxDatabases,
+    max_buckets: o.maxBuckets,
+    max_database_bytes: o.maxDatabaseBytes,
+    max_object_bytes: o.maxObjectBytes,
   }
 }
 
@@ -425,15 +550,17 @@ export class Bucket {
   readonly #url: string
   readonly #token: string
   readonly #headers?: Record<string, string>
+  readonly #workspace?: string
   readonly name: string
 
-  constructor(client: Client, name: string, f: typeof fetch, url: string, token: string, headers?: Record<string, string>) {
+  constructor(client: Client, name: string, f: typeof fetch, url: string, token: string, headers?: Record<string, string>, workspace?: string) {
     this.#client = client
     this.name = name
     this.#fetch = f
     this.#url = url
     this.#token = token
     this.#headers = headers
+    this.#workspace = workspace
   }
 
   #path(sub: string) {
@@ -441,7 +568,7 @@ export class Bucket {
   }
 
   #objectURL(key: string) {
-    const url = new URL(this.#url + this.#path("object"))
+    const url = new URL(this.#url + scopePath(this.#workspace, this.#path("object")))
     url.searchParams.set("key", key)
     return url
   }
@@ -464,9 +591,10 @@ export class Bucket {
       headers["content-length"] = String(o.contentLength)
       init.duplex = "half"
     }
+    const url = this.#objectURL(key)
     let res: Response
     try {
-      res = await this.#fetch(this.#objectURL(key), init)
+      res = await this.#fetch(url, init)
     } catch (err) {
       if (o.signal?.aborted) throw err
       throw new LumbungError("network_error", 0, `request to ${new URL(this.#url).origin} failed`, { cause: err })
@@ -480,9 +608,10 @@ export class Bucket {
     const headers: Record<string, string> = { authorization: `Bearer ${this.#token}`, ...this.#headers }
     const range = rangeHeader(o.range)
     if (range) headers.range = range
+    const url = this.#objectURL(key)
     let res: Response
     try {
-      res = await this.#fetch(this.#objectURL(key), { headers, signal: o.signal })
+      res = await this.#fetch(url, { headers, signal: o.signal })
     } catch (err) {
       if (o.signal?.aborted) throw err
       throw new LumbungError("network_error", 0, `request to ${new URL(this.#url).origin} failed`, { cause: err })
@@ -506,9 +635,10 @@ export class Bucket {
 
   /** An object's record, or null when there's no object with that key (or no such bucket). */
   async head(key: string, o: { signal?: AbortSignal } = {}): Promise<ObjectOut | null> {
+    const url = this.#objectURL(key)
     let res: Response
     try {
-      res = await this.#fetch(this.#objectURL(key), {
+      res = await this.#fetch(url, {
         method: "HEAD",
         headers: { authorization: `Bearer ${this.#token}`, ...this.#headers },
         signal: o.signal,

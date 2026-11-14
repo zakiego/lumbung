@@ -10,6 +10,9 @@
 //    the dashboard calls.
 // 2. The database is created through the dashboard as the owner, so the
 //    engine's audit log names them (dashboard:<email>).
+//    Then a second workspace: its own database of the same name, a member
+//    invited into it alone, what they can and can't do through the
+//    dashboard, and the engine holding their level by itself (PLAN 17.8).
 // 3. Everything else goes through the SDK (packages/client/dist, so build it
 //    first) and the engine's REST and MCP endpoints.
 //
@@ -33,7 +36,10 @@ const dashboardDir = join(root, "apps/dashboard")
 const serverBuild = join(dashboardDir, ".output/server")
 
 const OWNER = { name: "E2E Owner", email: "owner@example.com", password: "correct-horse-battery" }
+const MEMBER = { name: "E2E Member", email: "member@example.com", password: "another-horse-battery" }
 const DB = "e2e-app"
+// A second workspace, for the member who is given only that one.
+const WS2 = "e2e-agent"
 
 // ---------------------------------------------------------------------------
 // Steps and cleanup
@@ -363,18 +369,18 @@ async function main() {
     })
 
     await step(`create database ${DB} through the dashboard as the owner`, async () => {
-      const d = await owner.call<{ name: string; default_branch: string }>("src/fns/databases.ts#createDatabase", { name: DB })
+      const d = await owner.call<{ name: string; default_branch: string }>("src/fns/databases.ts#createDatabase", { ws: "default", name: DB })
       check(d.name === DB && d.default_branch === "main", `unexpected result ${JSON.stringify(d)}`)
     })
 
     await step("create bucket e2e-files through the dashboard as the owner", async () => {
-      const b = await owner.call<{ name: string; object_count: number }>("src/fns/buckets.ts#createBucket", { name: "e2e-files" })
+      const b = await owner.call<{ name: string; object_count: number }>("src/fns/buckets.ts#createBucket", { ws: "default", name: "e2e-files" })
       check(b.name === "e2e-files" && b.object_count === 0, `unexpected bucket ${JSON.stringify(b)}`)
     })
 
     await step("upload a file through the dashboard's streaming route", async () => {
       const body = "hello from the e2e run"
-      const res = await fetch(`${dashboard.url}/app/api/objects?bucket=e2e-files&key=${encodeURIComponent("docs/hello.txt")}`, {
+      const res = await fetch(`${dashboard.url}/app/api/objects?ws=default&bucket=e2e-files&key=${encodeURIComponent("docs/hello.txt")}`, {
         method: "PUT",
         headers: { ...owner.headers(), "content-type": "text/plain", "content-length": String(body.length) },
         body,
@@ -384,7 +390,7 @@ async function main() {
 
     await step("upload a large file in parts through the dashboard (multipart)", async () => {
       const key = encodeURIComponent("videos/big.bin")
-      const base = `${dashboard.url}/app/api/objects?bucket=e2e-files&key=${key}`
+      const base = `${dashboard.url}/app/api/objects?ws=default&bucket=e2e-files&key=${key}`
       const start = await fetch(`${base}&uploads`, { method: "POST", headers: { ...owner.headers(), "x-object-content-type": "application/octet-stream" } })
       const { uploadId } = (await start.json()) as { uploadId: string }
       check(start.ok && /^up_/.test(uploadId ?? ""), `start: HTTP ${start.status}`)
@@ -412,11 +418,126 @@ async function main() {
     })
 
     await step("browse the bucket's docs/ folder and download the file", async () => {
-      const html = await (await owner.get(`/app/buckets/e2e-files?prefix=${encodeURIComponent("docs/")}`)).text()
+      const html = await (await owner.get(`/app/w/default/buckets/e2e-files?prefix=${encodeURIComponent("docs/")}`)).text()
       check(html.includes("hello.txt") && html.includes("22 B"), `the server-rendered bucket page doesn't list hello.txt: ${html.slice(0, 300)}`)
-      const res = await owner.get(`/app/api/objects?bucket=e2e-files&key=${encodeURIComponent("docs/hello.txt")}`)
+      const res = await owner.get(`/app/api/objects?ws=default&bucket=e2e-files&key=${encodeURIComponent("docs/hello.txt")}`)
       check(res.ok && (await res.text()) === "hello from the e2e run", `download: HTTP ${res.status}`)
       check(/^attachment/.test(res.headers.get("content-disposition") ?? ""), "the download isn't an attachment")
+    })
+
+    // ---- two workspaces (PLAN 17.8)
+
+    const refused = async (browser: Browser, fn: string, data: unknown, want: RegExp) => {
+      try {
+        await browser.call(fn, data)
+      } catch (e) {
+        check(e instanceof ServerFnError && want.test(e.message), `${fn}: wrong error: ${String(e)}`)
+        return
+      }
+      throw new Error(`${fn} succeeded, want an error matching ${want}`)
+    }
+    const defaultId = (await service.workspaces.list({ limit: 200 })).data.find((w) => w.default)!.id
+
+    const second = await step(`create workspace ${WS2} through the dashboard, limited to 2 databases`, async () => {
+      const w = await owner.call<{ id: string; name: string; limits?: { max_databases: number } }>("src/fns/workspaces.ts#createWorkspace", { name: WS2, maxDatabases: 2 })
+      check(w.name === WS2 && /^ws_/.test(w.id) && w.limits?.max_databases === 2, `unexpected workspace ${JSON.stringify(w)}`)
+      return w
+    })
+
+    await step("a name used in the default workspace is free in the second one, up to its limit", async () => {
+      await owner.call("src/fns/databases.ts#createDatabase", { ws: WS2, name: DB })
+      await owner.call("src/fns/databases.ts#createDatabase", { ws: WS2, name: "e2e-moving" })
+      await refused(owner, "src/fns/databases.ts#createDatabase", { ws: WS2, name: "one-too-many" }, /limit|databases/i)
+      const here = (await service.workspace(WS2).databases.list()).data.map((d) => d.name).sort()
+      check(here.join() === [DB, "e2e-moving"].join(), `the second workspace holds ${here.join()}`)
+      const there = (await service.databases.list()).data.map((d) => d.name)
+      check(there.join() === DB, `the default workspace holds ${there.join()}`)
+    })
+
+    await step("an old dashboard URL goes to the same page in the default workspace", async () => {
+      const res = await fetch(`${dashboard.url}/app/db/${DB}/data?branch=main`, { headers: owner.headers(), redirect: "manual" })
+      const to = res.headers.get("location") ?? ""
+      check(res.status >= 300 && res.status < 400 && to.endsWith(`/app/w/default/db/${DB}/data?branch=main`), `HTTP ${res.status}, location ${to}`)
+    })
+
+    const member = new Browser(dashboard, ids, seroval)
+    await step("invite a member into the second workspace only, and they join", async () => {
+      const access = { owner: false, grants: [{ workspace: second.id, role: "member" }] }
+      const { url } = await owner.call<{ url: string }>("src/fns/admin.ts#inviteMember", { email: MEMBER.email, access })
+      const token = url.split("/invite/")[1]
+      check(token, `no token in ${url}`)
+      await member.call("src/fns/session.ts#acceptInvite", { token, name: MEMBER.name, password: MEMBER.password })
+      check(member.cookieNames().some((n) => n.includes("session_token")), "joining didn't sign the member in")
+    })
+
+    await step("the member sees their workspace, and the default one doesn't exist for them", async () => {
+      const mine = await (await member.get(`/app/w/${WS2}`)).text()
+      check(mine.includes("e2e-moving"), `the member's workspace page doesn't list its databases: ${mine.slice(0, 300)}`)
+      for (const ws of ["default", defaultId, "no-such-workspace"]) {
+        const html = await (await member.get(`/app/w/${ws}`)).text()
+        check(html.includes("That workspace doesn") && !html.includes("e2e-files"), `/app/w/${ws} shows something to the member: ${html.slice(0, 300)}`)
+        await refused(member, "src/fns/databases.ts#createBranch", { ws, db: DB, name: "sneak" }, /workspace doesn't exist/)
+        await refused(member, "src/fns/buckets.ts#deleteObject", { ws, bucket: "e2e-files", key: "docs/hello.txt" }, /workspace doesn't exist/)
+        const res = await member.get(`/app/api/objects?ws=${ws}&bucket=e2e-files&key=${encodeURIComponent("docs/hello.txt")}`)
+        check(res.status === 404, `download from ${ws}: HTTP ${res.status}`)
+      }
+      const head = await service.bucket("e2e-files").head("docs/hello.txt")
+      check(head !== null, "the default workspace's file is gone")
+    })
+
+    await step("the member changes data in their workspace, and what takes an admin or an owner is refused", async () => {
+      const b = await member.call<{ name: string }>("src/fns/databases.ts#createBranch", { ws: WS2, db: DB, name: "by-member" })
+      check(b.name === "by-member", `unexpected branch ${JSON.stringify(b)}`)
+      await refused(member, "src/fns/databases.ts#createDatabase", { ws: WS2, name: "by-member" }, /admin/)
+      await refused(member, "src/fns/databases.ts#deleteDatabase", { ws: WS2, db: DB }, /admin/)
+      await refused(member, "src/fns/admin.ts#createToken", { ws: WS2, name: "mine", access: "admin" }, /admin/)
+      await refused(member, "src/fns/workspaces.ts#createWorkspace", { name: "mine" }, /owner/)
+      await refused(member, "src/fns/workspaces.ts#updateWorkspace", { ws: WS2, maxDatabases: 0 }, /owner/)
+      await refused(member, "src/fns/workspaces.ts#moveDatabase", { ws: WS2, db: DB, to: defaultId }, /owner/)
+      await refused(member, "src/fns/admin.ts#inviteMember", { email: "friend@example.com", access: { owner: true } }, /owner/)
+      const { data } = await service.workspace(WS2).audit.list({ limit: 100 })
+      const entry = data.find((a) => a.action === "branch.create" && a.actor === `dashboard:${MEMBER.email}`)
+      check(entry?.result === "ok", `no branch.create by the member in ${JSON.stringify(data.map((a) => [a.action, a.actor]))}`)
+    })
+
+    await step("the engine holds the member's level by itself, with the header the dashboard sends", async () => {
+      const asMember = (method: string, path: string, body?: unknown) =>
+        fetch(`${engine.url}${path}`, {
+          method,
+          headers: {
+            authorization: `Bearer ${engine.token}`,
+            "content-type": "application/json",
+            "x-lumbung-actor": `dashboard:${MEMBER.email}`,
+            "x-lumbung-actor-access": "write",
+          },
+          body: body ? JSON.stringify(body) : undefined,
+        })
+      const create = await asMember("POST", `/v1/workspaces/${second.id}/databases`, { name: "past-the-dashboard" })
+      check(create.status === 403, `creating a database at the member's level: HTTP ${create.status}`)
+      const other = await asMember("GET", "/v1/workspaces")
+      check(other.status === 400, `an instance endpoint at the member's level: HTTP ${other.status}`)
+      const short = await asMember("GET", "/v1/databases")
+      check(short.status === 400, `a URL without the workspace at the member's level: HTTP ${short.status}`)
+      const read = await asMember("GET", `/v1/workspaces/${second.id}/databases`)
+      check(read.ok, `listing at the member's level: HTTP ${read.status}`)
+    })
+
+    await step("the owner moves a database to the default workspace", async () => {
+      await owner.call("src/fns/workspaces.ts#moveDatabase", { ws: WS2, db: "e2e-moving", to: defaultId })
+      const there = (await service.databases.list()).data.map((d) => d.name).sort()
+      check(there.join() === [DB, "e2e-moving"].join(), `the default workspace holds ${there.join()}`)
+      const here = (await service.workspace(WS2).databases.list()).data.map((d) => d.name)
+      check(here.join() === DB, `the second workspace holds ${here.join()}`)
+    })
+
+    await step("deleting the workspace shuts the member out, and restoring it lets them back in", async () => {
+      await owner.call("src/fns/workspaces.ts#deleteWorkspace", { ws: WS2 })
+      const gone = await (await member.get(`/app/w/${WS2}`)).text()
+      check(gone.includes("That workspace doesn"), `the deleted workspace still shows: ${gone.slice(0, 300)}`)
+      await refused(member, "src/fns/databases.ts#createBranch", { ws: WS2, db: DB, name: "after-delete" }, /workspace doesn't exist/)
+      await owner.call("src/fns/workspaces.ts#restoreWorkspace", { id: second.id })
+      const back = await member.call<{ name: string }>("src/fns/databases.ts#createBranch", { ws: WS2, db: DB, name: "after-restore" })
+      check(back.name === "after-restore", `unexpected branch ${JSON.stringify(back)}`)
     })
   } catch (e) {
     if (e instanceof StepFailed) console.log(`\n--- dashboard output (tail)\n${dashboard.log().slice(-3000)}`)

@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createAgent } from "@ui-sdk/react/agent"
 import { expect, test, vi } from "vitest"
-import { type CreatedToken, CreateTokenDialog, type NewToken, TokenTable } from "./tokens"
+import { type CreatedToken, CreateTokenDialog, EVERY_WORKSPACE, type NewToken, TokenTable, WHOLE_WORKSPACE } from "./tokens"
 
 let approve = false
 const agent = createAgent({ allow: (step) => !step.confirm || approve })
@@ -82,9 +82,11 @@ test("one token reaches a database and a bucket, each at its own level", async (
 
   await user.click(screen.getByRole("button", { name: "New token" }))
   await user.type(screen.getByLabelText("Token name"), "agent")
-  // Everything already reaches it all, so there is nothing to add.
+  // The whole workspace already reaches it all, so there is nothing to add.
   expect(screen.queryByRole("button", { name: "Add another" })).toBeNull()
+  expect(screen.getByRole("combobox", { name: "Reaches" }).textContent).toContain("Whole workspace")
   await user.click(screen.getByRole("combobox", { name: "Reaches" }))
+  expect(screen.getByRole("option", { name: "Whole workspace" })).toBeTruthy()
   await user.click(screen.getByRole("option", { name: "shop" }))
   await user.click(screen.getByRole("combobox", { name: "Access" }))
   await user.click(screen.getByRole("option", { name: "Read and write" }))
@@ -95,9 +97,9 @@ test("one token reaches a database and a bucket, each at its own level", async (
   expect(screen.getByRole("combobox", { name: "Reaches 2" }).textContent).toContain("Bucket photos")
   expect(screen.getByRole("combobox", { name: "Access 2" }).textContent).toContain("Read")
   expect(screen.getByRole("checkbox", { name: "S3 access key" })).toBeTruthy()
-  // Everything is only offered while it is the one row.
+  // The whole workspace is only offered while it is the one row.
   await user.click(screen.getByRole("combobox", { name: "Reaches" }))
-  expect(screen.queryByRole("option", { name: "Everything" })).toBeNull()
+  expect(screen.queryByRole("option", { name: "Whole workspace" })).toBeNull()
   expect(screen.queryByRole("option", { name: "photos" })).toBeNull()
   await user.keyboard("{Escape}")
 
@@ -284,9 +286,31 @@ const token = (t: Partial<TokenOut>): TokenOut => ({
   ...t,
 })
 
-test("a workspace token reaches everything", () => {
+test("a workspace token reaches the whole workspace", () => {
   render(<TokenTable tokens={[token({ id: "w1", name: "backend", scope: "workspace", access: "write", database_id: "" })]} names={{ databases: {}, branches: {} }} onRevoke={async () => {}} />)
-  expect(screen.getByText("Everything")).toBeTruthy()
+  expect(screen.getByText("Whole workspace")).toBeTruthy()
+  expect(WHOLE_WORKSPACE).toBe("Whole workspace")
+})
+
+test("an instance token reaches every workspace, in the table and in the dialog", async () => {
+  const user = userEvent.setup()
+  const onCreate = vi.fn(async (_t: NewToken) => ({ token: SECRET }))
+  const instance = token({ id: "i1", name: "ops", scope: "instance", access: "admin", database_id: "", workspace_id: "" })
+  render(
+    <>
+      <TokenTable tokens={[instance]} names={{ databases: {}, branches: {} }} everything={EVERY_WORKSPACE} onRevoke={async () => {}} />
+      <CreateTokenDialog databases={[]} loadBranches={async () => []} everything={EVERY_WORKSPACE} onCreate={onCreate} />
+    </>,
+  )
+  expect(screen.getByText("ops").closest("tr")!.textContent).toContain("Every workspace")
+  expect(screen.queryByText("Whole workspace")).toBeNull()
+
+  await user.click(screen.getByRole("button", { name: "New token" }))
+  expect(screen.getByRole("combobox", { name: "Reaches" }).textContent).toContain("Every workspace")
+  await user.type(screen.getByLabelText("Token name"), "ops-2")
+  await user.click(screen.getByRole("button", { name: "Create token" }))
+  await waitFor(() => expect(onCreate).toHaveBeenCalledOnce())
+  expect(onCreate.mock.calls[0]?.[0]).toEqual({ name: "ops-2", access: "read" })
 })
 
 test("the service token can't be revoked", () => {

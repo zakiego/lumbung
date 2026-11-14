@@ -217,3 +217,23 @@ test("a searchable select's empty message takes no space until nothing matches",
   await waitFor(() => expect(empty.hasAttribute("data-empty")).toBe(true))
   expect(empty.textContent).toBe("No matches")
 })
+
+test("a labeled scroll area is a named region, an unlabeled one is plain", () => {
+  render(
+    <>
+      <ScrollArea label="Workspaces" type="auto">
+        <p>a</p>
+      </ScrollArea>
+      <ScrollArea>
+        <p>b</p>
+      </ScrollArea>
+    </>,
+  )
+  const region = screen.getByRole("region", { name: "Workspaces" })
+  expect(region.getAttribute("data-slot")).toBe("scroll-area-viewport")
+  expect(region.textContent).toBe("a")
+  expect(screen.getAllByRole("region")).toHaveLength(1)
+  const plain = screen.getByText("b").closest("[data-slot='scroll-area-viewport']")!
+  expect(plain.hasAttribute("role")).toBe(false)
+  expect(plain.hasAttribute("aria-label")).toBe(false)
+})

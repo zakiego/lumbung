@@ -9,16 +9,19 @@ sidebar:
 
 lumbung talks to a Lumbung engine over its REST API.
 
-Connection settings come from flags, then LUMBUNG_URL, LUMBUNG_TOKEN and LUMBUNG_DATABASE, then the profile saved by `lumbung login`.
+Connection settings come from flags, then LUMBUNG_URL, LUMBUNG_TOKEN, LUMBUNG_DATABASE and LUMBUNG_WORKSPACE, then the profile saved by `lumbung login`.
+
+A token for a workspace acts in that workspace. An instance token acts in the default workspace, or in the one --workspace names.
 
 Every command takes these flags:
 
 ```text
-      --json             print JSON instead of tables
-      --profile string   saved profile to use
-      --token string     API token (or LUMBUNG_TOKEN)
-      --url string       engine URL (or LUMBUNG_URL)
-  -y, --yes              don't ask before destructive actions
+      --json               print JSON instead of tables
+      --profile string     saved profile to use
+      --token string       API token (or LUMBUNG_TOKEN)
+      --url string         engine URL (or LUMBUNG_URL)
+  -w, --workspace string   workspace to act in, by name or id (or LUMBUNG_WORKSPACE); only an instance token needs it
+  -y, --yes                don't ask before destructive actions
 ```
 
 ## lumbung branch
@@ -142,6 +145,20 @@ List buckets.
 lumbung bucket list
 ```
 
+### lumbung bucket move
+
+Move a bucket to another workspace.
+
+Moves a bucket from the workspace the command acts in to another one. Needs an instance admin token. Every token that reached the bucket is revoked: make new ones in the new workspace.
+
+```text
+lumbung bucket move NAME [flags]
+```
+
+```text
+      --to string   the workspace to move it to, by name or id
+```
+
 ### lumbung bucket update
 
 Change a bucket's name, public read access or CORS origins.
@@ -188,6 +205,20 @@ List databases.
 
 ```text
 lumbung db list
+```
+
+### lumbung db move
+
+Move a database to another workspace.
+
+Moves a database from the workspace the command acts in to another one. Needs an instance admin token. Every token that reached the database is revoked: make new ones in the new workspace.
+
+```text
+lumbung db move NAME [flags]
+```
+
+```text
+      --to string   the workspace to move it to, by name or id
 ```
 
 ### lumbung db restore
@@ -256,7 +287,7 @@ lumbung import dump.sql --db app --branch staging --mode replace
 
 Save the engine URL and a token as a profile.
 
-Saves the engine URL and a token (and optionally a default database) to the config file, mode 600, as the profile named by --profile (default "default"), and makes it current. The token is read from --token, LUMBUNG_TOKEN, or one line on standard input.
+Saves the engine URL and a token (and optionally a default database and, for an instance token, the workspace to act in) to the config file, mode 600, as the profile named by --profile (default "default"), and makes it current. The token is read from --token, LUMBUNG_TOKEN, or one line on standard input.
 
 ```text
 lumbung login [flags]
@@ -501,6 +532,8 @@ List, create and revoke API tokens.
 
 Create a token; the full token is printed once.
 
+Without --db, --bucket or --grant the token reaches the whole workspace at --access, including what is created later. With admin access it can create and delete databases and buckets there.
+
 ```text
 lumbung token create [flags]
 ```
@@ -510,9 +543,10 @@ lumbung token create [flags]
       --access-key            also make an S3 access key for the token
       --branch string         limit the token to this branch of --db
       --bucket string         limit the token to this bucket (instead of --db)
-      --db string             limit the token to this database (default: the whole instance)
+      --db string             limit the token to this database (default: the whole workspace)
       --expires-in-days int   expire after this many days (0: never)
       --grant stringArray     reach several things with one token: db=NAME:ACCESS, db=NAME/BRANCH:ACCESS or bucket=NAME:ACCESS (repeat it)
+      --instance              make an instance token, which belongs to no workspace
       --name string           what the token is for
 ```
 
@@ -520,14 +554,20 @@ lumbung token create [flags]
 lumbung token create --name ci --db app --access write --expires-in-days 90
 lumbung token create --name uploads --bucket photos --access write --access-key
 lumbung token create --name agent --grant db=notes:write --grant bucket=files:read
+lumbung token create --name agent --access admin --workspace agent
+lumbung token create --name operator --access admin --instance
 ```
 
 ### lumbung token list
 
-List tokens.
+List the workspace's tokens, or the instance's with --instance.
 
 ```text
-lumbung token list
+lumbung token list [flags]
+```
+
+```text
+      --instance   list instance tokens instead of the workspace's
 ```
 
 ### lumbung token revoke
@@ -535,7 +575,11 @@ lumbung token list
 Revoke a token.
 
 ```text
-lumbung token revoke TOKEN_ID
+lumbung token revoke TOKEN_ID [flags]
+```
+
+```text
+      --instance   revoke an instance token
 ```
 
 ### lumbung version
@@ -544,5 +588,93 @@ Print the CLI version.
 
 ```text
 lumbung version
+```
+
+## lumbung workspace
+
+List, create, change, delete and restore workspaces.
+
+### lumbung workspace create
+
+Create a workspace.
+
+Creates an empty workspace. Limits that aren't passed take the instance's settings for new workspaces. Make its first token with `lumbung token create --workspace NAME`.
+
+```text
+lumbung workspace create NAME [flags]
+```
+
+```text
+      --max-buckets int             most buckets (0: no limit of its own)
+      --max-database-bytes string   most space its databases may take together, like 2GiB (0: no limit of its own)
+      --max-databases int           most databases, counting the trash (0: no limit of its own)
+      --max-object-bytes string     most space its buckets may hold together, like 5GiB (0: no limit of its own)
+```
+
+```sh
+lumbung workspace create agent --max-databases 20 --max-object-bytes 5GiB
+lumbung token create --name agent --access admin --workspace agent
+```
+
+### lumbung workspace delete
+
+Move a workspace to the trash, with everything in it.
+
+Moves a workspace to the trash. At once its tokens stop working and its databases and buckets stop answering. It can be restored, with everything in it, until the trash retention passes.
+
+```text
+lumbung workspace delete NAME
+```
+
+### lumbung workspace list
+
+List workspaces.
+
+```text
+lumbung workspace list
+```
+
+### lumbung workspace restore
+
+Restore a workspace from the trash.
+
+```text
+lumbung workspace restore NAME_OR_ID [flags]
+```
+
+```text
+      --name string   restore under this name instead of the old one
+```
+
+### lumbung workspace show
+
+Show a workspace's limits and what it holds; without a name, the one this token acts in.
+
+```text
+lumbung workspace show [NAME_OR_ID]
+```
+
+### lumbung workspace trash
+
+List workspaces in the trash.
+
+```text
+lumbung workspace trash
+```
+
+### lumbung workspace update
+
+Rename a workspace or change its limits.
+
+```text
+lumbung workspace update NAME_OR_ID [flags]
+```
+
+```text
+      --max-buckets int             most buckets (0: no limit of its own)
+      --max-database-bytes string   most space its databases may take together, like 2GiB (0: no limit of its own)
+      --max-databases int           most databases, counting the trash (0: no limit of its own)
+      --max-object-bytes string     most space its buckets may hold together, like 5GiB (0: no limit of its own)
+      --name string                 the workspace's new name
 ```
 
