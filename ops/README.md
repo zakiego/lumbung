@@ -14,7 +14,7 @@ How we run Lumbung at https://lumbung.zakiego.com on the Mac mini (the `zaki-sel
 | Edge Worker | `apps/edge`, route `lumbung.zakiego.com/*` |
 | Nightly backup | launchd `com.zakiego.lumbung-backup`, 03:30, log `~/selfhost/lumbung-backup.log` |
 
-Requests go Worker first. `/app`, `/v1`, `/mcp` and `/health` pass to the zone origin (the tunnel), everything else to Pages. The tunnel splits the app paths by port, with the path rule above the host rule:
+Requests go Worker first. `/app`, `/v1`, `/mcp`, `/libsql` and `/health` pass to the zone origin (the tunnel), everything else to Pages. The tunnel splits the app paths by port, with the path rule above the host rule:
 
 ```yaml
   # Lumbung dashboard, must stay above the engine rule (zaki-selfhost)
