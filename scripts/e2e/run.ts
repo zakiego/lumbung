@@ -366,6 +366,29 @@ async function main() {
       const d = await owner.call<{ name: string; default_branch: string }>("src/fns/databases.ts#createDatabase", { name: DB })
       check(d.name === DB && d.default_branch === "main", `unexpected result ${JSON.stringify(d)}`)
     })
+
+    await step("create bucket e2e-files through the dashboard as the owner", async () => {
+      const b = await owner.call<{ name: string; object_count: number }>("src/fns/buckets.ts#createBucket", { name: "e2e-files" })
+      check(b.name === "e2e-files" && b.object_count === 0, `unexpected bucket ${JSON.stringify(b)}`)
+    })
+
+    await step("upload a file through the dashboard's streaming route", async () => {
+      const body = "hello from the e2e run"
+      const res = await fetch(`${dashboard.url}/app/api/objects?bucket=e2e-files&key=${encodeURIComponent("docs/hello.txt")}`, {
+        method: "PUT",
+        headers: { ...owner.headers(), "content-type": "text/plain", "content-length": String(body.length) },
+        body,
+      })
+      check(res.ok, `upload: HTTP ${res.status} ${await res.text()}`)
+    })
+
+    await step("browse the bucket's docs/ folder and download the file", async () => {
+      const html = await (await owner.get(`/app/buckets/e2e-files?prefix=${encodeURIComponent("docs/")}`)).text()
+      check(html.includes("hello.txt") && html.includes("22 B"), `the server-rendered bucket page doesn't list hello.txt: ${html.slice(0, 300)}`)
+      const res = await owner.get(`/app/api/objects?bucket=e2e-files&key=${encodeURIComponent("docs/hello.txt")}`)
+      check(res.ok && (await res.text()) === "hello from the e2e run", `download: HTTP ${res.status}`)
+      check(/^attachment/.test(res.headers.get("content-disposition") ?? ""), "the download isn't an attachment")
+    })
   } catch (e) {
     if (e instanceof StepFailed) console.log(`\n--- dashboard output (tail)\n${dashboard.log().slice(-3000)}`)
     throw e
@@ -450,6 +473,14 @@ async function main() {
     const r = await rpc("tools/list")
     const names = (r.tools as { name: string }[]).map((t) => t.name)
     check(names.includes("query"), `tools: ${names.join(", ")}`)
+  })
+
+  await step("the same file over the S3 API with a presigned URL", async () => {
+    const t = await service.tokens.create({ name: "e2e-files", access: "read", bucket: "e2e-files", accessKey: true })
+    const scoped = createClient({ url: engine.url, token: t.token })
+    const { url } = await scoped.bucket("e2e-files").presign("docs/hello.txt", { expiresIn: 60 })
+    const res = await fetch(url)
+    check(res.ok && (await res.text()) === "hello from the e2e run", `presigned GET: HTTP ${res.status}`)
   })
 
   await step("MCP tools/call query returns the rows", async () => {
