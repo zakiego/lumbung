@@ -36,7 +36,7 @@ export COMPOSE_FILE=compose.yaml:ops/compose.selfhost.yaml
 
 ## First deploy
 
-1. Clone and deploy. The first `pre-deploy.sh` skips the backups (no volumes yet) and installs the nightly backup agent.
+1. Clone and deploy. The first deploy skips the backups (no volumes yet), and `pre-deploy.sh` installs the nightly backup agent.
 
    ```bash
    gh repo clone zakiego/lumbung ~/selfhost/lumbung
@@ -81,7 +81,9 @@ A push to `main` deploys (once allowlisted). By hand:
 ~/.agents/skills/zaki-selfhost/scripts/deploy.sh lumbung
 ```
 
-`deploy.sh` runs `scripts/pre-deploy.sh` (backs up `meta.db` and `dashboard.db`), then `scripts/deploy-up.sh` (builds engine, then dashboard, swaps, rolls back to `:prev` when health fails).
+`deploy.sh` runs `scripts/pre-deploy.sh` (cheap checks: docker answers, `meta.db` is one the running engine can serve, the nightly backup is installed), then `scripts/deploy-up.sh`: it builds the engine, then the dashboard, backs up `meta.db` and `dashboard.db` right before the swap with the old images, swaps, and rolls back to `:prev` when health fails.
+
+A `meta.db` backup must be one the old engine can restore: its manifest's `meta_version` can't be higher than the migrations that engine knows. When it is (a `meta.db` already migrated past the running engine), the copy is removed and the deploy stops before the swap. `LUMBUNG_ALLOW_NO_ROLLBACK=1` deploys anyway, for when the new engine is the fix.
 
 Going back one image after a healthy deploy:
 
@@ -103,7 +105,7 @@ docker compose up -d --no-build --wait
 
 | Kind | Where | Kept |
 |---|---|---|
-| Pre-deploy `meta.db` | `lumbung_data:/data/backups/pre-deploy/<time>-meta` | 5 |
+| Pre-deploy `meta.db` | `lumbung_data:/data/backups/pre-deploy/<time>-meta` | 5 good ones |
 | Pre-deploy `dashboard.db` | `lumbung_dashboard:/data/backups/pre-deploy-<time>.db` | 5 |
 | Nightly, full engine | `lumbung_data:/data/backups/nightly/<time>` and `~/selfhost/lumbung-backups/engine/<time>` | 7 each |
 | Nightly `dashboard.db` | `lumbung_dashboard:/data/backups/nightly-dashboard-<time>.db` and `~/selfhost/lumbung-backups/dashboard/` | 7 each |
