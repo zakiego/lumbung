@@ -1,9 +1,9 @@
 import type { ObjectOut } from "@lumbung/client"
-import { Link, createFileRoute, useRouter } from "@tanstack/react-router"
+import { Link, createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { ArchiveIcon, SettingsIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { z } from "zod"
-import { ObjectTable, PublicBadge, UploadButton, prefixTrail } from "@/components/app/buckets"
+import { DEFAULT_OBJECT_SORT, OBJECT_SORT_KEYS, defaultSortDir, type ObjectSort, ObjectSortMenu, ObjectTable, PublicBadge, UploadButton, prefixTrail, sortSearch } from "@/components/app/buckets"
 import { errorText } from "@/components/app/form-dialog"
 import { PageBody, PageHeader } from "@/components/app/shell"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
@@ -24,6 +24,9 @@ export const Route = createFileRoute("/_app/buckets/$bucket/")({
       .max(1024)
       .optional()
       .transform((p) => (p ? p.slice(0, p.lastIndexOf("/") + 1) || undefined : undefined)),
+    // A bad sort in a hand-edited URL falls back to the default.
+    sort: z.enum(OBJECT_SORT_KEYS).optional().catch(undefined),
+    dir: z.enum(["asc", "desc"]).optional().catch(undefined),
   }),
   loaderDeps: ({ search }) => ({ prefix: search.prefix ?? "" }),
   // A new folder is a new page: no state, or a late "Load more", carries over.
@@ -56,7 +59,9 @@ export const Route = createFileRoute("/_app/buckets/$bucket/")({
 
 function Frame({ children, actions }: { children: React.ReactNode; actions?: React.ReactNode }) {
   const { bucket } = Route.useParams()
-  const { prefix = "" } = Route.useSearch()
+  const search = Route.useSearch()
+  const prefix = search.prefix ?? ""
+  const keep = { sort: search.sort, dir: search.dir }
   const trail = prefixTrail(prefix)
   return (
     <>
@@ -78,7 +83,7 @@ function Frame({ children, actions }: { children: React.ReactNode; actions?: Rea
                     {bucket}
                   </h1>
                 ) : (
-                  <Link to="/buckets/$bucket" params={{ bucket }} className="block truncate font-mono text-muted-foreground hover:text-foreground">
+                  <Link to="/buckets/$bucket" params={{ bucket }} search={keep} className="block truncate font-mono text-muted-foreground hover:text-foreground">
                     {bucket}
                   </Link>
                 )}
@@ -95,7 +100,7 @@ function Frame({ children, actions }: { children: React.ReactNode; actions?: Rea
                       {t.label}
                     </h1>
                   ) : (
-                    <Link to="/buckets/$bucket" params={{ bucket }} search={{ prefix: t.prefix }} className="block truncate font-mono text-muted-foreground hover:text-foreground">
+                    <Link to="/buckets/$bucket" params={{ bucket }} search={{ prefix: t.prefix, ...keep }} className="block truncate font-mono text-muted-foreground hover:text-foreground">
                       {t.label}
                     </Link>
                   )}
@@ -113,7 +118,13 @@ function Frame({ children, actions }: { children: React.ReactNode; actions?: Rea
 function BucketPage() {
   const page = Route.useLoaderData()
   const { viewer } = Route.useRouteContext()
-  const { prefix = "" } = Route.useSearch()
+  const search = Route.useSearch()
+  const prefix = search.prefix ?? ""
+  const sort: ObjectSort = { key: search.sort ?? DEFAULT_OBJECT_SORT.key, dir: search.dir ?? (search.sort ? defaultSortDir(search.sort) : DEFAULT_OBJECT_SORT.dir) }
+  const navigate = useNavigate({ from: Route.fullPath })
+  const setSort = (next: ObjectSort) => {
+    void navigate({ search: (s) => ({ prefix: s.prefix, ...sortSearch(next) }), replace: true, resetScroll: false })
+  }
   const router = useRouter()
   const canWrite = can(viewer.role, "write")
   const canAdmin = can(viewer.role, "admin")
@@ -167,6 +178,8 @@ function BucketPage() {
           The bucket holds {number.format(page.bucket.object_count)} {page.bucket.object_count === 1 ? "object" : "objects"}, {formatBytes(page.bucket.size_bytes)}
         </span>
         {page.bucket.public_read && <PublicBadge />}
+        {/* Type and Modified are hidden on narrow screens, so their sort lives here. */}
+        {page.objects.length + page.prefixes.length > 0 && <ObjectSortMenu sort={sort} onSortChange={setSort} className="-mr-2 ml-auto md:hidden" />}
       </div>
       <ObjectTable
         bucket={name}
@@ -175,9 +188,12 @@ function BucketPage() {
         prefixes={[...page.prefixes, ...more.prefixes]}
         canWrite={canWrite}
         onDelete={remove}
+        sort={sort}
+        onSortChange={setSort}
         footer={
           more.cursor && (
-            <div className="mt-4 flex justify-center">
+            <div className="mt-4 flex flex-col items-center gap-2">
+              {sort.key !== "name" && <p className="text-xs text-muted-foreground">Sorted within loaded items</p>}
               <Button variant="secondary" onClick={loadMore} disabled={loading}>
                 {loading ? "Loading…" : "Load more"}
               </Button>
