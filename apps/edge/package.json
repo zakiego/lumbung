@@ -1,0 +1,18 @@
+{
+  "name": "@lumbung/edge",
+  "private": true,
+  "description": "Cloudflare Worker for our own deployment: routes the public hostname to the Pages site, the dashboard and the engine.",
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "XDG_CONFIG_HOME=$HOME/.wrangler-accounts/personal wrangler deploy",
+    "deploy:preview": "XDG_CONFIG_HOME=$HOME/.wrangler-accounts/personal wrangler deploy -e preview"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0",
+    "wrangler": "4.161.0"
+  }
+}

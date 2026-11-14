@@ -1,0 +1,40 @@
+# Our deployment on the Mac mini (zaki-selfhost), layered over compose.yaml:
+#
+#   COMPOSE_FILE=compose.yaml:ops/compose.selfhost.yaml docker compose ...
+#
+# scripts/deploy-up.sh, pre-deploy.sh and backup.sh set COMPOSE_FILE
+# themselves. Ports stay on 127.0.0.1, so the tunnel (cloudflared on the
+# same machine) is the only way in from outside. See ops/README.md.
+
+# Both services trust the proxy header only from loopback and private
+# networks: cloudflared reaches the published ports from the host, and
+# OrbStack hands that traffic to the container from a Docker network address.
+x-proxy: &proxy
+  LUMBUNG_CLIENT_IP_HEADER: CF-Connecting-IP
+  LUMBUNG_TRUSTED_PROXIES: 127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7
+
+# Logs capped at 30 MB per container, as in the zaki-selfhost template.
+x-logging: &logging
+  driver: local
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  engine:
+    ports: !override
+      - "127.0.0.1:4805:4870"
+    mem_limit: 1g
+    environment:
+      <<: *proxy
+    logging: *logging
+
+  dashboard:
+    ports: !override
+      - "127.0.0.1:4806:4871"
+    mem_limit: 512m
+    environment:
+      <<: *proxy
+      LUMBUNG_DASHBOARD_URL: https://lumbung.zakiego.com
+      LUMBUNG_PUBLIC_ENGINE_URL: https://lumbung.zakiego.com
+    logging: *logging
