@@ -26,6 +26,9 @@
 //   <!-- docs-test: continue -->      run the next ts/js sample appended to
 //                                     the page's last sample without this
 //                                     marker (its setup), as one program
+//   <!-- docs-test: example NAME -->  run the page inside examples/NAME, so
+//                                     its samples resolve that example's
+//                                     packages (default: drizzle)
 // Otherwise the fixture is a database `app` with a `users` table
 // (id, email, name) holding one row, as the quickstart leaves it.
 //
@@ -41,19 +44,22 @@ import { startEngine, type Running } from "../../packages/client/test/engine.ts"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const docsDir = join(root, "apps/site/src/content/docs/docs")
-// Inside examples/drizzle, so samples resolve @lumbung/client and drizzle.
-const workRoot = join(root, "examples/drizzle/.docs-test")
+// Inside an example package, so samples resolve its dependencies:
+// examples/drizzle has @lumbung/client and drizzle, examples/libsql has
+// @libsql/client and drizzle.
+const workRootOf = (example: string) => join(root, "examples", example, ".docs-test")
+const workRoots = new Set<string>()
 
 type Sample = { lang: string; code: string; title?: string; skip?: string; cont?: boolean; line: number }
-type Page = { file: string; mode: "fixture" | "fresh" | "empty-app"; samples: Sample[] }
+type Page = { file: string; mode: "fixture" | "fresh" | "empty-app"; example: string; samples: Sample[] }
 
 const RUN = new Set(["sh", "bash", "ts", "js", "sql"])
 const fileComment = /^\/\/ ([\w./-]+\.(?:ts|js|mjs|json))\s*$/
-const marker = /^\s*<!--\s*docs-test:\s*(skip|fresh|empty-app|continue)\b\s*(.*?)\s*-->\s*$/
+const marker = /^\s*<!--\s*docs-test:\s*(skip|fresh|empty-app|continue|example)\b\s*(.*?)\s*-->\s*$/
 
 function parse(file: string): Page {
   const lines = readFileSync(file, "utf8").split("\n")
-  const page: Page = { file, mode: "fixture", samples: [] }
+  const page: Page = { file, mode: "fixture", example: "drizzle", samples: [] }
   let pendingSkip: string | undefined
   let pendingContinue = false
   for (let i = 0; i < lines.length; i++) {
@@ -64,6 +70,9 @@ function parse(file: string): Page {
         pendingSkip = m[2]
       } else if (m[1] === "continue") {
         pendingContinue = true
+      } else if (m[1] === "example") {
+        if (!/^[a-z0-9-]+$/.test(m[2] ?? "")) throw new Error(`${relative(root, file)}:${i + 1}: docs-test: example needs a name`)
+        page.example = m[2]!
       } else {
         page.mode = m[1] as Page["mode"]
       }
@@ -136,6 +145,8 @@ function rewrite(code: string, engine: Running, lang: string): string {
 
 async function runPage(page: Page, bin: string): Promise<{ ran: number; skipped: number; failures: string[] }> {
   const rel = relative(docsDir, page.file)
+  const workRoot = workRootOf(page.example)
+  workRoots.add(workRoot)
   const work = join(workRoot, rel.replace(/[/.]/g, "_"))
   rmSync(work, { recursive: true, force: true })
   mkdirSync(join(work, "src"), { recursive: true })
@@ -222,7 +233,7 @@ for (const file of files) {
   failures.push(...r.failures)
   console.log(`${r.failures.length ? "FAIL" : "ok  "} ${relative(docsDir, file)}  (${r.ran} run, ${r.skipped} skipped)`)
 }
-rmSync(workRoot, { recursive: true, force: true })
+for (const w of workRoots) rmSync(w, { recursive: true, force: true })
 console.log(`\ndocs-test: ${ran} samples run, ${skipped} skipped with a reason, ${failures.length} failed`)
 if (failures.length) {
   console.log("\n" + failures.join("\n\n"))

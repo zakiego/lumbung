@@ -28,4 +28,4 @@ data/
 .DS_Store
 
 # docs-test working folders
-examples/drizzle/.docs-test/
+examples/*/.docs-test/
