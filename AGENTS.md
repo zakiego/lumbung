@@ -14,6 +14,7 @@ examples/        Runnable examples, tested in CI (drizzle: drizzle-kit + lumbung
 docs/adr         Decision records
 ops/             Our own deployment files and notes
 scripts/         CI helpers, worktree setup, wording check, docs tests
+skills/lumbung   Agent skill (SKILL.md) for connecting an app or agent to an instance; update it with API, CLI or SDK changes
 ```
 
 ## Rules
