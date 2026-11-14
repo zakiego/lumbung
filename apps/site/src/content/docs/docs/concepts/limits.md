@@ -70,6 +70,10 @@ The default workspace starts with no limits of its own, so an instance that neve
 
 The byte limits work like the instance's: a write, a branch copy, an import or an upload that would pass one is refused before anything is kept, and reads and deletes keep working. Revoked tokens are cleared after `LUMBUNG_TRASH_RETENTION`; until then a workspace holds at most ten times its live-token limit in token records, so minting and revoking in a loop hits `limit_reached` too.
 
+## Requests from the dashboard
+
+The dashboard uses one token, the service token, for everyone who signs in. Its requests are counted per person, by the name it sends in `X-Lumbung-Actor`, so one person can't use up the rate limit for the rest. Only the service token is counted this way.
+
 ## Connections
 
 Each open branch has one writer connection and up to `LUMBUNG_READERS_PER_BRANCH` (4) read-only ones. Writes to one branch run one at a time; reads run alongside them. At most `LUMBUNG_MAX_OPEN_BRANCHES` (64) branches keep connections open; the least recently used idle one closes to make room, and any branch idle for `LUMBUNG_IDLE_CONN_TIMEOUT` (5 minutes) closes on its own. A closed branch reopens on the next request.

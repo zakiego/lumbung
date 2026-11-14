@@ -508,6 +508,17 @@ func (s *Server) touch(ctx context.Context, tokenID string) {
 	}
 }
 
+// rateKey is what a principal's requests are counted under: its token. The
+// service token is one token for everyone who uses the dashboard, so its
+// requests are counted per person it names. One person, in one workspace,
+// then can't use up what the others need.
+func rateKey(p auth.Principal) string {
+	if p.Service && p.Actor != "" {
+		return p.TokenID + "\x00" + p.Actor
+	}
+	return p.TokenID
+}
+
 var actorRe = regexp.MustCompile(`^[^\x00-\x1f\x7f]{1,200}$`)
 
 // middleware runs around every operation: request id, authentication with
@@ -542,13 +553,13 @@ func (s *Server) middleware(ctx huma.Context, next func(huma.Context)) {
 		writeProblem(ctx, ae, id)
 		return
 	}
-	if ok, wait := s.perToken.Allow(p.TokenID); !ok {
+	if a := ctx.Header("X-Lumbung-Actor"); a != "" && p.Service && actorRe.MatchString(a) {
+		p.Actor = a
+	}
+	if ok, wait := s.perToken.Allow(rateKey(p)); !ok {
 		ctx.SetHeader("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 		writeProblem(ctx, apierr.New(apierr.RateLimited, "too many requests for this token"), id)
 		return
-	}
-	if a := ctx.Header("X-Lumbung-Actor"); a != "" && p.Service && actorRe.MatchString(a) {
-		p.Actor = a
 	}
 	// Every operation runs as a principal acting in exactly one workspace.
 	p, err = s.act(ctx.Context(), p, selFrom(ctx.Context()))

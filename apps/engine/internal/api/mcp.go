@@ -110,12 +110,12 @@ func (s *Server) gateRequest(w http.ResponseWriter, r *http.Request) (auth.Princ
 		w.Header().Set("WWW-Authenticate", `Bearer realm="lumbung"`)
 		return auth.Principal{}, id, ae
 	}
-	if ok, wait := s.perToken.Allow(p.TokenID); !ok {
-		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-		return auth.Principal{}, id, apierr.New(apierr.RateLimited, "too many requests for this token")
-	}
 	if a := r.Header.Get("X-Lumbung-Actor"); a != "" && p.Service && actorRe.MatchString(a) {
 		p.Actor = a
+	}
+	if ok, wait := s.perToken.Allow(rateKey(p)); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		return auth.Principal{}, id, apierr.New(apierr.RateLimited, "too many requests for this token")
 	}
 	// As on REST, the request runs as a principal acting in one workspace.
 	p, err = s.act(r.Context(), p, selFrom(r.Context()))
