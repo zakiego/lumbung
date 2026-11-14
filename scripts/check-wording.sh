@@ -21,9 +21,10 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   exit 2
 fi
 
-# A hosted product we never name. Built from character classes so this file
-# doesn't spell it out. Matched as a whole word, any case.
-name_re='[Dd][1]'
+# Hosted products we never name: the database one, and the object storage one
+# that became relevant with buckets (PLAN 16). Built from character classes so
+# this file doesn't spell them out. Matched as whole words, any case.
+name_re='[Dd][1]|[Rr][2]'
 # Comparison framing. Only the files that state the rule may quote it.
 phrase_re='clone of|alternative to|drop-in replacement for'
 rule_files=(PLAN.md AGENTS.md scripts/check-wording.sh scripts/check-wording.test.sh)

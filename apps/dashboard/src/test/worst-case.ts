@@ -35,9 +35,9 @@ export const invites: Invite[] = [{ id: "i1", email: LONG_EMAIL, role: "member",
 
 export function audit(n: number): AuditOut[] {
   const base: AuditOut[] = [
-    { id: 1, actor: `dashboard:${LONG_EMAIL}`, token_id: "", action: "branch.promote", target: `db_01JCX9/br_01JCXA/${LONG_BRANCH}`, result: "ok", code: "", at, request_id: "r1" },
-    { id: 2, actor: "", token_id: "tok_01JCX9ZK4M2", action: "snapshot.restore", target: "db_01JCX9/snap_01JCXB", result: "error", code: "branch_name_taken", at, request_id: "r2" },
-    { id: 3, actor: "", token_id: "", action: "x", target: "", result: "ok", code: "", at, request_id: "r3" },
+    { id: 1, actor: `dashboard:${LONG_EMAIL}`, token_id: "", action: "branch.promote", target: `db_01JCX9/br_01JCXA/${LONG_BRANCH}`, result: "ok", code: "", at, request_id: "req-1" },
+    { id: 2, actor: "", token_id: "tok_01JCX9ZK4M2", action: "snapshot.restore", target: "db_01JCX9/snap_01JCXB", result: "error", code: "branch_name_taken", at, request_id: "req-2" },
+    { id: 3, actor: "", token_id: "", action: "x", target: "", result: "ok", code: "", at, request_id: "req-3" },
   ]
   return Array.from({ length: n }, (_, i) => ({ ...base[i % base.length]!, id: i }))
 }
