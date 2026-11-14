@@ -1,6 +1,6 @@
 import { useRouter } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
-import { type FormEvent, type ReactNode, useState } from "react"
+import { type FormEvent, type ReactElement, type ReactNode, useState } from "react"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
@@ -15,6 +15,10 @@ type NameDialogProps = {
   trigger: string
   triggerIcon?: ReactNode
   triggerVariant?: "default" | "secondary" | "outline"
+  /** Replaces the button look, for a trigger that sits somewhere else, like the sidebar. */
+  triggerClassName?: string
+  /** Wraps the trigger, for a tooltip around it. */
+  wrapTrigger?: (trigger: ReactElement<Record<string, unknown>>) => ReactNode
   title: string
   description?: string
   label: string
@@ -33,6 +37,8 @@ export function NameDialog({
   trigger,
   triggerIcon = <PlusIcon aria-hidden="true" />,
   triggerVariant = "default",
+  triggerClassName,
+  wrapTrigger = (t) => t,
   title,
   description,
   label,
@@ -75,10 +81,12 @@ export function NameDialog({
         }
       }}
     >
-      <DialogTrigger className={buttonVariants({ variant: triggerVariant })}>
-        {triggerIcon}
-        {trigger}
-      </DialogTrigger>
+      {wrapTrigger(
+        <DialogTrigger className={triggerClassName ?? buttonVariants({ variant: triggerVariant })}>
+          {triggerIcon}
+          <span>{trigger}</span>
+        </DialogTrigger>,
+      )}
       <DialogContent>
         <DialogTitle>{title}</DialogTitle>
         {description && <DialogDescription>{description}</DialogDescription>}
@@ -124,6 +132,8 @@ export function useCreateDatabase(onDone?: () => void) {
   }
 }
 
-export function CreateDatabaseDialog({ onCreate }: { onCreate: (name: string) => Promise<unknown> }) {
-  return <NameDialog trigger="New database" title="Create database" label="Name" placeholder="my-app" submit="Create" pendingSubmit="Creating…" onSubmit={onCreate} />
+export type TriggerSlot = Pick<NameDialogProps, "triggerClassName" | "wrapTrigger">
+
+export function CreateDatabaseDialog({ onCreate, ...slot }: { onCreate: (name: string) => Promise<unknown> } & TriggerSlot) {
+  return <NameDialog trigger="New database" title="Create database" label="Name" placeholder="my-app" submit="Create" pendingSubmit="Creating…" onSubmit={onCreate} {...slot} />
 }

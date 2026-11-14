@@ -10,7 +10,7 @@ import { TruncatedTip } from "@/components/ui/tooltip"
 import { formatBytes, number, timeAgo } from "@/lib/format"
 import { APP_BASE } from "@/lib/paths"
 import { Confirm, errorText } from "./form-dialog"
-import { NameDialog } from "./name-dialog"
+import { NameDialog, type TriggerSlot } from "./name-dialog"
 
 export const BUCKET_PATTERN = "[a-z0-9][a-z0-9\\-]{1,61}[a-z0-9]"
 
@@ -26,7 +26,7 @@ export function useCreateBucket(onDone?: () => void) {
   }
 }
 
-export function CreateBucketDialog({ onCreate, variant }: { onCreate: (name: string) => Promise<unknown>; variant?: "default" | "secondary" }) {
+export function CreateBucketDialog({ onCreate, variant, ...slot }: { onCreate: (name: string) => Promise<unknown>; variant?: "default" | "secondary" } & TriggerSlot) {
   return (
     <NameDialog
       trigger="New bucket"
@@ -40,6 +40,7 @@ export function CreateBucketDialog({ onCreate, variant }: { onCreate: (name: str
       pattern={BUCKET_PATTERN}
       patternHint="Use 3 to 63 lowercase letters, digits and dashes, starting and ending with a letter or digit."
       onSubmit={onCreate}
+      {...slot}
     />
   )
 }
