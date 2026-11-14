@@ -400,6 +400,21 @@ func TestWorkspaceIsolationLists(t *testing.T) {
 		if cur := w.ok(w.do(tok, "GET", "/v1/workspace", "/v1/workspace", nil), 200).json(t); cur["id"] != a.id || cur["name"] != "acme" || cur["default"] != false {
 			t.Fatalf("%s token's workspace: %v", who, cur)
 		}
+		// Limits and usage are totals over the whole workspace. A token for
+		// one database or bucket would learn from them what else is there,
+		// so only a token for the whole workspace sees them.
+		whole := who == "admin" || who == "write" || who == "read"
+		for _, path := range []string{"/v1/workspace", "/v1/workspaces/acme", "/v1/workspaces"} {
+			m := w.ok(w.do(tok, "GET", "", path, nil), 200).json(t)
+			if path == "/v1/workspaces" {
+				m = m["data"].([]any)[0].(map[string]any)
+			}
+			_, hasLimits := m["limits"]
+			_, hasUsage := m["usage"]
+			if hasLimits != whole || hasUsage != whole {
+				t.Fatalf("%s token: GET %s shows limits %v, usage %v: %v", who, path, hasLimits, hasUsage, m)
+			}
+		}
 	}
 	// A workspace admin sees all of its own, and only that.
 	names := func(path string) string {
@@ -1365,4 +1380,264 @@ func TestWorkspaceManagement(t *testing.T) {
 	e.fails(e.do(ro, "POST", pWS, pWS, map[string]any{"name": "x"}), 403, "forbidden")
 	e.fails(e.do(ro, "POST", "", "/v1/workspaces/bigger/databases", map[string]any{"name": "x"}), 403, "forbidden")
 	e.ok(e.do(ro, "GET", "", "/v1/workspaces/bigger/databases", nil), 200)
+}
+
+// noFollow sends a request without following redirects.
+func (e *env) noFollow(token, method, path string, body []byte) resp {
+	e.t.Helper()
+	req, err := http.NewRequest(method, e.http.URL+path, bytes.NewReader(body))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	res, err := client.Do(req)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(res.Body)
+	return resp{status: res.StatusCode, header: res.Header, body: buf.Bytes()}
+}
+
+// A qualified URL never redirects to its short form. The router cleans a
+// path with empty, "." or ".." segments by redirecting, and the short path
+// would send an instance token to the default workspace.
+func TestWorkspaceQualifiedURLNeverRedirects(t *testing.T) {
+	w := newWSWorld(t, nil)
+	// A notes database in the default workspace too, holding something else.
+	w.createDB("notes")
+	w.ok(w.sql(w.admin, "notes", "CREATE TABLE t(v)"), 200)
+	w.ok(w.sql(w.admin, "notes", "INSERT INTO t VALUES ('secret of the default workspace')"), 200)
+	query, _ := json.Marshal(map[string]any{"sql": "SELECT v FROM t"})
+	write, _ := json.Marshal(map[string]any{"sql": "INSERT INTO t VALUES ('landed in the wrong workspace')"})
+	pipeline, _ := json.Marshal(map[string]any{"baton": nil, "requests": []any{exec("SELECT v FROM t"), closeReq}})
+	for _, path := range []string{
+		"/v1/workspaces/acme/databases//notes/query",
+		"/v1/workspaces/acme/databases/./notes/query",
+		"/v1/workspaces/acme/databases/x/../notes/query",
+		"/v1/workspaces/acme/databases/notes/query/",
+		"/v1/workspaces/acme/databases/notes//query",
+		"/v1/workspaces/acme/databases/%2e/notes/query",
+		"/v1/workspaces/acme/libsql//notes/main/v2/pipeline",
+		"/v1/workspaces/acme/libsql/notes/main/./v2/pipeline",
+		"/v1/workspaces/acme/mcp/",
+		"/v1/workspaces/acme/mcp/../databases",
+		"/v1/workspaces/acme/tokens/",
+		"/v1/workspaces/acme/buckets//files",
+	} {
+		for _, tok := range []string{w.admin, w.a.admin.Token, w.b.admin.Token} {
+			for _, body := range [][]byte{query, write, pipeline} {
+				for _, method := range []string{"POST", "GET", "DELETE"} {
+					r := w.noFollow(tok, method, path, body)
+					if r.status >= 300 && r.status < 400 || r.header.Get("Location") != "" {
+						t.Fatalf("%s %s redirects to %q (%d)", method, path, r.header.Get("Location"), r.status)
+					}
+					if r.status < 400 || bytes.Contains(r.body, []byte("secret of")) {
+						t.Fatalf("%s %s: %d %s", method, path, r.status, r.body)
+					}
+					// And a client that does follow redirects ends up nowhere.
+					if f := w.do(tok, method, "", path, body); f.status < 400 || bytes.Contains(f.body, []byte("secret of")) {
+						t.Fatalf("%s %s, following redirects: %d %s", method, path, f.status, f.body)
+					}
+				}
+			}
+		}
+	}
+	// A path the router cleans before the workspace's part ends is still a
+	// qualified URL after cleaning: the redirect keeps the workspace.
+	if r := w.noFollow(w.admin, "POST", "/v1/workspaces/acme//databases/notes/query", query); r.status != 307 || r.header.Get("Location") != "/v1/workspaces/acme/databases/notes/query" {
+		t.Fatalf("a slash after the workspace: %d to %q", r.status, r.header.Get("Location"))
+	}
+	// Nothing was written anywhere.
+	for name, tok := range map[string]string{"default": w.admin, "acme": w.a.admin.Token, "globex": w.b.admin.Token} {
+		if r := w.ok(w.sql(tok, "notes", "SELECT count(*) AS n FROM t"), 200); !bytes.Contains(r.body, []byte(`"value":"1"`)) {
+			t.Fatalf("%s/notes changed: %s", name, r.body)
+		}
+	}
+	// The canonical qualified URL still works.
+	if r := w.ok(w.do(w.admin, "POST", "", "/v1/workspaces/acme/databases/notes/query", query), 200); !bytes.Contains(r.body, []byte(w.a.secret)) {
+		t.Fatalf("canonical qualified URL: %s", r.body)
+	}
+}
+
+// 17.9 row 9: a workspace's own limits on bytes. A write past them is
+// refused with nothing partial kept, and other workspaces aren't affected.
+func TestWorkspaceIsolationQuotas(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) { c.RateLimit, c.RateBurst = 100000, 100000 })
+	mk := func(name string, limits map[string]any) key {
+		limits["name"] = name
+		e.ok(e.do(e.admin, "POST", "/v1/workspaces", "/v1/workspaces", limits), 201)
+		var k key
+		r := e.ok(e.do(e.admin, "POST", "", "/v1/workspaces/"+name+"/tokens", map[string]any{"name": "admin", "access": "admin", "access_key": true}), 201)
+		if err := json.Unmarshal(r.body, &k); err != nil {
+			t.Fatal(err)
+		}
+		e.ok(e.do(k.Token, "POST", pDBs, "/v1/databases", map[string]any{"name": "app"}), 201)
+		e.ok(e.sql(k.Token, "app", "CREATE TABLE t(v)"), 200)
+		e.ok(e.do(k.Token, "POST", "/v1/buckets", "/v1/buckets", map[string]any{"name": "files"}), 201)
+		return k
+	}
+	tight := mk("tight", map[string]any{"max_database_bytes": 400_000, "max_object_bytes": 100_000})
+	roomy := mk("roomy", map[string]any{})
+	big := "INSERT INTO t VALUES (zeroblob(300000))"
+	count := func(k key) string {
+		r := e.ok(e.sql(k.Token, "app", "SELECT count(*) FROM t"), 200).json(t)
+		return r["rows"].([]any)[0].([]any)[0].(map[string]any)["value"].(string)
+	}
+
+	// Databases: a small write fits, one past the limit doesn't, and the
+	// refused one leaves no rows behind.
+	e.ok(e.sql(tight.Token, "app", "INSERT INTO t VALUES (zeroblob(1000))"), 200)
+	e.fails(e.sql(tight.Token, "app", big), 507, "workspace_quota_exceeded")
+	e.fails(e.do(tight.Token, "POST", pBatch, "/v1/databases/app/batch", map[string]any{"statements": []any{
+		map[string]any{"sql": "INSERT INTO t VALUES (1)"}, map[string]any{"sql": big}}}), 507, "workspace_quota_exceeded")
+	wantErr(t, e.one(tight.Token, "app", "main", big), "workspace_quota_exceeded", "libSQL past the workspace limit")
+	if _, msg := call(t, e.mcp(tight.Token), "execute", map[string]any{"database": "app", "sql": big}); !strings.Contains(msg, "workspace_quota_exceeded") {
+		t.Fatalf("MCP past the workspace limit: %q", msg)
+	}
+	if n := count(tight); n != "1" {
+		t.Fatalf("a refused write left rows: %s", n)
+	}
+	// Copies count too: a second database's worth of branches doesn't fit.
+	e.ok(e.sql(tight.Token, "app", "INSERT INTO t VALUES (zeroblob(150000))"), 200)
+	e.fails(e.do(tight.Token, "POST", pBranches, "/v1/databases/app/branches", map[string]any{"name": "copy"}), 507, "workspace_quota_exceeded")
+	if got := len(e.ok(e.do(tight.Token, "GET", pBranches, "/v1/databases/app/branches", nil), 200).json(t)["data"].([]any)); got != 1 {
+		t.Fatalf("a refused branch was kept: %d branches", got)
+	}
+	// The other workspace isn't affected by any of it.
+	e.ok(e.sql(roomy.Token, "app", big), 200)
+	e.ok(e.do(roomy.Token, "POST", pBranches, "/v1/databases/app/branches", map[string]any{"name": "copy"}), 201)
+
+	// Objects, through REST, the S3 API and MCP.
+	blob := bytes.Repeat([]byte("x"), 80_000)
+	e.ok(e.do(tight.Token, "PUT", "/v1/buckets/{bucket}/object", "/v1/buckets/files/object?key=a", blob), 200)
+	e.fails(e.do(tight.Token, "PUT", "/v1/buckets/{bucket}/object", "/v1/buckets/files/object?key=b", blob), 507, "workspace_quota_exceeded")
+	e.s3Fails(e.s3(tight, "PUT", "/v1/s3/files/c", blob), 403, "QuotaExceeded")
+	if _, msg := call(t, e.mcp(tight.Token), "put_object", map[string]any{"bucket": "files", "key": "d", "text": string(blob)}); !strings.Contains(msg, "workspace_quota_exceeded") {
+		t.Fatalf("MCP put past the workspace limit: %q", msg)
+	}
+	// The limit is on the workspace, not the bucket: a second bucket shares it.
+	e.ok(e.do(tight.Token, "POST", "/v1/buckets", "/v1/buckets", map[string]any{"name": "more"}), 201)
+	e.fails(e.do(tight.Token, "PUT", "/v1/buckets/{bucket}/object", "/v1/buckets/more/object?key=e", blob), 507, "workspace_quota_exceeded")
+	// Replacing an object counts the difference only.
+	e.ok(e.do(tight.Token, "PUT", "/v1/buckets/{bucket}/object", "/v1/buckets/files/object?key=a", blob), 200)
+	list := e.ok(e.do(tight.Token, "GET", "/v1/buckets/{bucket}/objects", "/v1/buckets/files/objects", nil), 200).json(t)["data"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("refused uploads were kept: %v", list)
+	}
+	for _, k := range []string{"b", "c", "d"} {
+		e.fails(e.do(tight.Token, "GET", "", "/v1/buckets/files/object?key="+k, nil), 404, "object_not_found")
+	}
+	e.ok(e.do(roomy.Token, "PUT", "/v1/buckets/{bucket}/object", "/v1/buckets/files/object?key=a", blob), 200)
+	e.ok(e.do(roomy.Token, "PUT", "/v1/buckets/{bucket}/object", "/v1/buckets/files/object?key=b", blob), 200)
+
+	// What the workspace sees matches what was kept, and its own admin
+	// can't lift the limit; the instance admin can.
+	usage := e.ok(e.do(tight.Token, "GET", "/v1/workspace", "/v1/workspace", nil), 200).json(t)["usage"].(map[string]any)
+	if usage["object_bytes"] != 80_000.0 || usage["database_bytes"].(float64) <= 150_000 || usage["database_bytes"].(float64) > 400_000 {
+		t.Fatalf("usage: %v", usage)
+	}
+	e.fails(e.do(tight.Token, "PATCH", "/v1/workspaces/{ws}", "/v1/workspaces/tight", map[string]any{"max_database_bytes": 0}), 403, "forbidden")
+	e.ok(e.do(e.admin, "PATCH", "/v1/workspaces/{ws}", "/v1/workspaces/tight", map[string]any{"max_database_bytes": 0, "max_object_bytes": 0}), 200)
+	e.ok(e.sql(tight.Token, "app", big), 200)
+	e.ok(e.do(tight.Token, "PUT", "/v1/buckets/{bucket}/object", "/v1/buckets/files/object?key=b", blob), 200)
+}
+
+// A workspace token that tries an instance action is refused, and the
+// refusal is logged in its own workspace. It can't push the instance's
+// history out of the instance log.
+func TestWorkspaceCannotFloodInstanceAudit(t *testing.T) {
+	w := newWSWorld(t, func(c *config.Config) { c.AuditMaxRows = 5 })
+	instance := func() []any {
+		return w.ok(w.do(w.admin, "GET", "", "/v1/instance/audit?limit=200", nil), 200).json(t)["data"].([]any)
+	}
+	creates := func() int {
+		n := 0
+		for _, raw := range instance() {
+			if e := raw.(map[string]any); e["action"] == "workspace.create" && e["workspace_id"] == "" {
+				n++
+			}
+		}
+		return n
+	}
+	if creates() != 2 {
+		t.Fatalf("instance log at the start: %v", instance())
+	}
+	for i := 0; i < 20; i++ {
+		w.fails(w.do(w.a.read.Token, "POST", "/v1/workspaces", "/v1/workspaces", map[string]any{"name": "x"}), 403, "forbidden")
+		w.fails(w.do(w.a.admin.Token, "POST", "/v1/instance/tokens", "/v1/instance/tokens", map[string]any{"name": "x", "access": "admin"}), 403, "forbidden")
+		w.fails(w.do(w.a.dbAdmin, "PATCH", "/v1/workspaces/{ws}", "/v1/workspaces/globex", map[string]any{"name": "x"}), 403, "forbidden")
+	}
+	if creates() != 2 {
+		t.Fatalf("a workspace token pushed the instance's history out: %v", instance())
+	}
+	// The refusals are in workspace A's own log, capped there.
+	own := w.ok(w.do(w.a.admin.Token, "GET", "", "/v1/audit?limit=200", nil), 200).json(t)["data"].([]any)
+	if len(own) != 5 {
+		t.Fatalf("workspace A's log holds %d entries, want its cap of 5", len(own))
+	}
+	for _, raw := range own {
+		if e := raw.(map[string]any); e["result"] != "error" || e["code"] != "forbidden" || e["workspace_id"] != w.a.id {
+			t.Fatalf("workspace A's log: %v", e)
+		}
+	}
+	// B's log wasn't touched by A's noise.
+	if got := len(w.ok(w.do(w.b.admin.Token, "GET", "", "/v1/audit?limit=200", nil), 200).json(t)["data"].([]any)); got != 5 {
+		t.Fatalf("workspace B's log holds %d entries", got)
+	}
+}
+
+// Minting and revoking tokens in a loop can't grow meta.db without bound:
+// revoked tokens count against a hard cap until they are cleared, and an
+// instance cap doesn't tell a workspace how full the instance is.
+func TestWorkspaceBoundedTokensAndCapMessages(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) {
+		c.RateLimit, c.RateBurst = 100000, 100000
+		c.MaxTokensPerWorkspace, c.MaxDatabases, c.MaxBuckets = 2, 2, 2
+	})
+	e.ok(e.do(e.admin, "POST", "/v1/workspaces", "/v1/workspaces", map[string]any{"name": "loop"}), 201)
+	adm := e.ok(e.do(e.admin, "POST", "", "/v1/workspaces/loop/tokens", map[string]any{"name": "admin", "access": "admin"}), 201).json(t)["token"].(string)
+	minted := 1
+	for {
+		r := e.do(adm, "POST", pTokens, "/v1/tokens", map[string]any{"name": "x", "access": "read"})
+		if r.status != 201 {
+			e.fails(r, 409, "limit_reached")
+			break
+		}
+		minted++
+		e.ok(e.do(adm, "DELETE", pToken, "/v1/tokens/"+r.json(t)["id"].(string), nil), 204)
+		if minted > 100 {
+			t.Fatal("minting and revoking never hit a cap")
+		}
+	}
+	if minted != 20 {
+		t.Fatalf("the workspace held %d token rows before the cap, want 20 (10 times its 2 live tokens)", minted)
+	}
+	// Once the revoked ones are cleared, it mints again.
+	if n, err := e.srv.Engine.Meta().PurgeRevokedTokens(context.Background(), time.Now().Add(time.Hour)); err != nil || n != 19 {
+		t.Fatalf("purged %d revoked tokens, %v", n, err)
+	}
+	e.ok(e.do(adm, "POST", pTokens, "/v1/tokens", map[string]any{"name": "x", "access": "read"}), 201)
+	// The service token survives the purge even when revoked rows go.
+	e.ok(e.do(e.admin, "GET", "/v1/workspaces", "/v1/workspaces", nil), 200)
+
+	// The instance's own caps: the default workspace fills them, and the
+	// other workspace is told only that there is no room, not how many
+	// exist or how many the instance allows.
+	e.createDB("one")
+	e.createDB("two")
+	e.ok(e.do(e.admin, "POST", "/v1/buckets", "/v1/buckets", map[string]any{"name": "one"}), 201)
+	e.ok(e.do(e.admin, "POST", "/v1/buckets", "/v1/buckets", map[string]any{"name": "two"}), 201)
+	for _, r := range []resp{
+		e.do(adm, "POST", pDBs, "/v1/databases", map[string]any{"name": "mine"}),
+		e.do(adm, "POST", "/v1/buckets", "/v1/buckets", map[string]any{"name": "mine"}),
+	} {
+		e.fails(r, 409, "limit_reached")
+		if title := r.json(t)["title"].(string); strings.ContainsAny(title, "0123456789") {
+			t.Fatalf("the instance cap's message carries a number: %q", title)
+		}
+	}
 }

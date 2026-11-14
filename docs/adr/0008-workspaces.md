@@ -57,6 +57,7 @@ Picked: **the token decides, and a qualified URL exists for callers that have no
 - Short URLs (`/v1/databases/...`, `/v1/buckets/...`, `/v1/tokens`, `/v1/audit`, `/v1/trash`, `/v1/s3/...`, `/libsql/...`, `/mcp`) resolve in the caller's workspace. For a request with no workspace of its own (an instance token, an anonymous request) that is the default workspace.
 - Qualified URLs put `/v1/workspaces/{ws}` in front of the same paths, for every door: `/v1/workspaces/acme/databases`, `/v1/workspaces/acme/s3/photos/cat.jpg`, `/v1/workspaces/acme/libsql/app/main/`, `/v1/workspaces/acme/mcp`. `{ws}` is a name or an id. They sit under `/v1`, so no proxy rule changes.
 - A workspace-bound token may use a qualified URL only for its own workspace. For any other value it gets `workspace_not_found`, the same answer as a workspace that doesn't exist.
+- A qualified URL never redirects to a short one. A path the router would clean (empty, `.` or `..` segments) is no endpoint in its qualified form: a redirect to the short path would drop the workspace and send an instance token to the default one.
 
 The qualified form is one mechanism instead of a header because several clients can only be given a URL: a browser following a public link, `@libsql/client`, an S3 client's endpoint, an MCP connector. Every one of them already takes a base URL.
 
@@ -66,7 +67,7 @@ OpenAPI lists each operation once, at its short path, and states the qualified f
 
 ### Limits and quotas
 
-A workspace has `max_databases`, `max_buckets`, `max_database_bytes` (the branch files of its live databases) and `max_object_bytes` (its objects plus multipart parts in progress). 0 means no limit of its own. The instance limits still apply on top. A new workspace takes its limits from the request or from `LUMBUNG_WORKSPACE_MAX_*` settings; the default workspace starts with none, so an upgraded instance behaves as before. `LUMBUNG_MAX_WORKSPACES` caps workspaces and `LUMBUNG_MAX_TOKENS_PER_WORKSPACE` caps live tokens, so an agent with an admin token can't fill meta.db.
+A workspace has `max_databases`, `max_buckets`, `max_database_bytes` (the branch files of its live databases) and `max_object_bytes` (its objects plus multipart parts in progress). 0 means no limit of its own. The instance limits still apply on top. A new workspace takes its limits from the request or from `LUMBUNG_WORKSPACE_MAX_*` settings; the default workspace starts with none, so an upgraded instance behaves as before. `LUMBUNG_MAX_WORKSPACES` caps workspaces and `LUMBUNG_MAX_TOKENS_PER_WORKSPACE` caps live tokens. Revoked tokens are deleted after the trash retention, and until then a workspace holds at most ten times its live cap in token rows, so an agent with an admin token can't fill meta.db by minting and revoking either.
 
 Counts are checked in the transaction that inserts. Bytes are reserved before a write, the way the instance quota already works.
 
@@ -84,7 +85,9 @@ An instance admin can move a database or a bucket to another workspace. The live
 
 ### Audit
 
-Every entry records the workspace it happened in. `GET /v1/audit` is the request's workspace, for a workspace admin. `GET /v1/instance/audit` is everything, including instance actions (workspaces, instance tokens, moves), for an instance admin. The row cap applies per workspace, so one busy workspace can't push another's history out.
+Every entry records the workspace it happened in. `GET /v1/audit` is the request's workspace, for a workspace admin. `GET /v1/instance/audit` is everything, including instance actions (workspaces, instance tokens, moves), for an instance admin. The row cap applies per workspace, so one busy workspace can't push another's history out. An instance action a workspace token tries and is refused is logged in that token's workspace, not in the instance's log, for the same reason.
+
+A workspace's limits and usage are totals over everything in it, so only a token for the whole workspace sees them. A database or bucket token gets the workspace's name and id and nothing else.
 
 ### Dashboard
 
@@ -104,7 +107,7 @@ Nothing changes in the format: workspaces are rows in meta.db, which every backu
 
 ### Upgrade path
 
-Migration 6 is forward-only. It creates the default workspace, rebuilds `databases`, `buckets` and `tokens` with a `workspace_id`, carries `token_grants` across the rebuild (migration 5's comment), replaces the two name indexes with per-workspace ones, and stamps existing audit rows with the default workspace.
+Migration 6 is forward-only. It creates the default workspace, rebuilds `databases`, `buckets` and `tokens` with a `workspace_id`, carries `token_grants` across the rebuild (migration 5's comment), and replaces the two name indexes with per-workspace ones. Audit entries written before it keep no workspace, so they stay in the instance log: only an instance admin could read them before, and they name instance tokens and dashboard users.
 
 - Database, bucket and grants tokens land in the default workspace and work unchanged.
 - Instance tokens stay instance tokens, the service token included. On short URLs they act in the default workspace, which holds everything they could reach before.

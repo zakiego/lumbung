@@ -117,10 +117,10 @@ func (e *Engine) RestoreDatabase(ctx context.Context, ws, dbRef, name string) (m
 	}
 	entry := e.layout.TrashEntry(d.ID)
 	need := dirBytes(filepath.Join(entry, "dbs"))
-	if err := e.reserveBytes(need); err != nil {
+	if err := e.reserveBytes(ctx, d.WorkspaceID, need); err != nil {
 		return meta.Database{}, err
 	}
-	defer e.releaseBytes(need)
+	defer e.releaseBytes(d.WorkspaceID, need)
 	if err := moveIfExists(filepath.Join(entry, "dbs"), e.layout.DatabaseDir(d.ID)); err != nil {
 		return meta.Database{}, err
 	}
@@ -140,7 +140,7 @@ func (e *Engine) RestoreDatabase(ctx context.Context, ws, dbRef, name string) (m
 		return meta.Database{}, err
 	}
 	for _, b := range branches {
-		e.recordSize(b.ID, fileBytes(e.layout.BranchFile(d.ID, b.ID)))
+		e.recordSize(d.WorkspaceID, b.ID, fileBytes(e.layout.BranchFile(d.ID, b.ID)))
 	}
 	return restored, nil
 }

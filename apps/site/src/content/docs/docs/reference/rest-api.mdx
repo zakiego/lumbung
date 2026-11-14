@@ -1146,11 +1146,11 @@ Response `200`:
 | `default` (required) | boolean | The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted. |
 | `deleted_at` (required) | string or null | When it went to the trash, or null. |
 | `id` (required) | string |  |
-| `limits` (required) | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. |
+| `limits` | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. Left out for a token that doesn't reach the whole workspace. |
 | `name` (required) | string |  |
 | `purge_after` (required) | string or null | When a trashed workspace is removed for good, or null. |
 | `updated_at` (required) | string |  |
-| `usage` (required) | WorkspaceUsageOut |  |
+| `usage` | WorkspaceUsageOut | What the workspace holds now. Left out for a token that doesn't reach the whole workspace. |
 
 ### List workspaces
 
@@ -1194,11 +1194,11 @@ Response `201`:
 | `default` (required) | boolean | The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted. |
 | `deleted_at` (required) | string or null | When it went to the trash, or null. |
 | `id` (required) | string |  |
-| `limits` (required) | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. |
+| `limits` | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. Left out for a token that doesn't reach the whole workspace. |
 | `name` (required) | string |  |
 | `purge_after` (required) | string or null | When a trashed workspace is removed for good, or null. |
 | `updated_at` (required) | string |  |
-| `usage` (required) | WorkspaceUsageOut |  |
+| `usage` | WorkspaceUsageOut | What the workspace holds now. Left out for a token that doesn't reach the whole workspace. |
 
 ### Get a workspace
 
@@ -1216,11 +1216,11 @@ Response `200`:
 | `default` (required) | boolean | The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted. |
 | `deleted_at` (required) | string or null | When it went to the trash, or null. |
 | `id` (required) | string |  |
-| `limits` (required) | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. |
+| `limits` | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. Left out for a token that doesn't reach the whole workspace. |
 | `name` (required) | string |  |
 | `purge_after` (required) | string or null | When a trashed workspace is removed for good, or null. |
 | `updated_at` (required) | string |  |
-| `usage` (required) | WorkspaceUsageOut |  |
+| `usage` | WorkspaceUsageOut | What the workspace holds now. Left out for a token that doesn't reach the whole workspace. |
 
 ### Rename a workspace or change its limits
 
@@ -1248,9 +1248,9 @@ Response `200`:
 | `default` (required) | boolean | The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted. |
 | `deleted_at` (required) | string or null | When it went to the trash, or null. |
 | `id` (required) | string |  |
-| `limits` (required) | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. |
+| `limits` | WorkspaceLimitsOut | The workspace's own limits. The instance limits always apply on top. Left out for a token that doesn't reach the whole workspace. |
 | `name` (required) | string |  |
 | `purge_after` (required) | string or null | When a trashed workspace is removed for good, or null. |
 | `updated_at` (required) | string |  |
-| `usage` (required) | WorkspaceUsageOut |  |
+| `usage` | WorkspaceUsageOut | What the workspace holds now. Left out for a token that doesn't reach the whole workspace. |
 

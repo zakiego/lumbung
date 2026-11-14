@@ -102,12 +102,6 @@ func (e *Engine) WorkspaceUsage(ctx context.Context, wsID string) (WorkspaceUsag
 		return WorkspaceUsage{}, err
 	}
 	u := WorkspaceUsage{Databases: c.Databases, Buckets: c.Buckets, Tokens: c.Tokens, ObjectBytes: c.ObjectBytes}
-	branches, err := e.meta.ListWorkspaceBranches(ctx, wsID)
-	if err != nil {
-		return WorkspaceUsage{}, err
-	}
-	for _, b := range branches {
-		u.DatabaseBytes += e.BranchBytes(b.ID)
-	}
+	u.DatabaseBytes = e.WorkspaceBytes(wsID)
 	return u, nil
 }

@@ -71,6 +71,21 @@ func scanToken(r scanner) (Token, error) {
 // buckets, listed in its Grants.
 const ScopeGrants = "grants"
 
+// RevokedTokenFactor bounds the token rows one workspace may hold, live and
+// revoked together, as a multiple of its cap on live tokens.
+const RevokedTokenFactor = 10
+
+// PurgeRevokedTokens deletes tokens revoked before the given time, with
+// their grants. The audit log keeps their ids. The service token is kept:
+// SetServiceToken brings an earlier one back by id.
+func (s *Store) PurgeRevokedTokens(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE revoked_at IS NOT NULL AND revoked_at < ? AND service = 0`, before.UTC().Format(TimeLayout))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // ScopeInstance is the scope of a token that belongs to no workspace.
 const ScopeInstance = "instance"
 
@@ -91,10 +106,12 @@ func (s *Store) CreateToken(ctx context.Context, t Token, maxLive int) (Token, e
 	}
 	defer func() { _ = tx.Rollback() }()
 	if t.WorkspaceID != "" {
-		var live int
+		var live, all int
 		if err := tx.QueryRowContext(ctx,
-			`SELECT (SELECT count(*) FROM tokens WHERE workspace_id = w.id AND revoked_at IS NULL) FROM workspaces w WHERE w.id = ? AND w.deleted_at IS NULL`,
-			t.WorkspaceID).Scan(&live); err != nil {
+			`SELECT (SELECT count(*) FROM tokens WHERE workspace_id = w.id AND revoked_at IS NULL),
+			        (SELECT count(*) FROM tokens WHERE workspace_id = w.id)
+			 FROM workspaces w WHERE w.id = ? AND w.deleted_at IS NULL`,
+			t.WorkspaceID).Scan(&live, &all); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return Token{}, noWorkspace(t.WorkspaceID)
 			}
@@ -102,6 +119,12 @@ func (s *Store) CreateToken(ctx context.Context, t Token, maxLive int) (Token, e
 		}
 		if maxLive > 0 && live >= maxLive {
 			return Token{}, apierr.Newf(apierr.LimitReached, "the workspace has the most tokens allowed (%d); revoke some first", maxLive)
+		}
+		// Revoked tokens stay as rows until PurgeRevokedTokens clears them.
+		// Minting and revoking in a loop would otherwise grow meta.db without
+		// ever touching the cap on live tokens.
+		if maxLive > 0 && all >= RevokedTokenFactor*maxLive {
+			return Token{}, apierr.New(apierr.LimitReached, "the workspace revoked too many tokens recently; they are cleared after the trash retention")
 		}
 		// The last line of defense for the workspace boundary on tokens: a
 		// grant across it is refused here even if a handler resolved it.

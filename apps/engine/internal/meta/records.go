@@ -96,7 +96,7 @@ func (s *Store) CreateDatabase(ctx context.Context, wsID, name, dbID, branchID s
 		return Database{}, Branch{}, err
 	}
 	if n >= maxDatabases {
-		return Database{}, Branch{}, apierr.Newf(apierr.LimitReached, "the instance has the most databases allowed (%d)", maxDatabases)
+		return Database{}, Branch{}, apierr.New(apierr.LimitReached, "the instance can't hold more databases")
 	}
 	var own, limit int
 	if err := tx.QueryRowContext(ctx,

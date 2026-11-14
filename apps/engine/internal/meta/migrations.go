@@ -269,6 +269,11 @@ CREATE INDEX token_grants_bucket ON token_grants(bucket_id) WHERE bucket_id IS N
 	// Deferring doesn't stop ON DELETE CASCADE. Dropping tokens deletes every
 	// token_grants row (migration 5's warning), so the grants are copied aside
 	// first and put back after. A later rebuild of tokens must do the same.
+	//
+	// Audit entries written before this migration keep an empty workspace,
+	// which is the instance's log. Only an instance admin could read them
+	// before, and they name instance tokens and dashboard users, so they are
+	// not handed to the default workspace's admins.
 	`
 PRAGMA defer_foreign_keys = ON;
 
@@ -366,7 +371,6 @@ CREATE INDEX tokens_bucket ON tokens(bucket_id) WHERE bucket_id IS NOT NULL;
 CREATE INDEX tokens_workspace ON tokens(workspace_id) WHERE workspace_id IS NOT NULL;
 
 ALTER TABLE audit ADD COLUMN workspace_id TEXT NOT NULL DEFAULT '';
-UPDATE audit SET workspace_id = (SELECT id FROM workspaces WHERE is_default = 1);
 CREATE INDEX audit_workspace ON audit(workspace_id, id);
 `,
 }

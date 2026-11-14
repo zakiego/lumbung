@@ -100,10 +100,10 @@ func (e *Engine) Import(ctx context.Context, t Target, format ImportFormat, mode
 	_ = removeCompanions(staged)
 	grow := fileBytes(staged) - fileBytes(tg.path)
 	if grow > 0 {
-		if err := e.reserveBytes(grow); err != nil {
+		if err := e.reserveBytes(ctx, tg.db.WorkspaceID, grow); err != nil {
 			return err
 		}
-		defer e.releaseBytes(grow)
+		defer e.releaseBytes(tg.db.WorkspaceID, grow)
 	}
 	if err := e.swapBranchFile(ctx, tg, staged, allowed); err != nil {
 		return err

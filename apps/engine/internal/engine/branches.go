@@ -111,10 +111,10 @@ func (e *Engine) CreateBranch(ctx context.Context, ws, dbRef, name string, src B
 	} else {
 		srcSize = fileBytes(srcPath)
 	}
-	if err := e.reserveBytes(srcSize); err != nil {
+	if err := e.reserveBytes(ctx, d.WorkspaceID, srcSize); err != nil {
 		return meta.Branch{}, err
 	}
-	defer e.releaseBytes(srcSize)
+	defer e.releaseBytes(d.WorkspaceID, srcSize)
 	if parentTarget != nil {
 		err = e.copyBranch(ctx, *parentTarget, dst)
 	} else if _, cerr := e.copyDB(ctx, srcPath, dst); cerr != nil {
@@ -129,7 +129,7 @@ func (e *Engine) CreateBranch(ctx context.Context, ws, dbRef, name string, src B
 		_ = removeBranchFiles(dst)
 		return meta.Branch{}, err
 	}
-	e.recordSize(b.ID, size)
+	e.recordSize(d.WorkspaceID, b.ID, size)
 	return b, nil
 }
 
@@ -214,10 +214,10 @@ func (e *Engine) ResetBranch(ctx context.Context, ws, dbRef, branchRef string) (
 	if parentTarget != nil {
 		srcSize = fileBytes(parentTarget.path)
 	}
-	if err := e.reserveBytes(srcSize); err != nil {
+	if err := e.reserveBytes(ctx, tg.db.WorkspaceID, srcSize); err != nil {
 		return meta.Branch{}, err
 	}
-	defer e.releaseBytes(srcSize)
+	defer e.releaseBytes(tg.db.WorkspaceID, srcSize)
 	if parentTarget != nil {
 		if err := e.copyBranch(ctx, *parentTarget, staged); err != nil {
 			return meta.Branch{}, err
@@ -259,7 +259,7 @@ func (e *Engine) swapBranchFile(ctx context.Context, tg target, staged string, r
 		if err := syncDir(filepath.Dir(cur.path)); err != nil {
 			return err
 		}
-		e.recordSize(cur.branch.ID, fileBytes(cur.path))
+		e.recordSize(cur.db.WorkspaceID, cur.branch.ID, fileBytes(cur.path))
 		return nil
 	})
 }

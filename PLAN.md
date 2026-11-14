@@ -455,7 +455,7 @@ Scopes: `instance`, `workspace`, `database`, `bucket`, `grants`.
 - A workspace admin can't change its workspace's limits, rename or delete it, or see, list or make other workspaces.
 - Minting and managing: a token can only be made, listed or revoked by a principal in the same workspace that is an admin of everything it reaches. A workspace admin covers every token of its workspace. Only an instance admin covers an instance token.
 - `POST /v1/tokens` without a target makes a workspace token in the request's workspace. Instance tokens are made at `POST /v1/instance/tokens`.
-- `LUMBUNG_MAX_TOKENS_PER_WORKSPACE` caps live tokens in one workspace.
+- `LUMBUNG_MAX_TOKENS_PER_WORKSPACE` caps live tokens in one workspace. Revoked tokens are deleted after `LUMBUNG_TRASH_RETENTION`, and until then a workspace holds at most ten times that cap in token rows.
 
 ### 17.3 Addressing
 
@@ -480,7 +480,9 @@ GET                  /v1/instance/audit                     (every workspace and
 ```
 
 - Creating, renaming, deleting and restoring a database, the trash list, creating and deleting a bucket and reading the audit log take a workspace admin (they took an instance admin).
-- `GET /v1/audit` is the request's workspace. Every audit entry records its workspace, and `LUMBUNG_AUDIT_MAX_ROWS` applies per workspace.
+- `GET /v1/audit` is the request's workspace. Every audit entry records its workspace, and `LUMBUNG_AUDIT_MAX_ROWS` applies per workspace. An instance action a workspace token tries and is refused is logged in its own workspace.
+- `GET /v1/workspace` and `/v1/workspaces/{ws}` give limits and usage only to a token for the whole workspace.
+- A qualified URL never redirects to a short one: a path with empty, `.` or `..` segments is not found.
 - Database, bucket and token bodies gain `workspace_id`. A token's `scope` may be `workspace`.
 - The database list gives a token limited to some branches a limited view: counts, size, default branch and last activity cover only the branches it reaches. `GET /v1/databases/{db}` still refuses such a token, as before. MCP `list_databases` follows the same rule.
 - Moving revokes every token that reached the moved database or bucket.
@@ -537,14 +539,14 @@ The two fuzz tests gain a second workspace and fail if a request with one worksp
 
 ### 17.10 Upgrade
 
-Migration 6, forward-only: the default workspace, `workspace_id` on `databases`, `buckets` and `tokens` (rebuilt, with `token_grants` carried across), per-workspace name indexes, `workspace_id` on audit rows. Existing database, bucket and grants tokens land in the default workspace. Instance tokens stay instance tokens. A test starts from a version 5 `meta.db` with every kind of token, a grants token included, and checks each afterwards. The steps for our instance are in `ops/README.md`.
+Migration 6, forward-only: the default workspace, `workspace_id` on `databases`, `buckets` and `tokens` (rebuilt, with `token_grants` carried across), per-workspace name indexes, `workspace_id` on audit rows (entries from before the migration keep none and stay in the instance log). Existing database, bucket and grants tokens land in the default workspace. Instance tokens stay instance tokens. A test starts from a version 5 `meta.db` with every kind of token, a grants token included, and checks each afterwards. The steps for our instance are in `ops/README.md`.
 
 ### 17.11 Milestones
 
 | # | Milestone | Done when |
 |---|---|---|
-| 18 | Workspace core | Migration 6 with the upgrade test, workspaces in meta, engine and auth, the `workspace` scope, short and qualified URLs on every door, the workspace and instance endpoints, count limits and the token cap, per-workspace audit, the limited database view, isolation rows for REST, libSQL, S3 and MCP, generated files current, concept docs |
-| 19 | Quotas, deletion, moving | 17.5 byte quotas, 17.6 trash, restore, purge and move, the service token's narrowed access, the new MCP tools, backup and restore drill, the rest of 17.9, fuzz tests with two workspaces |
+| 18 | Workspace core | Migration 6 with the upgrade test, workspaces in meta, engine and auth, the `workspace` scope, short and qualified URLs on every door, the workspace and instance endpoints, 17.5 limits and the token cap, per-workspace audit, the limited database view, isolation rows for REST, libSQL, S3 and MCP, generated files current, concept docs |
+| 19 | Deletion, moving | 17.6 trash, restore, purge and move, the service token's narrowed access, the new MCP tools, backup and restore drill, the rest of 17.9, fuzz tests with two workspaces |
 | 20 | SDK, CLI, docs | 17.7 SDK 0.2.0 and CLI with tests against a real engine, examples, guides and the AI agents guide, the proof script for REST, libSQL, S3 and MCP |
 | 21 | Dashboard | 17.8, reviewed per `/zaki-design-ui`, end-to-end script walks two workspaces |
 | 22 | Upgrade notes | `ops/README.md` steps for our instance, restore drill run against a local upgraded copy |

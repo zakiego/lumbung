@@ -292,7 +292,7 @@ func (s *Server) s3FromAPI(req *s3Req, err error) *s3proto.Error {
 		return m("KeyTooLongError", http.StatusBadRequest)
 	case apierr.ObjectTooLarge:
 		return m("EntityTooLarge", http.StatusBadRequest)
-	case apierr.BucketSizeLimit, apierr.ObjectQuotaExceeded:
+	case apierr.BucketSizeLimit, apierr.ObjectQuotaExceeded, apierr.WorkspaceQuotaExceeded:
 		return m("QuotaExceeded", http.StatusForbidden)
 	case apierr.DiskFull:
 		return m("InsufficientStorage", http.StatusInsufficientStorage)

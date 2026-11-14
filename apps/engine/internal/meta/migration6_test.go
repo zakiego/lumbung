@@ -199,7 +199,6 @@ func TestMigration6KeepsALiveInstance(t *testing.T) {
 		`SELECT count(*) FROM databases WHERE workspace_id IS NOT ?`,
 		`SELECT count(*) FROM buckets WHERE workspace_id IS NOT ?`,
 		`SELECT count(*) FROM tokens WHERE scope != 'instance' AND workspace_id IS NOT ?`,
-		`SELECT count(*) FROM audit WHERE workspace_id IS NOT ?`,
 	} {
 		var n int
 		if err := s.db.QueryRowContext(ctx, q, def.ID).Scan(&n); err != nil || n != 0 {
@@ -274,8 +273,15 @@ func TestMigration6KeepsALiveInstance(t *testing.T) {
 	if b, err := s.GetBucket(ctx, def.ID, "photos"); err != nil || b.ID != "bk_photos" || !b.PublicRead || len(b.CORSOrigins) != 1 || b.ObjectCount != 2 {
 		t.Fatalf("bucket %+v %v", b, err)
 	}
-	if entries, err := s.ListAudit(ctx, def.ID, 0, 10); err != nil || len(entries) != 2 || entries[1].Actor != "dashboard:zaki" || entries[0].Code != "name_taken" {
+	// Audit entries from before workspaces stay with the instance: only an
+	// instance admin could read them, and they name instance tokens and
+	// dashboard users. The default workspace's log starts empty.
+	if entries, err := s.ListAllAudit(ctx, "", 0, 10); err != nil || len(entries) != 2 || entries[1].Actor != "dashboard:zaki" || entries[0].Code != "name_taken" ||
+		entries[0].WorkspaceID != "" || entries[1].WorkspaceID != "" {
 		t.Fatalf("audit %+v %v", entries, err)
+	}
+	if entries, err := s.ListAudit(ctx, def.ID, 0, 10); err != nil || len(entries) != 0 {
+		t.Fatalf("the default workspace's log holds old entries: %+v %v", entries, err)
 	}
 
 	// The schema holds the new rules.

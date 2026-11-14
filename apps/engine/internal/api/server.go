@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -163,16 +164,58 @@ func (s *Server) Handler() http.Handler {
 		}
 		if qualified {
 			decoded, err := url.PathUnescape(rest)
-			if err != nil {
-				writeProblemHTTP(w, apierr.New(apierr.BadRequest, "the path isn't valid"), newRequestID())
+			// The router answers a path with empty, "." or ".." segments
+			// with a redirect to the cleaned path. Here that would be the
+			// short path, without the workspace, and a client that follows
+			// it would act in its default workspace instead. So such a path
+			// is no endpoint, and any redirect the router still makes is
+			// turned into the same answer.
+			if err != nil || path.Clean(decoded) != decoded {
+				writeProblemHTTP(w, apierr.New(apierr.NotFound, "no such endpoint"), newRequestID())
 				return
 			}
 			r = r.Clone(context.WithValue(r.Context(), keySel, sel))
 			r.URL.Path, r.URL.RawPath = decoded, rest
+			w = &noRedirect{ResponseWriter: w}
 		}
 		s.mux.ServeHTTP(&problemFallback{ResponseWriter: w}, r)
 	})
 }
+
+// noRedirect turns a redirect from the router into a 404 problem. It wraps
+// the response of a qualified URL, whose Location would name the short path.
+type noRedirect struct {
+	http.ResponseWriter
+	blocked bool
+}
+
+func (n *noRedirect) WriteHeader(status int) {
+	if status >= 300 && status < 400 && status != http.StatusNotModified {
+		n.blocked = true
+		h := n.Header()
+		h.Del("Location")
+		h.Set("Content-Type", "application/problem+json")
+		n.ResponseWriter.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(n.ResponseWriter).Encode(problemFrom(apierr.New(apierr.NotFound, "no such endpoint")))
+		return
+	}
+	n.ResponseWriter.WriteHeader(status)
+}
+
+func (n *noRedirect) Write(b []byte) (int, error) {
+	if n.blocked {
+		return len(b), nil
+	}
+	return n.ResponseWriter.Write(b)
+}
+
+func (n *noRedirect) Flush() {
+	if fl, ok := n.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
+}
+
+func (n *noRedirect) Unwrap() http.ResponseWriter { return n.ResponseWriter }
 
 const workspacesPrefix = "/v1/workspaces/"
 
@@ -488,8 +531,11 @@ func (s *Server) middleware(ctx huma.Context, next func(huma.Context)) {
 
 	if action, _ := ctx.Operation().Metadata["audit"].(string); action != "" {
 		e := meta.AuditEntry{WorkspaceID: p.WorkspaceID, TokenID: p.TokenID, Actor: p.Actor, Action: action, Target: info.target, Result: "ok", RequestID: id}
-		if instance, _ := ctx.Operation().Metadata["instance"].(bool); instance {
-			// Workspaces, instance tokens and moves belong to no workspace's log.
+		if instance, _ := ctx.Operation().Metadata["instance"].(bool); instance && !p.Bound() {
+			// Workspaces, instance tokens and moves belong to no workspace's
+			// log. A workspace token that tries one (and is refused) is logged
+			// in its own workspace: its attempts must not be able to push the
+			// instance's history out.
 			e.WorkspaceID = ""
 		}
 		if ctx.Status() >= 400 {

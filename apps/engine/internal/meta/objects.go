@@ -123,7 +123,7 @@ func (s *Store) CreateBucket(ctx context.Context, wsID, id, name string, max int
 		return Bucket{}, err
 	}
 	if n >= max {
-		return Bucket{}, apierr.Newf(apierr.LimitReached, "the instance has the most buckets allowed (%d)", max)
+		return Bucket{}, apierr.New(apierr.LimitReached, "the instance can't hold more buckets")
 	}
 	var own, limit int
 	if err := tx.QueryRowContext(ctx,
@@ -323,16 +323,32 @@ func queryStrings(ctx context.Context, db querier, q string, args ...any) ([]str
 	return out, rows.Err()
 }
 
-// ObjectUsage is how many bytes buckets hold: objects plus parts of uploads
-// in progress, for one bucket and for the instance.
-func (s *Store) ObjectUsage(ctx context.Context, bucketID string) (bucket, total int64, err error) {
-	err = s.db.QueryRowContext(ctx, `
+// ObjectUsage is how many bytes buckets hold, objects plus parts of uploads
+// in progress: for one bucket, for the workspace it is in, and for the
+// instance. It also returns that workspace's id and its own cap on object
+// bytes (0: none), read in the same statement so they match the usage.
+type ObjectUsage struct {
+	Bucket, Workspace, Total int64
+	WorkspaceID              string
+	WorkspaceLimit           int64
+}
+
+// ObjectUsage measures object storage around one bucket.
+func (s *Store) ObjectUsage(ctx context.Context, bucketID string) (ObjectUsage, error) {
+	var u ObjectUsage
+	err := s.db.QueryRowContext(ctx, `
 SELECT
   coalesce((SELECT size_bytes FROM buckets WHERE id = ?1), 0) +
   coalesce((SELECT sum(p.size) FROM upload_parts p JOIN uploads u ON u.id = p.upload_id WHERE u.bucket_id = ?1), 0),
+  coalesce((SELECT sum(b.size_bytes) FROM buckets b WHERE b.workspace_id = (SELECT workspace_id FROM buckets WHERE id = ?1)), 0) +
+  coalesce((SELECT sum(p.size) FROM upload_parts p JOIN uploads u ON u.id = p.upload_id JOIN buckets b ON b.id = u.bucket_id
+            WHERE b.workspace_id = (SELECT workspace_id FROM buckets WHERE id = ?1)), 0),
   coalesce((SELECT sum(size_bytes) FROM buckets), 0) +
-  coalesce((SELECT sum(size) FROM upload_parts), 0)`, bucketID).Scan(&bucket, &total)
-	return bucket, total, err
+  coalesce((SELECT sum(size) FROM upload_parts), 0),
+  coalesce((SELECT workspace_id FROM buckets WHERE id = ?1), ''),
+  coalesce((SELECT w.max_object_bytes FROM workspaces w JOIN buckets b ON b.workspace_id = w.id WHERE b.id = ?1), 0)`,
+		bucketID).Scan(&u.Bucket, &u.Workspace, &u.Total, &u.WorkspaceID, &u.WorkspaceLimit)
+	return u, err
 }
 
 const objectCols = `bucket_id, key, blob_id, size, etag, content_type, headers, metadata, parts, modified_at`

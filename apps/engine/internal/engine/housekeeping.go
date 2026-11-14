@@ -10,22 +10,33 @@ import (
 	"github.com/zakiego/lumbung/apps/engine/internal/ids"
 )
 
-// reserveBytes claims room in the instance quota for a whole-file copy
-// (branch, reset, restore from the trash). Release it once the copy's size
-// is recorded.
-func (e *Engine) reserveBytes(n int64) error {
+// reserveBytes claims room for a whole-file copy (branch, reset, import,
+// restore from the trash) in the instance quota and in the workspace's own
+// cap on database bytes. Release it once the copy's size is recorded.
+func (e *Engine) reserveBytes(ctx context.Context, ws string, n int64) error {
+	limits, err := e.meta.LimitsOf(ctx, ws)
+	if err != nil {
+		return err
+	}
 	e.usageMu.Lock()
 	defer e.usageMu.Unlock()
 	if e.total+e.reserved+n > e.cfg.MaxInstanceBytes {
-		return apierr.Newf(apierr.InstanceQuotaExceeded, "a copy of %d bytes would pass the %d byte instance quota", n, e.cfg.MaxInstanceBytes)
+		return apierr.New(apierr.InstanceQuotaExceeded, "the copy would pass the instance's size quota")
+	}
+	if l := limits.MaxDatabaseBytes; l > 0 && e.wsTotal[ws]+e.wsReserved[ws]+n > l {
+		return apierr.Newf(apierr.WorkspaceQuotaExceeded, "a copy of %d bytes would pass the workspace's %d byte limit on its databases", n, l)
 	}
 	e.reserved += n
+	e.wsReserved[ws] += n
 	return nil
 }
 
-func (e *Engine) releaseBytes(n int64) {
+func (e *Engine) releaseBytes(ws string, n int64) {
 	e.usageMu.Lock()
 	e.reserved -= n
+	if e.wsReserved[ws] -= n; e.wsReserved[ws] <= 0 {
+		delete(e.wsReserved, ws)
+	}
 	e.usageMu.Unlock()
 }
 

@@ -157,7 +157,7 @@ func (e *Engine) sessionWith(ctx context.Context, t Target, access Access, timeo
 	defer tx.release()
 	if err := f(tx.conn, tx.tg); err != nil {
 		_ = tx.conn.ExecTrusted("ROLLBACK")
-		return e.sqlErr(err, tx.grant.quotaLimited)
+		return e.sqlErr(err, tx.grant)
 	}
 	return tx.commit()
 }
@@ -175,31 +175,44 @@ func mapAcquire(err error) error {
 }
 
 // sqlErr maps an error from running statements. A full database is the
-// branch limit unless the instance quota set the tighter cap.
-func (e *Engine) sqlErr(err error, quotaLimited bool) error {
+// branch limit unless the instance quota or the workspace's own limit set
+// the tighter cap.
+func (e *Engine) sqlErr(err error, g sizeGrant) error {
 	ae := apierr.FromSQLite(err)
-	if ae.Code == apierr.BranchSizeLimit && quotaLimited {
-		return apierr.New(apierr.InstanceQuotaExceeded, "instance size quota reached").WithDetail(ae.Detail)
+	if ae.Code == apierr.BranchSizeLimit {
+		switch g.capBy {
+		case capWorkspace:
+			return apierr.New(apierr.WorkspaceQuotaExceeded, "the workspace's limit on its databases' size is reached").WithDetail(ae.Detail)
+		case capInstance:
+			return apierr.New(apierr.InstanceQuotaExceeded, "instance size quota reached").WithDetail(ae.Detail)
+		}
 	}
 	return ae
 }
 
+// What set a write's size cap, when it wasn't the branch limit.
+const (
+	capInstance  = "instance"
+	capWorkspace = "workspace"
+)
+
 // sizeGrant is the disk room a write transaction reserved.
 type sizeGrant struct {
-	bytes        int64
-	quotaLimited bool // the instance quota, not the branch limit, set the cap
+	bytes int64
+	ws    string // the workspace the room was reserved in
+	capBy string // capInstance or capWorkspace when one of them set the cap, not the branch limit
 }
 
 // applySizeLimit caps how far the writer's file may grow with
-// max_page_count: the branch limit, or less when the instance quota leaves
-// less room. Room is reserved under the usage lock until finishWrite, so
+// max_page_count: the branch limit, or less when the instance quota or the
+// workspace's own limit (wsLimit, 0 for none) leaves less room. Room is reserved under the usage lock until finishWrite, so
 // concurrent writers on different branches can't each spend the same free
 // space. New pages land in the WAL before the database file, so a
 // transaction may add at most half the free room in pages.
 //
 // The cap is never below the current page count: a full branch, or one on a
 // full instance, still runs deletes and writes that reuse free pages.
-func (e *Engine) applySizeLimit(conn *sqlitex.Conn) (sizeGrant, error) {
+func (e *Engine) applySizeLimit(conn *sqlitex.Conn, ws string, wsLimit int64) (sizeGrant, error) {
 	pageSize, err := trustedInt(conn, "PRAGMA page_size")
 	if err != nil {
 		return sizeGrant{}, apierr.FromSQLite(err)
@@ -211,22 +224,31 @@ func (e *Engine) applySizeLimit(conn *sqlitex.Conn) (sizeGrant, error) {
 	branchPages := e.cfg.MaxBranchBytes / pageSize
 
 	e.usageMu.Lock()
-	free := e.cfg.MaxInstanceBytes - e.total - e.reserved
+	free, by := e.cfg.MaxInstanceBytes-e.total-e.reserved, capInstance
+	if wsLimit > 0 {
+		if wsFree := wsLimit - e.wsTotal[ws] - e.wsReserved[ws]; wsFree < free {
+			free, by = wsFree, capWorkspace
+		}
+	}
 	roomPages := int64(0)
 	if free > 0 {
 		roomPages = free / (2 * pageSize)
 	}
 	limit := min(branchPages, pages+roomPages)
-	g := sizeGrant{quotaLimited: pages+roomPages < branchPages}
+	g := sizeGrant{ws: ws}
+	if pages+roomPages < branchPages {
+		g.capBy = by
+	}
 	if limit < pages {
 		limit = pages
 	}
 	g.bytes = (limit - pages) * pageSize * 2
 	e.reserved += g.bytes
+	e.wsReserved[ws] += g.bytes
 	e.usageMu.Unlock()
 
 	if _, err := trustedInt(conn, "PRAGMA max_page_count = "+strconv.FormatInt(max(limit, 1), 10)); err != nil {
-		e.finishWrite("", "", g)
+		e.finishWrite("", "", "", g)
 		return sizeGrant{}, apierr.FromSQLite(err)
 	}
 	return g, nil
@@ -234,12 +256,15 @@ func (e *Engine) applySizeLimit(conn *sqlitex.Conn) (sizeGrant, error) {
 
 // finishWrite releases a write's reservation and records the branch's new
 // size. An empty branchID only releases.
-func (e *Engine) finishWrite(branchID, path string, g sizeGrant) {
+func (e *Engine) finishWrite(ws, branchID, path string, g sizeGrant) {
 	e.usageMu.Lock()
 	e.reserved -= g.bytes
+	if e.wsReserved[g.ws] -= g.bytes; e.wsReserved[g.ws] <= 0 {
+		delete(e.wsReserved, g.ws)
+	}
 	e.usageMu.Unlock()
 	if branchID != "" {
-		e.recordSize(branchID, fileBytes(path))
+		e.recordSize(ws, branchID, fileBytes(path))
 	}
 }
 

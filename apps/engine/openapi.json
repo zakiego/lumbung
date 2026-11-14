@@ -2541,7 +2541,7 @@
           },
           "limits": {
             "$ref": "#/components/schemas/WorkspaceLimitsOut",
-            "description": "The workspace's own limits. The instance limits always apply on top."
+            "description": "The workspace's own limits. The instance limits always apply on top. Left out for a token that doesn't reach the whole workspace."
           },
           "name": {
             "type": "string"
@@ -2559,15 +2559,14 @@
             "type": "string"
           },
           "usage": {
-            "$ref": "#/components/schemas/WorkspaceUsageOut"
+            "$ref": "#/components/schemas/WorkspaceUsageOut",
+            "description": "What the workspace holds now. Left out for a token that doesn't reach the whole workspace."
           }
         },
         "required": [
           "id",
           "name",
           "default",
-          "limits",
-          "usage",
           "created_at",
           "updated_at",
           "deleted_at",

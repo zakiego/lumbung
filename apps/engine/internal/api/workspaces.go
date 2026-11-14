@@ -8,6 +8,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
+	"github.com/zakiego/lumbung/apps/engine/internal/auth"
 	"github.com/zakiego/lumbung/apps/engine/internal/engine"
 	"github.com/zakiego/lumbung/apps/engine/internal/meta"
 )
@@ -35,30 +36,36 @@ type WorkspaceUsageOut struct {
 
 // WorkspaceOut is a workspace.
 type WorkspaceOut struct {
-	ID         string             `json:"id"`
-	Name       string             `json:"name"`
-	Default    bool               `json:"default" doc:"The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted."`
-	Limits     WorkspaceLimitsOut `json:"limits" doc:"The workspace's own limits. The instance limits always apply on top."`
-	Usage      WorkspaceUsageOut  `json:"usage"`
-	CreatedAt  time.Time          `json:"created_at"`
-	UpdatedAt  time.Time          `json:"updated_at"`
-	DeletedAt  *time.Time         `json:"deleted_at" doc:"When it went to the trash, or null."`
-	PurgeAfter *time.Time         `json:"purge_after" doc:"When a trashed workspace is removed for good, or null."`
+	ID         string              `json:"id"`
+	Name       string              `json:"name"`
+	Default    bool                `json:"default" doc:"The instance's default workspace, where a request with no workspace of its own acts. It can't be deleted."`
+	Limits     *WorkspaceLimitsOut `json:"limits,omitempty" doc:"The workspace's own limits. The instance limits always apply on top. Left out for a token that doesn't reach the whole workspace."`
+	Usage      *WorkspaceUsageOut  `json:"usage,omitempty" doc:"What the workspace holds now. Left out for a token that doesn't reach the whole workspace."`
+	CreatedAt  time.Time           `json:"created_at"`
+	UpdatedAt  time.Time           `json:"updated_at"`
+	DeletedAt  *time.Time          `json:"deleted_at" doc:"When it went to the trash, or null."`
+	PurgeAfter *time.Time          `json:"purge_after" doc:"When a trashed workspace is removed for good, or null."`
 }
 
-func (s *Server) workspaceOut(ctx context.Context, w meta.Workspace) (WorkspaceOut, error) {
+// workspaceOut describes a workspace as far as the principal may see it.
+// Its limits and usage are totals over everything in it, so only a
+// principal that reaches the whole workspace gets them: a database or
+// bucket token would learn from them what else the workspace holds.
+func (s *Server) workspaceOut(ctx context.Context, p auth.Principal, w meta.Workspace) (WorkspaceOut, error) {
+	out := WorkspaceOut{ID: w.ID, Name: w.Name, Default: w.Default,
+		CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt, DeletedAt: w.DeletedAt, PurgeAfter: w.PurgeAfter}
+	if !p.SeesWorkspaceUsage(w.ID) {
+		return out, nil
+	}
 	u, err := s.eng.WorkspaceUsage(ctx, w.ID)
 	if err != nil {
 		return WorkspaceOut{}, err
 	}
-	return WorkspaceOut{
-		ID: w.ID, Name: w.Name, Default: w.Default,
-		Limits: WorkspaceLimitsOut{MaxDatabases: w.Limits.MaxDatabases, MaxBuckets: w.Limits.MaxBuckets,
-			MaxDatabaseBytes: w.Limits.MaxDatabaseBytes, MaxObjectBytes: w.Limits.MaxObjectBytes},
-		Usage: WorkspaceUsageOut{Databases: u.Databases, Buckets: u.Buckets, Tokens: u.Tokens,
-			DatabaseBytes: u.DatabaseBytes, ObjectBytes: u.ObjectBytes},
-		CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt, DeletedAt: w.DeletedAt, PurgeAfter: w.PurgeAfter,
-	}, nil
+	out.Limits = &WorkspaceLimitsOut{MaxDatabases: w.Limits.MaxDatabases, MaxBuckets: w.Limits.MaxBuckets,
+		MaxDatabaseBytes: w.Limits.MaxDatabaseBytes, MaxObjectBytes: w.Limits.MaxObjectBytes}
+	out.Usage = &WorkspaceUsageOut{Databases: u.Databases, Buckets: u.Buckets, Tokens: u.Tokens,
+		DatabaseBytes: u.DatabaseBytes, ObjectBytes: u.ObjectBytes}
+	return out, nil
 }
 
 type workspaceBody struct{ Body WorkspaceOut }
@@ -119,7 +126,7 @@ func (s *Server) registerWorkspaces(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			o, err := s.workspaceOut(ctx, w)
+			o, err := s.workspaceOut(ctx, principalFrom(ctx), w)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -148,7 +155,7 @@ func (s *Server) registerWorkspaces(api huma.API) {
 			out.Body.Data = []WorkspaceOut{}
 			out.Body.NextCursor = next
 			for _, w := range items {
-				o, err := s.workspaceOut(ctx, w)
+				o, err := s.workspaceOut(ctx, principalFrom(ctx), w)
 				if err != nil {
 					return nil, toProblem(ctx, err)
 				}
@@ -171,7 +178,7 @@ func (s *Server) registerWorkspaces(api huma.API) {
 					return nil, toProblem(ctx, err)
 				}
 				setTarget(ctx, w.ID)
-				o, err := s.workspaceOut(ctx, w)
+				o, err := s.workspaceOut(ctx, principalFrom(ctx), w)
 				if err != nil {
 					return nil, toProblem(ctx, err)
 				}
@@ -185,7 +192,7 @@ func (s *Server) registerWorkspaces(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			o, err := s.workspaceOut(ctx, w)
+			o, err := s.workspaceOut(ctx, principalFrom(ctx), w)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
@@ -212,7 +219,7 @@ func (s *Server) registerWorkspaces(api huma.API) {
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}
-			o, err := s.workspaceOut(ctx, w)
+			o, err := s.workspaceOut(ctx, principalFrom(ctx), w)
 			if err != nil {
 				return nil, toProblem(ctx, err)
 			}

@@ -187,6 +187,18 @@ func (s *Store) UpdateWorkspace(ctx context.Context, id string, u WorkspaceUpdat
 	return s.GetWorkspace(ctx, w.ID)
 }
 
+// LimitsOf returns a live workspace's own limits, for a quota check.
+func (s *Store) LimitsOf(ctx context.Context, wsID string) (WorkspaceLimits, error) {
+	var l WorkspaceLimits
+	err := s.db.QueryRowContext(ctx,
+		`SELECT max_databases, max_buckets, max_database_bytes, max_object_bytes FROM workspaces WHERE id = ? AND deleted_at IS NULL`, wsID).
+		Scan(&l.MaxDatabases, &l.MaxBuckets, &l.MaxDatabaseBytes, &l.MaxObjectBytes)
+	if errors.Is(err, sql.ErrNoRows) {
+		return WorkspaceLimits{}, noWorkspace(wsID)
+	}
+	return l, err
+}
+
 // WorkspaceCounts is what a workspace holds, from meta.db. Branch file sizes
 // are measured by the engine, not recorded here.
 type WorkspaceCounts struct {

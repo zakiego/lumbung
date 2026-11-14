@@ -567,13 +567,14 @@ export interface WorkspaceOut {
   /** When it went to the trash, or null. */
   deleted_at: string | null;
   id: string;
-  /** The workspace's own limits. The instance limits always apply on top. */
-  limits: WorkspaceLimitsOut;
+  /** The workspace's own limits. The instance limits always apply on top. Left out for a token that doesn't reach the whole workspace. */
+  limits?: WorkspaceLimitsOut;
   name: string;
   /** When a trashed workspace is removed for good, or null. */
   purge_after: string | null;
   updated_at: string;
-  usage: WorkspaceUsageOut;
+  /** What the workspace holds now. Left out for a token that doesn't reach the whole workspace. */
+  usage?: WorkspaceUsageOut;
 }
 
 export interface WorkspaceUsageOut {

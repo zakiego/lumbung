@@ -61,10 +61,14 @@ The limits above are for the whole instance. Each [workspace](/docs/concepts/wor
 |---|---|---|---|
 | Databases in one workspace, counting its trash | 20 | `LUMBUNG_WORKSPACE_MAX_DATABASES` | `limit_reached` |
 | Buckets in one workspace | 20 | `LUMBUNG_WORKSPACE_MAX_BUCKETS` | `limit_reached` |
+| Size of a workspace's branches together | 2 GiB | `LUMBUNG_WORKSPACE_MAX_DATABASE_BYTES` | `workspace_quota_exceeded` (507) |
+| Size of a workspace's buckets together, counting multipart uploads in progress | 5 GiB | `LUMBUNG_WORKSPACE_MAX_OBJECT_BYTES` | `workspace_quota_exceeded` (507), `QuotaExceeded` on the S3 API |
 | Live tokens in one workspace | 1,000 | `LUMBUNG_MAX_TOKENS_PER_WORKSPACE` | `limit_reached` |
 | Workspaces, counting the trash | 100 | `LUMBUNG_MAX_WORKSPACES` | `limit_reached` |
 
 The default workspace starts with no limits of its own, so an instance that never makes a workspace is bound by the instance limits alone.
+
+The byte limits work like the instance's: a write, a branch copy, an import or an upload that would pass one is refused before anything is kept, and reads and deletes keep working. Revoked tokens are cleared after `LUMBUNG_TRASH_RETENTION`; until then a workspace holds at most ten times its live-token limit in token records, so minting and revoking in a loop hits `limit_reached` too.
 
 ## Connections
 

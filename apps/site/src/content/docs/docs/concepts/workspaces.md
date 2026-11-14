@@ -93,9 +93,9 @@ curl -s -X PATCH http://127.0.0.1:4870/v1/workspaces/palui \
   -d '{"max_databases": 50, "max_buckets": 10}' | jq .limits
 ```
 
-A new workspace gets the limits from the request, or from the `LUMBUNG_WORKSPACE_MAX_*` [settings](/docs/reference/configuration/). The default workspace starts with none. A workspace also holds at most `LUMBUNG_MAX_TOKENS_PER_WORKSPACE` live tokens.
+A new workspace gets the limits from the request, or from the `LUMBUNG_WORKSPACE_MAX_*` [settings](/docs/reference/configuration/). The default workspace starts with none. A workspace also holds at most `LUMBUNG_MAX_TOKENS_PER_WORKSPACE` live tokens. A write past a byte limit fails with `workspace_quota_exceeded`, and nothing of it is kept.
 
-`GET /v1/workspace` shows the workspace a token is in, with its limits and what it uses now:
+`GET /v1/workspace` shows the workspace a token is in. A token for the whole workspace also gets its limits and what it uses now. A token for one database or bucket doesn't: the totals would tell it what else the workspace holds.
 
 ```sh
 PALUI_TOKEN=$(cat palui.token)

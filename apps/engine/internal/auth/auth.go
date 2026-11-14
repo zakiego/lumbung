@@ -244,6 +244,16 @@ func (p Principal) SeesWorkspace(wsID string) bool {
 	return p.Scope == ScopeInstance || p.WorkspaceID == wsID
 }
 
+// SeesWorkspaceUsage reports whether the principal may see a workspace's
+// limits and what it holds. A database, bucket or grants principal may not:
+// the totals would tell it about things in the workspace it can't reach.
+func (p Principal) SeesWorkspaceUsage(wsID string) bool {
+	if wsID == "" || rank(p.Access) == 0 {
+		return false
+	}
+	return p.Scope == ScopeInstance || (p.Scope == ScopeWorkspace && p.WorkspaceID == wsID)
+}
+
 // WorkspaceAtLeast reports whether the principal has at least the given
 // access to the whole workspace it acts in. Creating, renaming, deleting and
 // restoring databases and buckets, the trash and the audit log take admin.

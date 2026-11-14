@@ -215,12 +215,13 @@ func (e *Engine) DeleteBucket(ctx context.Context, id string) error {
 type reservation struct {
 	e        *Engine
 	bucketID string
+	ws       string
 	n        int64
 	done     bool
 }
 
-// reserveObjectBytes claims room for n new bytes in a bucket and in the
-// instance's object storage. credit returns the space the write frees (the
+// reserveObjectBytes claims room for n new bytes in a bucket, in its
+// workspace's own cap on object bytes, and in the instance's object storage. credit returns the space the write frees (the
 // object or part it replaces); it is read under the same lock as the usage,
 // so it can't be stale against it. Release the claim when the write fails,
 // or record the write with settle, which drops the claim in the same step so
@@ -228,7 +229,7 @@ type reservation struct {
 func (e *Engine) reserveObjectBytes(ctx context.Context, bucketID string, n int64, credit func() int64) (*reservation, error) {
 	e.objMu.Lock()
 	defer e.objMu.Unlock()
-	used, total, err := e.meta.ObjectUsage(ctx, bucketID)
+	u, err := e.meta.ObjectUsage(ctx, bucketID)
 	if err != nil {
 		return nil, err
 	}
@@ -236,17 +237,21 @@ func (e *Engine) reserveObjectBytes(ctx context.Context, bucketID string, n int6
 	if credit != nil {
 		freed = credit()
 	}
-	used -= freed
-	total -= freed
+	used, inWS, total := u.Bucket-freed, u.Workspace-freed, u.Total-freed
 	if used+e.objReserved[bucketID]+n > e.cfg.MaxBucketBytes {
 		return nil, apierr.Newf(apierr.BucketSizeLimit, "%d more bytes would pass the %d byte bucket size limit", n, e.cfg.MaxBucketBytes)
 	}
+	if l := u.WorkspaceLimit; l > 0 && inWS+e.objReservedWS[u.WorkspaceID]+n > l {
+		return nil, apierr.Newf(apierr.WorkspaceQuotaExceeded, "%d more bytes would pass the workspace's %d byte limit on its buckets", n, l)
+	}
 	if total+e.objReservedTotal+n > e.cfg.MaxObjectStorageBytes {
-		return nil, apierr.Newf(apierr.ObjectQuotaExceeded, "%d more bytes would pass the %d byte object storage quota", n, e.cfg.MaxObjectStorageBytes)
+		// No numbers: the instance's total is other workspaces' business.
+		return nil, apierr.New(apierr.ObjectQuotaExceeded, "the write would pass the instance's object storage quota")
 	}
 	e.objReserved[bucketID] += n
+	e.objReservedWS[u.WorkspaceID] += n
 	e.objReservedTotal += n
-	return &reservation{e: e, bucketID: bucketID, n: n}, nil
+	return &reservation{e: e, bucketID: bucketID, ws: u.WorkspaceID, n: n}, nil
 }
 
 func (r *reservation) releaseLocked() {
@@ -258,6 +263,9 @@ func (r *reservation) releaseLocked() {
 	e.objReserved[r.bucketID] -= r.n
 	if e.objReserved[r.bucketID] == 0 {
 		delete(e.objReserved, r.bucketID)
+	}
+	if e.objReservedWS[r.ws] -= r.n; e.objReservedWS[r.ws] <= 0 {
+		delete(e.objReservedWS, r.ws)
 	}
 	e.objReservedTotal -= r.n
 }
