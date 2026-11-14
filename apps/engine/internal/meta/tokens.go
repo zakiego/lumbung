@@ -13,27 +13,31 @@ type Token struct {
 	ID         string
 	Name       string
 	SecretHash []byte
-	Scope      string // instance or database
+	Scope      string // instance, database or bucket
 	DatabaseID string
 	BranchID   string
+	BucketID   string
 	Access     string // read, write or admin
 	Service    bool
-	CreatedAt  time.Time
-	ExpiresAt  *time.Time
-	LastUsedAt *time.Time
-	RevokedAt  *time.Time
+	// AccessSecret is the S3 access key secret, encrypted (ADR 0006). Empty
+	// when the token has no access key.
+	AccessSecret []byte
+	CreatedAt    time.Time
+	ExpiresAt    *time.Time
+	LastUsedAt   *time.Time
+	RevokedAt    *time.Time
 }
 
 // ErrNoToken means no token has that id.
 var ErrNoToken = errors.New("meta: no such token")
 
-const tokenCols = `id, name, secret_hash, scope, coalesce(database_id, ''), coalesce(branch_id, ''), access, service, created_at, expires_at, last_used_at, revoked_at`
+const tokenCols = `id, name, secret_hash, scope, coalesce(database_id, ''), coalesce(branch_id, ''), coalesce(bucket_id, ''), access, service, access_secret, created_at, expires_at, last_used_at, revoked_at`
 
 func scanToken(r scanner) (Token, error) {
 	var t Token
 	var created string
 	var expires, used, revoked sql.NullString
-	if err := r.Scan(&t.ID, &t.Name, &t.SecretHash, &t.Scope, &t.DatabaseID, &t.BranchID, &t.Access, &t.Service, &created, &expires, &used, &revoked); err != nil {
+	if err := r.Scan(&t.ID, &t.Name, &t.SecretHash, &t.Scope, &t.DatabaseID, &t.BranchID, &t.BucketID, &t.Access, &t.Service, &t.AccessSecret, &created, &expires, &used, &revoked); err != nil {
 		return Token{}, err
 	}
 	t.CreatedAt = *parseTime(sql.NullString{String: created, Valid: true})
@@ -46,9 +50,9 @@ func scanToken(r scanner) (Token, error) {
 // CreateToken stores a token record.
 func (s *Store) CreateToken(ctx context.Context, t Token) (Token, error) {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO tokens (id, name, secret_hash, scope, database_id, branch_id, access, service, created_at, expires_at)
-		 VALUES (?, ?, ?, ?, nullif(?, ''), nullif(?, ''), ?, ?, ?, ?)`,
-		t.ID, t.Name, t.SecretHash, t.Scope, t.DatabaseID, t.BranchID, t.Access, t.Service, now(), fmtTime(t.ExpiresAt))
+		`INSERT INTO tokens (id, name, secret_hash, scope, database_id, branch_id, bucket_id, access, service, access_secret, created_at, expires_at)
+		 VALUES (?, ?, ?, ?, nullif(?, ''), nullif(?, ''), nullif(?, ''), ?, ?, ?, ?, ?)`,
+		t.ID, t.Name, t.SecretHash, t.Scope, t.DatabaseID, t.BranchID, t.BucketID, t.Access, t.Service, nilIfEmpty(t.AccessSecret), now(), fmtTime(t.ExpiresAt))
 	if err != nil {
 		return Token{}, err
 	}
@@ -158,4 +162,11 @@ func (s *Store) SetServiceToken(ctx context.Context, id string, hash []byte) err
 		return err
 	}
 	return tx.Commit()
+}
+
+func nilIfEmpty(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
 }

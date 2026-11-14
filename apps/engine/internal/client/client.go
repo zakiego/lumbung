@@ -72,6 +72,43 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 	return json.NewDecoder(res.Body).Decode(out)
 }
 
+// Upload PUTs a body of a known length with extra headers and decodes the
+// JSON response into out.
+func (c *Client) Upload(ctx context.Context, path string, query url.Values, body io.Reader, size int64, contentType string, h http.Header, out any) error {
+	u := c.URL + path
+	if len(query) > 0 {
+		u += "?" + query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, body)
+	if err != nil {
+		return err
+	}
+	req.ContentLength = size
+	for k, vs := range h {
+		req.Header[k] = vs
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", c.UserAgent)
+	req.Header.Set("Content-Type", contentType)
+	res, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("can't reach %s: %w", c.URL, err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 400 {
+		e := &Error{Status: res.StatusCode}
+		if json.NewDecoder(res.Body).Decode(e) != nil || e.Code == "" {
+			e.Code, e.Title = "http_error", res.Status
+		}
+		return e
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(res.Body).Decode(out)
+}
+
 // Raw sends a body as is and returns the response for streaming. The caller
 // closes it.
 func (c *Client) Raw(ctx context.Context, method, path string, query url.Values, body io.Reader, contentType string) (*http.Response, error) {
@@ -160,12 +197,46 @@ type Token struct {
 	Scope      string     `json:"scope"`
 	DatabaseID string     `json:"database_id"`
 	BranchID   string     `json:"branch_id"`
+	BucketID   string     `json:"bucket_id"`
 	Access     string     `json:"access"`
 	Service    bool       `json:"service"`
 	CreatedAt  time.Time  `json:"created_at"`
 	ExpiresAt  *time.Time `json:"expires_at"`
 	LastUsedAt *time.Time `json:"last_used_at"`
 	Secret     string     `json:"token,omitempty"`
+	// AccessKeyID and SecretAccessKey are the token's S3 access key; the
+	// secret only comes back when the token is created.
+	AccessKeyID     string `json:"access_key_id,omitempty"`
+	SecretAccessKey string `json:"secret_access_key,omitempty"`
+}
+
+// Bucket is a bucket.
+type Bucket struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	PublicRead  bool      `json:"public_read"`
+	CORSOrigins []string  `json:"cors_origins"`
+	SizeBytes   int64     `json:"size_bytes"`
+	ObjectCount int64     `json:"object_count"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// Object is an object's record.
+type Object struct {
+	Key          string            `json:"key"`
+	Size         int64             `json:"size"`
+	ETag         string            `json:"etag"`
+	ContentType  string            `json:"content_type"`
+	LastModified time.Time         `json:"last_modified"`
+	Headers      map[string]string `json:"headers,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+}
+
+// ObjectPage is one page of an object listing.
+type ObjectPage struct {
+	Data       []Object `json:"data"`
+	Prefixes   []string `json:"prefixes"`
+	NextCursor string   `json:"next_cursor"`
 }
 
 // Column is a result column.

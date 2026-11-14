@@ -14,9 +14,9 @@ const at = "2026-11-14T08:00:00Z"
 
 export function tokens(n: number): TokenOut[] {
   const base: TokenOut[] = [
-    { id: "svc", name: "dashboard", scope: "instance", access: "admin", database_id: "", branch_id: "", created_at: at, expires_at: null, last_used_at: at, service: true },
-    { id: "t1", name: LONG_TOKEN, scope: "database", access: "write", database_id: "db1", branch_id: "b1", created_at: at, expires_at: "2027-02-12T00:00:00Z", last_used_at: null, service: false },
-    { id: "t2", name: "x", scope: "database", access: "read", database_id: "gone", branch_id: "", created_at: at, expires_at: null, last_used_at: null, service: false },
+    { id: "svc", name: "dashboard", scope: "instance", access: "admin", database_id: "", branch_id: "", bucket_id: "", access_key_id: "", created_at: at, expires_at: null, last_used_at: at, service: true },
+    { id: "t1", name: LONG_TOKEN, scope: "database", access: "write", database_id: "db1", branch_id: "b1", bucket_id: "", access_key_id: "", created_at: at, expires_at: "2027-02-12T00:00:00Z", last_used_at: null, service: false },
+    { id: "t2", name: "x", scope: "database", access: "read", database_id: "gone", branch_id: "", bucket_id: "", access_key_id: "", created_at: at, expires_at: null, last_used_at: null, service: false },
   ]
   return Array.from({ length: n }, (_, i) => ({ ...base[i % base.length]!, id: `t${i}` }))
 }
@@ -36,9 +36,9 @@ export const invites: Invite[] = [{ id: "i1", email: LONG_EMAIL, role: "member",
 
 export function audit(n: number): AuditOut[] {
   const base: AuditOut[] = [
-    { id: 1, actor: `dashboard:${LONG_EMAIL}`, token_id: "", action: "branch.promote", target: `db_01JCX9/br_01JCXA/${LONG_BRANCH}`, result: "ok", code: "", at, request_id: "r1" },
-    { id: 2, actor: "", token_id: "tok_01JCX9ZK4M2", action: "snapshot.restore", target: "db_01JCX9/snap_01JCXB", result: "error", code: "branch_name_taken", at, request_id: "r2" },
-    { id: 3, actor: "", token_id: "", action: "x", target: "", result: "ok", code: "", at, request_id: "r3" },
+    { id: 1, actor: `dashboard:${LONG_EMAIL}`, token_id: "", action: "branch.promote", target: `db_01JCX9/br_01JCXA/${LONG_BRANCH}`, result: "ok", code: "", at, request_id: "req-1" },
+    { id: 2, actor: "", token_id: "tok_01JCX9ZK4M2", action: "snapshot.restore", target: "db_01JCX9/snap_01JCXB", result: "error", code: "branch_name_taken", at, request_id: "req-2" },
+    { id: 3, actor: "", token_id: "", action: "x", target: "", result: "ok", code: "", at, request_id: "req-3" },
   ]
   return Array.from({ length: n }, (_, i) => ({ ...base[i % base.length]!, id: i }))
 }

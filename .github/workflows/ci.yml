@@ -82,6 +82,9 @@ jobs:
       # PLAN 6.2: statements through the query path must never create or
       # change a file outside the attacking branch.
       - run: go test -run '^$' -fuzz '^FuzzQueryPath$' -fuzztime 60s ./internal/engine
+      # PLAN 16.5: requests through the S3 handler must never create or
+      # change a file outside object storage.
+      - run: go test -run '^$' -fuzz '^FuzzS3Path$' -fuzztime 60s ./internal/api
 
   web:
     runs-on: ubuntu-latest

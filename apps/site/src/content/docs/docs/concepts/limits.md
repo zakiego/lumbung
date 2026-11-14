@@ -2,7 +2,7 @@
 title: Limits
 description: The limits on statements, results and storage, their defaults, and the error each one returns.
 sidebar:
-  order: 5
+  order: 6
 ---
 
 Every limit has a default that suits a small team on one machine, and every one can be changed with an environment variable. The [Configuration](/docs/reference/configuration/) page lists them all.
@@ -35,6 +35,23 @@ When a request hits a limit, nothing partial comes back and anything it wrote is
 A full branch, or any branch on an instance at its quota, still serves reads and deletes, and writes that reuse the space deletes freed. SQLite doesn't shrink a file when rows are deleted, so freed space is reused rather than returned.
 
 The branch limit counts the database's pages. The write-ahead log next to it is checkpointed and truncated once it passes a quarter of the branch limit (at most 1 MiB), so it stays small. The instance quota counts both, and a write may only claim half the free room in new pages, since each new page is written to the log first. Creating a branch, resetting one, importing and restoring a database from the trash are checked against the quota before they copy anything.
+
+## Object storage
+
+| Limit | Default | Setting | Error (REST) | Error (S3 API) |
+|---|---|---|---|---|
+| One object, sent whole or assembled from parts | 5 GiB | `LUMBUNG_MAX_OBJECT_BYTES` | `object_too_large` (413) | `EntityTooLarge` |
+| One bucket, counting multipart uploads in progress | 10 GiB | `LUMBUNG_MAX_BUCKET_BYTES` | `bucket_size_limit` (507) | `QuotaExceeded` (403) |
+| All buckets together | 20 GiB | `LUMBUNG_MAX_OBJECT_STORAGE_BYTES` | `object_storage_quota_exceeded` (507) | `QuotaExceeded` (403) |
+| Free disk before writing | 2 GiB | `LUMBUNG_MIN_FREE_DISK` | `insufficient_disk` (507) | `InsufficientStorage` (507) |
+| Buckets | 100 | `LUMBUNG_MAX_BUCKETS` | `limit_reached` | `TooManyBuckets` |
+| Life of an unfinished multipart upload | 24 h | `LUMBUNG_MULTIPART_EXPIRY` | | |
+| Life of a presigned URL | 7 days | `LUMBUNG_PRESIGN_MAX_EXPIRY` | | |
+| Requests without a token, per address | 100/s | `LUMBUNG_PUBLIC_RATE_LIMIT` | | `SlowDown` (503) |
+
+Object storage has its own quotas, apart from the branches'. An upload needs its length up front; it is claimed against the bucket and the instance before the first byte is written, and the write stops at that length, so a full bucket never holds a partial object. Replacing an object only counts the difference in size.
+
+Fixed by the S3 protocol: keys are at most 1024 bytes, custom metadata at most 2 KB, a multipart upload has at most 10,000 parts, and every part but the last is at least 5 MiB. A bucket has at most 1,000 multipart uploads in progress.
 
 ## Connections
 

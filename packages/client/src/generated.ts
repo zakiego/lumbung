@@ -69,6 +69,26 @@ export interface BranchOut {
   updated_at: string;
 }
 
+export interface BucketListBody {
+  data: BucketOut[];
+  /** Pass as cursor for the next page; empty on the last page. */
+  next_cursor: string;
+}
+
+export interface BucketOut {
+  /** Origins a browser may call the S3 API from. */
+  cors_origins: string[];
+  created_at: string;
+  id: string;
+  name: string;
+  object_count: number;
+  /** Anyone may read objects without a token. */
+  public_read: boolean;
+  /** Bytes the objects take. */
+  size_bytes: number;
+  updated_at: string;
+}
+
 export interface Change {
   after: string;
   before: string;
@@ -105,6 +125,18 @@ export interface ColumnOut {
   name: string;
 }
 
+export interface CopyInBody {
+  /** Set this or metadata to give the copy new attributes instead of the source's. Without it the source's content type is kept. */
+  content_type?: string;
+  /** Source bucket name or id; defaults to this bucket. */
+  from_bucket?: string;
+  from_key: string;
+  /** Key of the copy in this bucket. */
+  key: string;
+  /** The copy's metadata, replacing the source's. */
+  metadata?: Record<string, string>;
+}
+
 export interface CreateBranchInBody {
   /** Delete the branch automatically after this many days. 0 keeps it. */
   expires_in_days?: number;
@@ -114,6 +146,11 @@ export interface CreateBranchInBody {
   from_snapshot?: string;
   name: string;
   protected?: boolean;
+}
+
+export interface CreateBucketInBody {
+  /** 3 to 63 lowercase letters, digits and hyphens. */
+  name: string;
 }
 
 export interface CreateDatabaseInBody {
@@ -127,8 +164,12 @@ export interface CreateSnapshotInBody {
 
 export interface CreateTokenInBody {
   access: "read" | "write" | "admin";
+  /** Also make an S3 access key for this token. Its secret is shown once, like the token. */
+  access_key?: boolean;
   /** Branch name or id, to limit a database token to one branch. */
   branch?: string;
+  /** Bucket name or id, for a bucket token. Not with database. */
+  bucket?: string;
   /** Database name or id. Omit for an instance token. */
   database?: string;
   /** 0: never expires. A token that expires can't create one that outlives it: the expiry is capped at the creator's. */
@@ -138,8 +179,12 @@ export interface CreateTokenInBody {
 
 export interface CreateTokenOutBody {
   access: "read" | "write" | "admin";
+  /** The S3 access key id, when the token has an access key. */
+  access_key_id: string;
   /** When set, the token only reaches this branch. */
   branch_id: string;
+  /** For a bucket token, the bucket it reaches. */
+  bucket_id: string;
   created_at: string;
   /** For a database token, the database it reaches. */
   database_id: string;
@@ -147,7 +192,9 @@ export interface CreateTokenOutBody {
   id: string;
   last_used_at: string | null;
   name: string;
-  scope: "instance" | "database";
+  scope: "instance" | "database" | "bucket";
+  /** The S3 secret access key, when access_key was set. Shown once. */
+  secret_access_key?: string;
   /** The dashboard's service token. */
   service: boolean;
   /** The full token. Shown once; only its hash is stored. */
@@ -195,12 +242,48 @@ export interface Index {
   unique: boolean;
 }
 
+export interface ObjectListBody {
+  data: ObjectOut[];
+  /** Pass as cursor for the next page; empty on the last page. */
+  next_cursor: string;
+  /** Common prefixes under the delimiter, like folders. */
+  prefixes: string[];
+}
+
+export interface ObjectOut {
+  content_type: string;
+  /** MD5 of the content, or for a multipart object the MD5 of the parts' MD5s, a dash and the number of parts. Without quotes. */
+  etag: string;
+  /** Stored Cache-Control, Content-Disposition, Content-Encoding, Content-Language and Expires. */
+  headers: Record<string, string>;
+  key: string;
+  last_modified: string;
+  /** Custom metadata (x-amz-meta-* headers), lowercase names without the prefix. */
+  metadata: Record<string, string>;
+  size: number;
+}
+
 export interface Point {
   at: string;
   errors: number;
   queries: number;
   rows_read: number;
   rows_written: number;
+}
+
+export interface PresignInBody {
+  /** Seconds the URL stays valid, at most LUMBUNG_PRESIGN_MAX_EXPIRY. */
+  expires_in?: number;
+  key: string;
+  /** GET to download, PUT to upload. */
+  method?: "GET" | "PUT";
+}
+
+export interface PresignOutBody {
+  expires_at: string;
+  method: string;
+  /** The presigned S3 URL. Anyone holding it can use it until it expires or the token is revoked. */
+  url: string;
 }
 
 export interface Problem {
@@ -342,8 +425,12 @@ export interface TokenListBody {
 
 export interface TokenOut {
   access: "read" | "write" | "admin";
+  /** The S3 access key id, when the token has an access key. */
+  access_key_id: string;
   /** When set, the token only reaches this branch. */
   branch_id: string;
+  /** For a bucket token, the bucket it reaches. */
+  bucket_id: string;
   created_at: string;
   /** For a database token, the database it reaches. */
   database_id: string;
@@ -351,7 +438,7 @@ export interface TokenOut {
   id: string;
   last_used_at: string | null;
   name: string;
-  scope: "instance" | "database";
+  scope: "instance" | "database" | "bucket";
   /** The dashboard's service token. */
   service: boolean;
 }
@@ -367,6 +454,14 @@ export interface UpdateBranchInBody {
   expires_in_days?: number;
   name?: string;
   protected?: boolean;
+}
+
+export interface UpdateBucketInBody {
+  /** * or scheme://host[:port] each. */
+  cors_origins?: string[];
+  /** Rename the bucket. S3 paths and URLs that name it stop working. */
+  name?: string;
+  public_read?: boolean;
 }
 
 export interface UpdateDatabaseInBody {

@@ -9,13 +9,15 @@
 #      (65532), with the dashboard image (the engine image has no shell)
 #   2. `lumbungd restore` it into a second, empty scratch volume
 #   3. start a throwaway engine on that volume on a free 127.0.0.1 port
-#   4. wait for /health 200, then with the restored service token list every
-#      database and run PRAGMA integrity_check on each default branch through
-#      the API
+#   4. wait for /health 200, then with the restored service token run
+#      ops/restore-check.py: every database's default branch passes PRAGMA
+#      integrity_check, and every bucket lists the objects the backup holds,
+#      with objects downloaded and checked against their size and ETag
 #   5. remove the container and both volumes, whatever happened
 #
 # Prints PASS or FAIL as the last line and exits 0 or 1. A backup with no
-# databases fails (it proves nothing) unless DRILL_ALLOW_EMPTY=1.
+# databases and no buckets fails (it proves nothing) unless
+# DRILL_ALLOW_EMPTY=1.
 # Never touches the running deployment: its own container, volumes and port.
 set -euo pipefail
 
@@ -121,53 +123,10 @@ until [ "$code" = "200" ]; do
 done
 log "/health is green: $(head -c 300 "$tmpdir/health.json")"
 
-# --- 4. check every database -------------------------------------------------
+# --- 4. check every database and bucket ---------------------------------------
 # The token goes into a private file, never onto a command line.
 docker exec "$container" lumbungd service-token >"$tmpdir/token"
 [ -s "$tmpdir/token" ] || { log "the restored engine has no service token"; exit 1; }
 
-ALLOW_EMPTY="$ALLOW_EMPTY" python3 - "http://127.0.0.1:$port" "$tmpdir/token" "$src/manifest.json" <<'PY'
-import json, os, sys, urllib.parse, urllib.request
-
-base, token_file, manifest_file = sys.argv[1:4]
-token = open(token_file).read().strip()
-
-def call(method, path, body=None):
-    data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(base + path, data=data, method=method)
-    req.add_header("Authorization", f"Bearer {token}")
-    if data is not None:
-        req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=60) as res:
-        return json.load(res)
-
-dbs, cursor = [], ""
-while True:
-    q = {"limit": "200"}
-    if cursor:
-        q["cursor"] = cursor
-    page = call("GET", "/v1/databases?" + urllib.parse.urlencode(q))
-    dbs += page.get("data") or []
-    cursor = page.get("next_cursor") or ""
-    if not cursor:
-        break
-
-manifest = json.load(open(manifest_file))
-files = sum(1 for f in manifest["files"] if f["path"].startswith("dbs/"))
-print(f"[restore-drill] {len(dbs)} databases restored, {files} branch files in the backup")
-if len(dbs) != files:
-    print("[restore-drill] WARNING: the counts differ (a branch skipped while the backup ran?)")
-if not dbs and os.environ.get("ALLOW_EMPTY") != "1":
-    sys.exit("[restore-drill] the backup has no databases, so this proves nothing (DRILL_ALLOW_EMPTY=1 to accept)")
-
-bad = 0
-for db in dbs:
-    res = call("POST", f"/v1/databases/{urllib.parse.quote(db['id'])}/query",
-               {"sql": "PRAGMA integrity_check", "read_only": True})
-    vals = [v.get("value") if isinstance(v, dict) else v for row in res.get("rows", []) for v in row]
-    ok = vals == ["ok"]
-    bad += not ok
-    print(f"[restore-drill] {db['name']} ({db.get('default_branch')}): {'ok' if ok else vals}")
-if bad:
-    sys.exit(f"[restore-drill] {bad} database(s) failed integrity_check")
-PY
+DRILL_ALLOW_EMPTY="$ALLOW_EMPTY" python3 "$(dirname "$0")/restore-check.py" \
+  "http://127.0.0.1:$port" "$tmpdir/token" "$src/manifest.json"

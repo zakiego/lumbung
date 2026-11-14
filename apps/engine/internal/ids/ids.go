@@ -17,6 +17,9 @@ const (
 	Branch   = "br"
 	Snapshot = "sn"
 	Token    = "tok"
+	Bucket   = "bk"
+	Blob     = "ob"
+	Upload   = "up"
 )
 
 const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -52,6 +55,13 @@ var (
 
 // ValidName reports whether s is a valid database or branch name.
 func ValidName(s string) bool { return nameRe.MatchString(s) }
+
+var bucketRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
+
+// ValidBucketName reports whether s is a valid bucket name: 3 to 63
+// lowercase letters, digits and hyphens, starting and ending with a letter
+// or digit, so every S3 client accepts it.
+func ValidBucketName(s string) bool { return bucketRe.MatchString(s) }
 
 // IsID reports whether s has the shape of an id with the given prefix.
 func IsID(s, prefix string) bool {

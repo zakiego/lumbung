@@ -6,6 +6,7 @@ set -euo pipefail
 script="$(cd "$(dirname "$0")" && pwd)/check-wording.sh"
 name="$(printf '%s%s' D 1)"
 lower="$(printf '%s%s' d 1)"
+storage="$(printf '%s%s' R 2)"
 pass=0
 
 new_repo() {
@@ -36,6 +37,15 @@ expect 0 "clean repo passes" "$d"
 
 d="$(new_repo)"; echo "works like Cloudflare $name" >"$d/a.md"
 expect 1 "name in an untracked file" "$d"
+
+d="$(new_repo)"; echo "buckets like Cloudflare $storage" >"$d/a.md"
+expect 1 "object storage name in an untracked file" "$d"
+
+d="$(new_repo)"; echo "ok" >"$d/a.md"
+expect 1 "object storage name in the PR body" "$d" PR_BODY="works like $storage"
+
+d="$(new_repo)"; echo "an s3 bucket with key r2d2" >"$d/a.md"
+expect 0 "object storage name inside longer words is not flagged" "$d"
 
 d="$(new_repo)"; echo "a $lower database" >"$d/a.ts"; git -C "$d" add a.ts
 expect 1 "lowercase name in a tracked file" "$d"

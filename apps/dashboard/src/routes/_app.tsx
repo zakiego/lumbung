@@ -1,5 +1,6 @@
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router"
 import { AppShell } from "@/components/app/shell"
+import { listBuckets } from "@/fns/buckets"
 import { listDatabases } from "@/fns/databases"
 import { APP_BASE } from "@/lib/paths"
 import { loadSession } from "@/lib/session-cache"
@@ -12,15 +13,18 @@ export const Route = createFileRoute("/_app")({
     return { viewer: session.viewer }
   },
   // The sidebar still renders when the engine is down; pages show their own errors.
-  loader: async () => ({ databases: await listDatabases().catch(() => null) }),
+  loader: async () => {
+    const [databases, buckets] = await Promise.all([listDatabases().catch(() => null), listBuckets().catch(() => null)])
+    return { databases, buckets }
+  },
   component: AppLayout,
 })
 
 function AppLayout() {
   const { viewer } = Route.useRouteContext()
-  const { databases } = Route.useLoaderData()
+  const { databases, buckets } = Route.useLoaderData()
   return (
-    <AppShell viewer={viewer} databases={databases}>
+    <AppShell viewer={viewer} databases={databases} buckets={buckets}>
       <Outlet />
     </AppShell>
   )

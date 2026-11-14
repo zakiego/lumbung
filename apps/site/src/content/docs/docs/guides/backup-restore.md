@@ -31,14 +31,16 @@ Restoring never overwrites a branch. Set a schedule to take snapshots automatica
 
 ## Backups
 
-`lumbungd backup` copies `meta.db` and each database's default branch into a new timestamped folder, while the engine keeps running. Each file is copied with SQLite's online backup, so every copy holds whole transactions, and a `manifest.json` lists every file with its SHA-256.
+`lumbungd backup` copies `meta.db`, each database's default branch and every object in your [buckets](/docs/concepts/buckets/) into a new timestamped folder, while the engine keeps running. Each SQLite file is copied with SQLite's online backup, so every copy holds whole transactions, and a `manifest.json` lists every file with its SHA-256.
 
 ```sh
 lumbungd backup --to ./backups --keep 7
 ls backups
 ```
 
-Run it on the machine that holds the data folder (it reads `LUMBUNG_DATA_DIR`), from cron or a systemd timer, then copy the folder off the machine. `--all-branches` includes every branch, not only defaults. `--keep 7` deletes all but the newest seven backups of that kind. A `--meta-only` backup is named `<time>-meta` and counted on its own, so it never pushes a full backup out.
+Run it on the machine that holds the data folder (it reads `LUMBUNG_DATA_DIR`), from cron or a systemd timer, then copy the folder off the machine. `--all-branches` includes every branch, not only defaults. `--keep 7` deletes all but the newest seven backups of that kind.
+
+Object files never change once written, so an object the previous backup in the same folder already holds is hard-linked from it instead of copied: a nightly backup only adds the objects that are new. `--skip-objects` leaves object files out entirely, for a quick copy of the databases; such a backup is named `<time>-no-objects`, counted on its own by `--keep`, and only restored when you name its folder, since restoring it drops every object. The backup also carries `secrets/access-key-encryption-key`, without which a restored instance can't check S3 access keys, so keep backups as private as the data folder. A `--meta-only` backup is named `<time>-meta` and counted on its own, so it never pushes a full backup out.
 
 ## Restore a backup
 
@@ -48,6 +50,6 @@ Restore into a new, empty data folder with the engine stopped, then start the en
 lumbungd restore --from ./backups --to ./restored-data
 ```
 
-`--from` takes one backup, or a folder of them, in which case the newest full backup is used. Every file is checked against the manifest first. Branches that weren't in the backup, snapshots and databases in the trash are dropped from the restored `meta.db`, so nothing points at a missing file. A generated service token comes back with it; one set through `LUMBUNG_SERVICE_TOKEN` comes from the environment as before.
+`--from` takes one backup, or a folder of them, in which case the newest full backup is used. Every file is checked against the manifest first. Branches that weren't in the backup, snapshots, databases in the trash, objects whose file isn't in the backup (all of them, after `--skip-objects`) and multipart uploads in progress are dropped from the restored `meta.db`, so nothing points at a missing file. Bucket sizes and counts are recounted. A generated service token comes back with it; one set through `LUMBUNG_SERVICE_TOKEN` comes from the environment as before.
 
 Test a restore before you need one: restore into a scratch folder, start a second engine on it with another `LUMBUNG_ADDR`, and query it. [Backups](/docs/self-hosting/backups/) covers running this under Docker.

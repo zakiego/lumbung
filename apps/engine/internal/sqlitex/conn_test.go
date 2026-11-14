@@ -144,8 +144,8 @@ func TestAuthorizerStatements(t *testing.T) {
 	// Every ALTER TABLE form works, including renames, which touch the
 	// (empty) temp schema internally.
 	for _, sql := range []string{
-		"CREATE TABLE r(x)", "ALTER TABLE r RENAME TO r2", "ALTER TABLE r2 RENAME COLUMN x TO y",
-		"ALTER TABLE r2 ADD COLUMN z", "ALTER TABLE r2 DROP COLUMN z",
+		"CREATE TABLE r(x)", "ALTER TABLE r RENAME TO renamed", "ALTER TABLE renamed RENAME COLUMN x TO y",
+		"ALTER TABLE renamed ADD COLUMN z", "ALTER TABLE renamed DROP COLUMN z",
 	} {
 		if err := c.Exec(sql); err != nil {
 			t.Errorf("%s: %v", sql, err)

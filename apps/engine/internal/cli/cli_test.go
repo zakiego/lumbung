@@ -50,7 +50,10 @@ func run(m *testing.M) (int, error) {
 	cliBin = filepath.Join(dir, "lumbung")
 	data := filepath.Join(dir, "data")
 	eng := exec.Command(filepath.Join(dir, "lumbungd"))
-	eng.Env = append(os.Environ(), "LUMBUNG_DATA_DIR="+data, "LUMBUNG_ADDR=127.0.0.1:0", "LUMBUNG_MIN_FREE_DISK=1")
+	// Every test shares this engine and its admin token, so the per-token
+	// rate limit is raised: together they can pass the default burst.
+	eng.Env = append(os.Environ(), "LUMBUNG_DATA_DIR="+data, "LUMBUNG_ADDR=127.0.0.1:0", "LUMBUNG_MIN_FREE_DISK=1",
+		"LUMBUNG_RATE_LIMIT=100000", "LUMBUNG_RATE_BURST=100000")
 	stderr, _ := eng.StderrPipe()
 	if err := eng.Start(); err != nil {
 		return 0, err

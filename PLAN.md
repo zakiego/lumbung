@@ -70,6 +70,7 @@ $DATA_DIR/dbs/<database_id>/<branch_id>.db        (+ -wal, -shm)
 $DATA_DIR/snapshots/<database_id>/<snapshot_id>.db
 $DATA_DIR/trash/<database_id>/...                 (soft-deleted, purged after retention)
 $DATA_DIR/secrets/
+$DATA_DIR/objects/, uploads/                      (buckets, section 16.6)
 ```
 
 File names are opaque ids, never user-supplied names. That makes renames free and path traversal impossible.
@@ -311,6 +312,8 @@ Work top to bottom. Each one ends green in CI, with its docs pages written.
 | 10 | Deploy | Section 12, live at the public hostname, backup and restore tested |
 | 11 | libSQL protocol | `@libsql/client` and Drizzle's libsql driver work unchanged against a branch, including interactive transactions |
 
+Object storage continues with milestones 12 to 17 in section 16.9.
+
 Later, not scheduled: MCP OAuth for Claude on the web, publishing the SDK and CLI, the open-source checklist (license, security policy, contribution guide), read replicas.
 
 ## 15. Open questions for Zaki
@@ -318,3 +321,108 @@ Later, not scheduled: MCP OAuth for Claude on the web, publishing the SDK and CL
 - License for when the repo goes public.
 - Where to publish `@lumbung/client` (npm public, or GitHub Packages while private).
 - Whether the public hostname stays `lumbung.zakiego.com` or moves to its own domain.
+
+## 16. Object storage
+
+Added after milestone 11, on top of the shipped product. Buckets of files live next to the databases, in the same engine, behind the same tokens, dashboard, CLI, SDK and MCP. ADR 0006 records the protocol, layout, auth and limits.
+
+### 16.1 Model
+
+- A bucket belongs to the instance. Names match `[a-z0-9][a-z0-9-]{1,61}[a-z0-9]` (3 to 63 characters, so every S3 client accepts them). Bucket ids are `bk_...`.
+- An object has a key (1 to 1024 bytes of UTF-8, no control characters), a size, an ETag, a content type, the standard headers (`Cache-Control`, `Content-Disposition`, `Content-Encoding`, `Content-Language`) and custom metadata (`x-amz-meta-*`, 2 KB in total). Keys are opaque strings: they never become file paths.
+- The ETag is the MD5 of the content, or for a multipart object the MD5 of the parts' MD5s with a `-<parts>` suffix, as S3 clients expect.
+- Writes are atomic: a reader sees the old object or the new one, never a partial file. The last write wins.
+- No versioning, no lifecycle rules, no object locks. A bucket can only be deleted when it's empty.
+- Per bucket: `public_read` (anyone may GET and HEAD objects without a token; listing still needs one) and `cors_origins` (origins a browser may call the S3 API from, for presigned uploads).
+
+### 16.2 S3-compatible API
+
+At `/v1/s3/`, path-style: `/v1/s3/<bucket>/<key>`. It sits under `/v1`, so our edge Worker and tunnel already forward it. Clients set the endpoint to `https://<host>/v1/s3` with path-style addressing and any region.
+
+Operations: ListBuckets, CreateBucket, HeadBucket, DeleteBucket, GetBucketLocation, GetBucketVersioning (always unversioned), PutObject, GetObject (one `Range`, conditional headers, `response-*` overrides), HeadObject, DeleteObject, DeleteObjects, CopyObject (within and across buckets, `COPY` or `REPLACE` metadata), ListObjectsV2 and ListObjects (prefix, delimiter, pagination, `encoding-type=url`), CreateMultipartUpload, UploadPart, CompleteMultipartUpload, AbortMultipartUpload, ListParts, ListMultipartUploads. Anything else answers `NotImplemented`.
+
+- Auth is AWS Signature Version 4, in the `Authorization` header or as a presigned URL (query string, at most `LUMBUNG_PRESIGN_MAX_EXPIRY`). Payloads may be signed, `UNSIGNED-PAYLOAD`, or `aws-chunked` with signed chunks or trailing checksums; every chunk signature and declared checksum (CRC32, CRC32C, CRC64NVME, SHA-1, SHA-256, Content-MD5) is checked before the object is committed.
+- Errors are S3 XML with S3 error codes. Every request gets `x-amz-request-id`.
+- The engine routes `/v1/s3/` before the general router, so keys with `//`, `.` or `..` segments reach it unchanged.
+
+### 16.3 REST, SDK, CLI, MCP
+
+REST under `/v1` (JSON, problem+json errors, in the OpenAPI document):
+
+```
+GET  POST            /v1/buckets
+GET  PATCH  DELETE   /v1/buckets/{bucket}
+GET                  /v1/buckets/{bucket}/objects?prefix=&delimiter=&cursor=&limit=
+PUT  GET  HEAD DELETE /v1/buckets/{bucket}/object?key=     (raw body in and out; GET takes Range)
+POST                 /v1/buckets/{bucket}/copy             (from another bucket or key)
+POST                 /v1/buckets/{bucket}/presign          (a presigned URL, signed with the token's access key)
+```
+
+`POST /v1/tokens` takes `bucket` (instead of `database`) and `access_key: true`, which returns an S3 access key id and secret once.
+
+- SDK: `client.buckets` (list, create, get, update, delete) and `client.bucket(name)` (put, get with range, head, delete, list, copy, presign). Same rules as section 9: no runtime dependencies, tests against a real engine.
+- CLI: `bucket list|create|delete|update`, `object ls|put|get|rm|cp|presign`, and `token create --bucket --access-key`.
+- MCP tools: `list_buckets`, `create_bucket`, `list_objects`, `get_object` (text up to the context cap, metadata only for binary), `put_object` (text or base64, capped), `delete_object`, `presign_object`. Same annotations and caps as section 8.
+
+### 16.4 Tokens and access keys
+
+- New token scope `bucket`: read, write or admin on one bucket. Instance tokens reach every bucket at their level. Database tokens never reach a bucket, and bucket tokens never reach a database.
+- read: list, GET, HEAD, presign GET. write: also PUT, DELETE, copy into the bucket, multipart, presign PUT. admin: also bucket settings and tokens for the bucket. Creating and deleting buckets needs an instance admin.
+- An access key belongs to one token: id `LMB` + the token's id in capitals, secret 40 random characters. It has the token's scope, expiry, rate limit and audit identity, and revoking the token revokes the key and every URL it signed. SigV4 needs the secret on the server, so it is stored encrypted (AES-256-GCM, key in `secrets/access-key-encryption-key`, mode 600, made on first start).
+- Failed signatures count against the per-address failed-auth limit. Anonymous public reads have their own per-address limit.
+
+### 16.5 Isolation (the part that must not be wrong)
+
+Each row is a named test through the real HTTP handlers, for both the S3 API and REST:
+
+| Attack | Expected |
+|---|---|
+| A token for bucket A reads, lists, heads, writes, deletes, copies or presigns in bucket B | denied, the same answer as a bucket that doesn't exist |
+| CopyObject into A from B with a token for A | denied (the source needs read) |
+| Read token: PUT, DELETE, DeleteObjects, copy, any multipart step, presign PUT, bucket settings | denied |
+| Write token: bucket settings, delete bucket, create bucket, tokens | denied |
+| Database token on any bucket operation; bucket token on databases, `/libsql`, SQL MCP tools | denied |
+| A multipart upload id from bucket B used under bucket A, or by another bucket's token | `NoSuchUpload` |
+| Presigned URL with its path, method, expiry or headers changed; expired; signed by a revoked token | denied |
+| Signed payload hash or chunk signature that doesn't match the body; wrong secret; clock skew past 15 minutes | denied, nothing stored |
+| Anonymous PUT, DELETE or list on a public bucket; anonymous GET on a private or missing bucket | denied, private and missing look the same |
+| Keys like `../../meta.db`, `%2e%2e/x`, `/abs`, `a//b`, 1025 bytes, control characters | stored as opaque keys or refused; no file outside the bucket's blob folder is touched |
+| Object, bucket or instance storage past its limit; disk under `LUMBUNG_MIN_FREE_DISK` | refused before or while writing, nothing partial kept |
+| The access key secret in meta.db or a meta-only backup | never in plain text |
+
+A Go fuzz test sends random methods, paths, keys and headers through the S3 handler and fails if any file outside `objects/`, `uploads/` and `tmp/` is created or changed. CI runs it for a bounded time. Section 6.2's tests stay as they are.
+
+### 16.6 Storage
+
+```
+$DATA_DIR/objects/<bucket id>/<2 chars>/<blob id>    one immutable file per object version
+$DATA_DIR/uploads/<upload id>/<part>                 multipart parts in progress
+$DATA_DIR/secrets/access-key-encryption-key
+```
+
+The index (buckets, objects, uploads, parts) lives in meta.db. A write streams to `tmp/`, is checked (size, hashes, checksums), renamed into `objects/`, then recorded in one meta transaction. A replaced or deleted object's file is removed after `LUMBUNG_OBJECT_GC_DELAY`, so a backup running meanwhile can still copy it. Files meta.db doesn't know are swept at start and by housekeeping. Unfinished multipart uploads are aborted after `LUMBUNG_MULTIPART_EXPIRY`.
+
+Limits (section 6.3 style, all settings): object size, bucket size, total object storage (objects plus parts in progress), bucket count, presign expiry, anonymous read rate. Writes are refused with HTTP 507 under the free-disk threshold.
+
+### 16.7 Backup and restore
+
+`lumbungd backup` copies every live object's file and the encryption key with meta.db, listed in the manifest with SHA-256 sums. Files are immutable, so a file already in the previous backup is hard-linked instead of copied, with its sum reused. `--skip-objects` leaves them out. Restore copies them back, and reconcile drops object rows whose file isn't in the backup (fixing bucket totals) and every unfinished upload. `ops/restore-drill.sh` also lists every bucket and downloads objects to check their size and ETag. A `--skip-objects` backup is a kind of its own (`<time>-no-objects`), so it is never restored by default and never pushes full backups out of retention. Object files are copied right after meta.db, before branches, so the GC delay covers them; a file linked from the previous backup is checked against its sum first.
+
+### 16.8 Dashboard and docs
+
+- Dashboard: Buckets in the sidebar. List with size and object count, create. Bucket browser with folders from `/`, breadcrumbs, upload (streamed through the dashboard, not buffered), download, delete, empty and loading and error states. Settings: public read, CORS origins, delete with a typed confirmation. Read-only members browse and download; members upload and delete; owners change settings and create or delete buckets.
+- Docs: Concepts: Buckets and objects; Tokens and scopes and Limits updated. Guides: Use an S3 client, Store files from Node, Browser uploads with presigned URLs. Reference: S3 API (operations, auth, error codes). Self-hosting: Backups updated. Samples run in `scripts/docs-test`; S3 samples run inside `examples/s3`.
+- `examples/s3`: the AWS SDK for JavaScript, unchanged, against a real engine in CI: put, get with a range, head, list with prefix and delimiter, copy, delete, multipart (by hand and with its upload helper), presigned GET and PUT.
+
+### 16.9 Milestones
+
+| # | Milestone | Done when |
+|---|---|---|
+| 12 | Object store core | meta migration, bucket and object store in the engine, multipart, quotas, GC and orphan sweep, bucket token scope and access keys, settings and error codes, unit tests |
+| 13 | S3 API | 16.2 complete, every row of 16.5 passing, fuzz test in CI, `examples/s3` green in CI |
+| 14 | REST, SDK, CLI | 16.3 REST, SDK and CLI with tests against a real engine, OpenAPI and generated docs current |
+| 15 | MCP and docs | MCP tools verified with mcporter, every page in 16.8 with samples passing |
+| 16 | Backup and restore | 16.7 with tests, restore drill updated and run once against a local backup |
+| 17 | Dashboard | 16.8 screens, `break-ui` on the browser, end-to-end script walks a bucket |
+
+Each ends with a cold review by a fresh subagent and every HIGH and MEDIUM finding fixed before the next starts.

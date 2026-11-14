@@ -75,7 +75,7 @@ func Root(o Options) *cobra.Command {
 	}
 	root := &cobra.Command{
 		Use:           "lumbung",
-		Short:         "Work with a Lumbung instance: databases, branches, queries, migrations, snapshots and tokens",
+		Short:         "Work with a Lumbung instance: databases, branches, queries, migrations, snapshots, buckets and tokens",
 		Long:          "lumbung talks to a Lumbung engine over its REST API.\n\nConnection settings come from flags, then LUMBUNG_URL, LUMBUNG_TOKEN and LUMBUNG_DATABASE, then the profile saved by `lumbung login`.",
 		Version:       version.Version,
 		SilenceUsage:  true,
@@ -92,7 +92,7 @@ func Root(o Options) *cobra.Command {
 	pf.BoolVarP(&a.yes, "yes", "y", false, "don't ask before destructive actions")
 
 	root.AddCommand(a.loginCmd(), a.dbCmd(), a.branchCmd(), a.queryCmd(), a.shellCmd(), a.migrateCmd(),
-		a.snapshotCmd(), a.tokenCmd(), a.importCmd(), a.exportCmd(), a.versionCmd())
+		a.snapshotCmd(), a.tokenCmd(), a.importCmd(), a.exportCmd(), a.bucketCmd(), a.objectCmd(), a.versionCmd())
 	return root
 }
 

@@ -63,3 +63,7 @@ Set `LUMBUNG_DASHBOARD_URL` to the public address, like `https://db.example.com`
 ## Paths
 
 Everything the engine serves is under `/v1`, `/mcp` and `/health`, and everything the dashboard serves is under `/app`. If you route several services under one name, send those prefixes to each.
+
+## Buckets behind a proxy
+
+The [S3 API](/docs/reference/s3-api/) checks signatures over the path and the `Host` header, so the proxy must pass both through unchanged: keep the original `Host`, and don't merge `//` or resolve `.` and `..` in paths. Presigned URLs use the scheme the request arrived with; the engine reads `X-Forwarded-Proto` only from `LUMBUNG_TRUSTED_PROXIES`, so include the proxy's address there when it terminates TLS. Uploads can be large: raise the proxy's body size limit (for example `client_max_body_size` in nginx) to at least `LUMBUNG_MAX_OBJECT_BYTES`, or to the part size your S3 clients use.

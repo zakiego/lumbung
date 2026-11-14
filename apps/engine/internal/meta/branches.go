@@ -319,6 +319,14 @@ type Present struct {
 	Branches  map[string]bool // live branches with their file
 	Snapshots map[string]bool // snapshots with their file
 	Trash     map[string]bool // deleted databases whose trash folder is there
+	// Blobs are object files, by blob id. Nil leaves objects alone.
+	Blobs map[string]bool
+	// Uploads are multipart uploads whose folder is there. Nil leaves them
+	// alone; an empty map drops every upload.
+	Uploads map[string]bool
+	// Parts are part files that are there, as "<upload id>/<file>". An
+	// upload with a recorded part that isn't is dropped too.
+	Parts map[string]bool
 }
 
 // DropMissing makes a restored meta.db match the files next to it. It
@@ -414,6 +422,52 @@ func (s *Store) DropMissing(ctx context.Context, p Present) error {
 		} {
 			if err := exec(q, id); err != nil {
 				return err
+			}
+		}
+	}
+
+	// Objects whose file isn't there, and uploads whose parts aren't.
+	if p.Blobs != nil {
+		blobs, err := ids(`SELECT blob_id FROM objects`)
+		if err != nil {
+			return err
+		}
+		for _, id := range blobs {
+			if !p.Blobs[id] {
+				if err := exec(`DELETE FROM objects WHERE blob_id = ?`, id); err != nil {
+					return err
+				}
+			}
+		}
+		if err := exec(`UPDATE buckets SET
+			size_bytes = coalesce((SELECT sum(size) FROM objects WHERE bucket_id = buckets.id), 0),
+			object_count = (SELECT count(*) FROM objects WHERE bucket_id = buckets.id)`); err != nil {
+			return err
+		}
+	}
+	if p.Uploads != nil {
+		uploads, err := ids(`SELECT id FROM uploads`)
+		if err != nil {
+			return err
+		}
+		for _, id := range uploads {
+			missing := !p.Uploads[id]
+			if !missing && p.Parts != nil {
+				files, err := queryStrings(ctx, tx, `SELECT upload_id || '/' || file FROM upload_parts WHERE upload_id = ?`, id)
+				if err != nil {
+					return err
+				}
+				for _, f := range files {
+					missing = missing || !p.Parts[f]
+				}
+			}
+			if missing {
+				if err := exec(`DELETE FROM upload_parts WHERE upload_id = ?`, id); err != nil {
+					return err
+				}
+				if err := exec(`DELETE FROM uploads WHERE id = ?`, id); err != nil {
+					return err
+				}
 			}
 		}
 	}

@@ -507,17 +507,21 @@ func (a *app) tokenCmd() *cobra.Command {
 						scope += "/" + t.BranchID
 					}
 				}
+				if t.BucketID != "" {
+					scope = t.BucketID
+				}
 				rows = append(rows, []string{t.ID, t.Name, scope, t.Access, tsPtr(t.ExpiresAt), tsPtr(t.LastUsedAt)})
 			}
 			a.table([]string{"ID", "NAME", "SCOPE", "ACCESS", "EXPIRES", "LAST USED"}, rows)
 			return nil
 		},
 	})
-	var name, access, branch string
+	var name, access, branch, bucket string
 	var expires int
+	var accessKey bool
 	create := &cobra.Command{
 		Use: "create", Short: "Create a token; the full token is printed once", Args: cobra.NoArgs,
-		Example: "  lumbung token create --name ci --db app --access write --expires-in-days 90",
+		Example: "  lumbung token create --name ci --db app --access write --expires-in-days 90\n  lumbung token create --name uploads --bucket photos --access write --access-key",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, _, err := a.client()
 			if err != nil {
@@ -530,6 +534,12 @@ func (a *app) tokenCmd() *cobra.Command {
 			if branch != "" {
 				body["branch"] = branch
 			}
+			if bucket != "" {
+				body["bucket"] = bucket
+			}
+			if accessKey {
+				body["access_key"] = true
+			}
 			var t client.Token
 			if err := c.Do(cmd.Context(), http.MethodPost, "/v1/tokens", nil, body, &t); err != nil {
 				return err
@@ -539,6 +549,11 @@ func (a *app) tokenCmd() *cobra.Command {
 			}
 			fmt.Fprintf(a.errOut, "Created token %s. Copy it now; it won't be shown again:\n", t.ID)
 			fmt.Fprintln(a.out, t.Secret)
+			if t.AccessKeyID != "" {
+				fmt.Fprintln(a.errOut, "S3 access key id and secret access key (the secret is shown once too):")
+				fmt.Fprintln(a.out, t.AccessKeyID)
+				fmt.Fprintln(a.out, t.SecretAccessKey)
+			}
 			return nil
 		},
 	}
@@ -546,6 +561,8 @@ func (a *app) tokenCmd() *cobra.Command {
 	create.Flags().StringVar(&access, "access", "read", "read, write or admin")
 	create.Flags().StringVar(&a.flagDB, "db", "", "limit the token to this database (default: the whole instance)")
 	create.Flags().StringVar(&branch, "branch", "", "limit the token to this branch of --db")
+	create.Flags().StringVar(&bucket, "bucket", "", "limit the token to this bucket (instead of --db)")
+	create.Flags().BoolVar(&accessKey, "access-key", false, "also make an S3 access key for the token")
 	create.Flags().IntVar(&expires, "expires-in-days", 0, "expire after this many days (0: never)")
 	_ = create.MarkFlagRequired("name")
 	cmd.AddCommand(create, &cobra.Command{

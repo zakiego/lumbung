@@ -25,7 +25,7 @@ var updateGolden = flag.Bool("update", false, "rewrite the golden error files")
 
 // env is a running API on a fresh data directory.
 type env struct {
-	t       *testing.T
+	t       testing.TB
 	srv     *server.Server
 	http    *httptest.Server
 	admin   string // the service token
@@ -35,7 +35,7 @@ type env struct {
 	schemas map[string]*jsonschema.Schema
 }
 
-func newEnv(t *testing.T, mod func(*config.Config)) *env {
+func newEnv(t testing.TB, mod func(*config.Config)) *env {
 	t.Helper()
 	cfg := config.Defaults()
 	cfg.DataDir = t.TempDir()
@@ -148,7 +148,7 @@ type resp struct {
 	body   []byte
 }
 
-func (r resp) json(t *testing.T) map[string]any {
+func (r resp) json(t testing.TB) map[string]any {
 	t.Helper()
 	var m map[string]any
 	if err := json.Unmarshal(r.body, &m); err != nil {
@@ -157,7 +157,7 @@ func (r resp) json(t *testing.T) map[string]any {
 	return m
 }
 
-func (r resp) code(t *testing.T) string {
+func (r resp) code(t testing.TB) string {
 	t.Helper()
 	c, _ := r.json(t)["code"].(string)
 	return c
@@ -222,7 +222,7 @@ func (e *env) fails(r resp, status int, code string) resp {
 
 // golden compares an error body with testdata/golden/<name>.json, ignoring
 // the request id.
-func golden(t *testing.T, name string, r resp) {
+func golden(t testing.TB, name string, r resp) {
 	t.Helper()
 	var m map[string]any
 	if err := json.Unmarshal(r.body, &m); err != nil {

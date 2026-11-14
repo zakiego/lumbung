@@ -18,11 +18,28 @@ type NameDialogProps = {
   placeholder?: string
   submit: string
   pendingSubmit: string
+  /** The name rule, as an HTML pattern. Default: database and branch names. */
+  pattern?: string
+  /** What to show when the name breaks the pattern. */
+  patternHint?: string
   /** Runs on submit. A rejection keeps the dialog open and shows its message under the field. */
   onSubmit: (name: string) => Promise<unknown>
 }
 
-export function NameDialog({ trigger, triggerIcon = <PlusIcon aria-hidden="true" />, triggerVariant = "default", title, description, label, placeholder, submit, pendingSubmit, onSubmit }: NameDialogProps) {
+export function NameDialog({
+  trigger,
+  triggerIcon = <PlusIcon aria-hidden="true" />,
+  triggerVariant = "default",
+  title,
+  description,
+  label,
+  placeholder,
+  submit,
+  pendingSubmit,
+  pattern = NAME_PATTERN,
+  patternHint = "Use lowercase letters, digits and dashes.",
+  onSubmit,
+}: NameDialogProps) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [error, setError] = useState("")
@@ -73,12 +90,12 @@ export function NameDialog({ trigger, triggerIcon = <PlusIcon aria-hidden="true"
               }}
               placeholder={placeholder}
               required
-              pattern={NAME_PATTERN}
+              pattern={pattern}
               autoComplete="off"
               spellCheck={false}
               className="font-mono"
             />
-            <FieldError match="patternMismatch">Use lowercase letters, digits and dashes.</FieldError>
+            <FieldError match="patternMismatch">{patternHint}</FieldError>
             <FieldError match={!!error}>{error}</FieldError>
           </Field>
           <DialogFooter>

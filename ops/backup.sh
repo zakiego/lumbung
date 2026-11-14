@@ -13,9 +13,9 @@
 #      (SHA-256 against the manifest, integrity_check) and keep 7 of each
 #
 # A copy outside the volume survives a deleted volume, not a dead disk: copy
-# ~/selfhost/lumbung-backups somewhere else too. It holds the service token
-# and the dashboard's sign-in secret, so it is private to this user (mode
-# 700, the secret files 600).
+# ~/selfhost/lumbung-backups somewhere else too. It holds the service token,
+# the key that encrypts S3 access key secrets and the dashboard's sign-in
+# secret, so it is private to this user (mode 700, the secret files 600).
 #
 # ops/restore-drill.sh proves the newest host copy restores.
 set -euo pipefail
@@ -151,6 +151,18 @@ else
 fi
 
 # --- 3. copy out and check ----------------------------------------------------
+# docker cp writes every file in full before the dedupe below links the
+# unchanged ones, so the whole backup must fit on the disk for a moment.
+need_mb=$(( $(printf '%s' "$engine_json" | tail -n 1 | json_field bytes) / 1048576 + 1 ))
+free_mb=$(df -m /System/Volumes/Data | awk 'NR==2 {print $4}')
+if [ $((free_mb - need_mb)) -lt "$MIN_FREE_MB" ]; then
+  log "copying $remote needs ${need_mb} MB and only ${free_mb} MB are free (keeping ${MIN_FREE_MB} MB); not copying"
+  exit 1
+fi
+skipped=$(printf '%s' "$engine_json" | tail -n 1 | json_field skipped 2>/dev/null || echo 0)
+if [ "${skipped:-0}" != "0" ]; then
+  log "WARNING: $skipped files disappeared while the backup ran (see skipped in its manifest.json); the backup took longer than the object GC delay, or branches were deleted"
+fi
 dest="$OUT/engine/$stamp"
 if [ -e "$dest" ]; then
   log "$dest already exists"
@@ -173,6 +185,50 @@ for f in m["files"]:
         sys.exit(f"{f['path']} doesn't match the manifest")
 print(f"{len(m['files'])} files match the manifest")
 PY
+# Object files never change, and docker cp copies hard links as separate
+# files: link each object file that the previous host copy holds with the
+# same sum, so a night only adds the objects that are new.
+prev=""
+shopt -s nullglob
+for path in "$OUT"/engine/[0-9]*T[0-9]*Z; do prev="$path"; done
+shopt -u nullglob
+if [ -n "$prev" ]; then
+  python3 - "$partial" "$prev" <<'PY'
+import hashlib, json, os, sys
+new, prev = sys.argv[1:3]
+try:
+    old = {f["path"]: f["sha256"] for f in json.load(open(os.path.join(prev, "manifest.json")))["files"]}
+except (OSError, ValueError, KeyError):
+    sys.exit(0)
+linked = 0
+for f in json.load(open(os.path.join(new, "manifest.json")))["files"]:
+    p = f["path"]
+    if not p.startswith("objects/") or old.get(p) != f["sha256"]:
+        continue
+    src, dst = os.path.join(prev, p), os.path.join(new, p)
+    # Link only an old copy that still matches its sum, so a file that went
+    # bad in one night's copy never replaces tonight's checked one.
+    h = hashlib.sha256()
+    try:
+        with open(src, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:
+        continue
+    if h.hexdigest() != f["sha256"]:
+        print(f"{p}: the copy in {os.path.basename(prev)} doesn't match its sum; keeping tonight's")
+        continue
+    tmp = dst + ".link"
+    try:
+        os.link(src, tmp)
+        os.replace(tmp, dst)
+        linked += 1
+    except OSError:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+print(f"{linked} object files linked from {os.path.basename(prev)}")
+PY
+fi
 mv "$partial" "$dest"
 partial=""
 log "engine copy: $dest ($(du -sk "$dest" | cut -f1) KB)"

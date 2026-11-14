@@ -55,6 +55,15 @@ type Config struct {
 	LibSQLTxTimeout       time.Duration
 	LibSQLMaxStreams      int
 	LibSQLStreamsPerToken int
+
+	MaxBuckets            int
+	MaxObjectBytes        int64
+	MaxBucketBytes        int64
+	MaxObjectStorageBytes int64
+	MultipartExpiry       time.Duration
+	PresignMaxExpiry      time.Duration
+	PublicRateLimit       int
+	ObjectGCDelay         time.Duration
 }
 
 // Kind is how a setting's value is written.
@@ -115,7 +124,7 @@ func integer(f func(*Config) *int) func(*Config, string) error {
 
 // Settings lists every setting in documentation order.
 var Settings = []Setting{
-	{"LUMBUNG_DATA_DIR", KindString, "./data", "Folder for meta.db, branch files, snapshots, trash and generated secrets. Use a local disk.", str(func(c *Config) *string { return &c.DataDir })},
+	{"LUMBUNG_DATA_DIR", KindString, "./data", "Folder for meta.db, branch files, snapshots, trash, object files and generated secrets. Use a local disk.", str(func(c *Config) *string { return &c.DataDir })},
 	{"LUMBUNG_ADDR", KindString, "127.0.0.1:4870", "Address the HTTP server listens on.", str(func(c *Config) *string { return &c.Addr })},
 
 	{"LUMBUNG_STATEMENT_TIMEOUT", KindDuration, "30s", "Longest a query or batch may run. Longer ones are cancelled with `statement_timeout` and the connection stays usable.", dur(func(c *Config) *time.Duration { return &c.StatementTimeout })},
@@ -156,6 +165,15 @@ var Settings = []Setting{
 	{"LUMBUNG_LIBSQL_TX_TIMEOUT", KindDuration, "60s", "Longest an interactive transaction over the libSQL protocol may stay open, from its BEGIN. Past it the transaction is rolled back and its stream closed. An open write transaction holds the branch's only writer, so other writes wait for it.", dur(func(c *Config) *time.Duration { return &c.LibSQLTxTimeout })},
 	{"LUMBUNG_LIBSQL_MAX_STREAMS", KindInt, "128", "Most open libSQL protocol streams on the instance. Past it new streams fail with `too_many_streams`.", integer(func(c *Config) *int { return &c.LibSQLMaxStreams })},
 	{"LUMBUNG_LIBSQL_MAX_STREAMS_PER_TOKEN", KindInt, "16", "Most open libSQL protocol streams per token.", integer(func(c *Config) *int { return &c.LibSQLStreamsPerToken })},
+
+	{"LUMBUNG_MAX_BUCKETS", KindInt, "100", "Most buckets on the instance.", integer(func(c *Config) *int { return &c.MaxBuckets })},
+	{"LUMBUNG_MAX_OBJECT_BYTES", KindBytes, "5GiB", "Largest object, sent in one piece or assembled from a multipart upload. Larger ones fail with `object_too_large`.", bytesOf(func(c *Config) *int64 { return &c.MaxObjectBytes })},
+	{"LUMBUNG_MAX_BUCKET_BYTES", KindBytes, "10GiB", "Most bytes one bucket may hold, counting its multipart uploads in progress. Writes past it fail with `bucket_size_limit`.", bytesOf(func(c *Config) *int64 { return &c.MaxBucketBytes })},
+	{"LUMBUNG_MAX_OBJECT_STORAGE_BYTES", KindBytes, "20GiB", "Most bytes all buckets together may hold, counting multipart uploads in progress. Writes past it fail with `object_storage_quota_exceeded`. Separate from `LUMBUNG_MAX_INSTANCE_BYTES`, which covers branch files.", bytesOf(func(c *Config) *int64 { return &c.MaxObjectStorageBytes })},
+	{"LUMBUNG_MULTIPART_EXPIRY", KindDuration, "24h", "A multipart upload not completed this long after it started is aborted and its parts removed.", dur(func(c *Config) *time.Duration { return &c.MultipartExpiry })},
+	{"LUMBUNG_PRESIGN_MAX_EXPIRY", KindDuration, "168h", "Longest a presigned URL may stay valid. The S3 protocol allows at most 7 days.", dur(func(c *Config) *time.Duration { return &c.PresignMaxExpiry })},
+	{"LUMBUNG_PUBLIC_RATE_LIMIT", KindInt, "100", "Requests per second each client address may make without a token, to read objects in public buckets.", integer(func(c *Config) *int { return &c.PublicRateLimit })},
+	{"LUMBUNG_OBJECT_GC_DELAY", KindDuration, "1h", "How long the file of a replaced or deleted object is kept before it is removed, so a backup that already copied meta.db can still copy it.", dur(func(c *Config) *time.Duration { return &c.ObjectGCDelay })},
 }
 
 // Load resolves the configuration: each setting's environment value when
@@ -180,6 +198,9 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if _, err := ParseNetworks(c.TrustedProxies); err != nil {
 		return Config{}, fmt.Errorf("config: LUMBUNG_TRUSTED_PROXIES: %w", err)
+	}
+	if c.PresignMaxExpiry > 7*24*time.Hour {
+		return Config{}, fmt.Errorf("config: LUMBUNG_PRESIGN_MAX_EXPIRY can't pass 168h (7 days)")
 	}
 	if c.ConnMaxMemory < 4<<20 {
 		return Config{}, fmt.Errorf("config: LUMBUNG_CONN_MAX_MEMORY must be at least 4MiB")

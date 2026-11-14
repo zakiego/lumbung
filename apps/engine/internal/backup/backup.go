@@ -10,8 +10,14 @@
 //	  manifest.json                 what's in it, with SHA-256 sums
 //	  meta.db
 //	  dbs/<database id>/<branch id>.db
+//	  objects/<bucket id>/<xx>/<blob id>   every live object's file
 //	  secrets/service-token         when present
+//	  secrets/access-key-encryption-key   when present
 //	<to>/20261114T013000Z-meta/     meta.db only, taken before an upgrade
+//	<to>/20261114T014500Z-no-objects/   a full backup without object files
+//
+// Object files never change once written, so a file the previous backup in
+// the same folder already holds is hard-linked from it instead of copied.
 package backup
 
 import (
@@ -42,6 +48,10 @@ import (
 const (
 	stampLayout = "20060102T150405Z"
 	metaSuffix  = "-meta"
+	// noObjectsSuffix names a --skip-objects backup, a kind of its own: it
+	// is never picked as the newest full backup, never pushes full ones out
+	// of retention, and never serves as the source of linked files.
+	noObjectsSuffix = "-no-objects"
 )
 
 // Options say what to back up.
@@ -50,6 +60,7 @@ type Options struct {
 	To          string
 	AllBranches bool // every branch, not only each database's default
 	MetaOnly    bool // only meta.db (before an upgrade)
+	SkipObjects bool // leave object files out (meta.db still lists them)
 	Keep        int  // keep the newest N backups of this kind in To; 0 keeps all
 	Limits      sqlitex.Limits
 	Now         func() time.Time
@@ -62,10 +73,26 @@ type Manifest struct {
 	MetaVersion int       `json:"meta_version"`
 	AllBranches bool      `json:"all_branches"`
 	MetaOnly    bool      `json:"meta_only"`
-	Files       []File    `json:"files"`
-	// Skipped lists branch files that disappeared while the backup ran
-	// (the branch was deleted, or its database moved to the trash).
+	// Objects says whether object files are in the backup.
+	Objects bool   `json:"objects"`
+	Files   []File `json:"files"`
+	// Skipped lists branch and object files that disappeared while the
+	// backup ran (the branch was deleted, its database moved to the trash,
+	// or the object was replaced longer ago than the GC delay).
 	Skipped []string `json:"skipped,omitempty"`
+	// Linked counts object files hard-linked from the previous backup.
+	Linked int `json:"linked,omitempty"`
+}
+
+// ObjectFiles counts the object files in the backup.
+func (m Manifest) ObjectFiles() int {
+	n := 0
+	for _, f := range m.Files {
+		if strings.HasPrefix(f.Path, "objects/") {
+			n++
+		}
+	}
+	return n
 }
 
 // File is one copied file.
@@ -107,6 +134,8 @@ func Run(ctx context.Context, o Options) (string, Manifest, error) {
 	name := o.Now().UTC().Format(stampLayout)
 	if o.MetaOnly {
 		name += metaSuffix
+	} else if o.SkipObjects {
+		name += noObjectsSuffix
 	}
 	final := filepath.Join(o.To, name)
 	if _, err := os.Stat(final); err == nil {
@@ -127,7 +156,8 @@ func Run(ctx context.Context, o Options) (string, Manifest, error) {
 		}
 	}()
 
-	m := Manifest{Version: 1, CreatedAt: o.Now().UTC(), AllBranches: o.AllBranches, MetaOnly: o.MetaOnly}
+	m := Manifest{Version: 2, CreatedAt: o.Now().UTC(), AllBranches: o.AllBranches, MetaOnly: o.MetaOnly,
+		Objects: !o.MetaOnly && !o.SkipObjects}
 	if err := copySQLite(ctx, layout.Meta(), filepath.Join(work, "meta.db"), o.Limits); err != nil {
 		return "", m, fmt.Errorf("backup: meta.db: %w", err)
 	}
@@ -135,13 +165,21 @@ func Run(ctx context.Context, o Options) (string, Manifest, error) {
 		return "", m, err
 	}
 
-	version, branches, err := readCopy(ctx, filepath.Join(work, "meta.db"), o.AllBranches)
+	version, branches, blobs, err := readCopy(ctx, filepath.Join(work, "meta.db"), o.AllBranches)
 	if err != nil {
 		return "", m, fmt.Errorf("backup: read the copied meta.db: %w", err)
 	}
 	m.MetaVersion = version
 	if o.MetaOnly {
 		branches = nil
+	}
+	// Object files first, right after meta.db: a file replaced after the
+	// copy of meta.db is only kept for the GC delay, so they can't wait
+	// behind every branch.
+	if m.Objects {
+		if err := copyObjects(o.To, name, layout, work, blobs, &m); err != nil {
+			return "", m, err
+		}
 	}
 	for _, b := range branches {
 		rel := filepath.Join("dbs", b.dbID, b.id+".db")
@@ -162,8 +200,20 @@ func Run(ctx context.Context, o Options) (string, Manifest, error) {
 			return "", m, err
 		}
 	}
-	if b, err := os.ReadFile(filepath.Join(layout.SecretsDir(), "service-token")); err == nil {
-		rel := filepath.Join("secrets", "service-token")
+	for _, secret := range secretFiles {
+		if o.MetaOnly && secret == "access-key-encryption-key" {
+			// A meta-only backup rolls meta.db back in the same data folder,
+			// which keeps its key; leaving it out means the copy alone never
+			// opens an access key secret.
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(layout.SecretsDir(), secret))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return "", m, err
+		}
+		rel := filepath.Join("secrets", secret)
 		if err := os.MkdirAll(filepath.Join(work, "secrets"), 0o700); err != nil {
 			return "", m, err
 		}
@@ -182,25 +232,101 @@ func Run(ctx context.Context, o Options) (string, Manifest, error) {
 		return "", m, err
 	}
 	ok = true
-	if err := prune(o.To, o.Keep, o.MetaOnly, o.Now()); err != nil {
+	if err := prune(o.To, o.Keep, kindOf(o), o.Now()); err != nil {
 		return final, m, fmt.Errorf("backup: %s is complete, but retention failed: %w", final, err)
 	}
 	return final, m, nil
 }
 
+// secretFiles are the generated secrets a backup carries, so a restored
+// instance keeps its service token and can still read access key secrets.
+var secretFiles = []string{"service-token", "access-key-encryption-key"}
+
 type branchRef struct{ dbID, id string }
 
-// readCopy lists the branches to copy from the copied meta.db, read-only so
-// the file stays exactly as its checksum says.
-func readCopy(ctx context.Context, path string, all bool) (int, []branchRef, error) {
+type blobRef struct{ bucketID, id string }
+
+// previousFiles returns the newest earlier full backup in dir and its
+// manifest's object files by path, for hard-linking unchanged files.
+func previousFiles(dir, current string) (string, map[string]File) {
+	all, err := list(dir, "")
+	if err != nil {
+		return "", nil
+	}
+	for _, name := range all {
+		if name >= current {
+			continue
+		}
+		prev := filepath.Join(dir, name)
+		b, err := os.ReadFile(filepath.Join(prev, "manifest.json"))
+		if err != nil {
+			return "", nil
+		}
+		var pm Manifest
+		if json.Unmarshal(b, &pm) != nil {
+			return "", nil
+		}
+		files := map[string]File{}
+		for _, f := range pm.Files {
+			if strings.HasPrefix(f.Path, "objects/") && validPath(f.Path) {
+				files[f.Path] = f
+			}
+		}
+		return prev, files
+	}
+	return "", nil
+}
+
+// copyObjects copies every listed object file into the backup, or links it
+// from the previous backup when that one holds the same file. Files are
+// named by random ids and never change, so the same path means the same
+// content; the size is checked anyway.
+func copyObjects(to, current string, layout storage.Layout, work string, blobs []blobRef, m *Manifest) error {
+	prevDir, prev := previousFiles(to, current)
+	for _, b := range blobs {
+		rel := storage.BlobRel(b.bucketID, b.id)
+		slash := filepath.ToSlash(rel)
+		dst := filepath.Join(work, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return err
+		}
+		if pf, ok := prev[slash]; ok {
+			// The old copy is read and checked against its sum before it is
+			// linked, so a file that went bad in one backup is copied again
+			// from the live data instead of spreading to every later one.
+			old := filepath.Join(prevDir, rel)
+			if sum, n, err := fileSum(old); err == nil && n == pf.Bytes && sum == pf.SHA256 && os.Link(old, dst) == nil {
+				m.Files = append(m.Files, pf)
+				m.Linked++
+				continue
+			}
+		}
+		if err := copyFile(layout.BlobFile(b.bucketID, b.id), dst); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				_ = os.Remove(dst)
+				m.Skipped = append(m.Skipped, slash)
+				continue
+			}
+			return fmt.Errorf("backup: object file %s: %w", slash, err)
+		}
+		if err := m.add(work, rel); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readCopy lists the branches and object files to copy from the copied
+// meta.db, read-only so the file stays exactly as its checksum says.
+func readCopy(ctx context.Context, path string, all bool) (int, []branchRef, []blobRef, error) {
 	c, err := sqlite3.OpenContext(ctx, uri(path, "ro"))
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	defer c.Close()
 	stmt, _, err := c.Prepare("PRAGMA user_version")
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	stmt.Step()
 	version := stmt.ColumnInt(0)
@@ -211,18 +337,39 @@ func readCopy(ctx context.Context, path string, all bool) (int, []branchRef, err
 	}
 	stmt, _, err = c.Prepare(q + ` ORDER BY b.database_id, b.id`)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
-	defer stmt.Close()
 	var out []branchRef
 	for stmt.Step() {
 		dbID, id := stmt.ColumnText(0), stmt.ColumnText(1)
 		if !ids.IsID(dbID, ids.Database) || !ids.IsID(id, ids.Branch) {
-			return 0, nil, fmt.Errorf("meta.db lists a malformed branch id %q/%q", dbID, id)
+			stmt.Close()
+			return 0, nil, nil, fmt.Errorf("meta.db lists a malformed branch id %q/%q", dbID, id)
 		}
 		out = append(out, branchRef{dbID, id})
 	}
-	return version, out, stmt.Err()
+	if err := stmt.Close(); err != nil {
+		return 0, nil, nil, err
+	}
+	var blobs []blobRef
+	if version >= 4 { // the objects table
+		stmt, _, err = c.Prepare(`SELECT bucket_id, blob_id FROM objects ORDER BY bucket_id, blob_id`)
+		if err != nil {
+			return 0, nil, nil, err
+		}
+		defer stmt.Close()
+		for stmt.Step() {
+			bk, id := stmt.ColumnText(0), stmt.ColumnText(1)
+			if !ids.IsID(bk, ids.Bucket) || !ids.IsID(id, ids.Blob) {
+				return 0, nil, nil, fmt.Errorf("meta.db lists a malformed object file %q/%q", bk, id)
+			}
+			blobs = append(blobs, blobRef{bk, id})
+		}
+		if err := stmt.Err(); err != nil {
+			return 0, nil, nil, err
+		}
+	}
+	return version, out, blobs, nil
 }
 
 func (m *Manifest) add(root, rel string) error {
@@ -302,9 +449,21 @@ func check(ctx context.Context, path string, limits sqlitex.Limits) error {
 }
 
 // List returns the full backups in a folder, newest first.
-func List(dir string) ([]string, error) { return list(dir, false) }
+func List(dir string) ([]string, error) { return list(dir, "") }
 
-func list(dir string, metaOnly bool) ([]string, error) {
+// kindOf is the folder suffix of a backup's kind.
+func kindOf(o Options) string {
+	switch {
+	case o.MetaOnly:
+		return metaSuffix
+	case o.SkipObjects:
+		return noObjectsSuffix
+	}
+	return ""
+}
+
+// list returns the backups of one kind (by folder suffix), newest first.
+func list(dir, suffix string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -315,11 +474,7 @@ func list(dir string, metaOnly bool) ([]string, error) {
 			continue
 		}
 		name := e.Name()
-		if metaOnly {
-			if !strings.HasSuffix(name, metaSuffix) || !isStamp(strings.TrimSuffix(name, metaSuffix)) {
-				continue
-			}
-		} else if !isStamp(name) {
+		if !strings.HasSuffix(name, suffix) || !isStamp(strings.TrimSuffix(name, suffix)) {
 			continue
 		}
 		out = append(out, name)
@@ -336,7 +491,7 @@ func isStamp(name string) bool {
 // prune keeps the newest keep backups of one kind, so meta-only backups
 // never push full ones out, and removes work folders a killed run left
 // behind more than a day ago.
-func prune(dir string, keep int, metaOnly bool, now time.Time) error {
+func prune(dir string, keep int, suffix string, now time.Time) error {
 	if entries, err := os.ReadDir(dir); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() || !strings.HasPrefix(e.Name(), ".") || !strings.Contains(e.Name(), ".partial-") {
@@ -350,7 +505,7 @@ func prune(dir string, keep int, metaOnly bool, now time.Time) error {
 	if keep <= 0 {
 		return nil
 	}
-	all, err := list(dir, metaOnly)
+	all, err := list(dir, suffix)
 	if err != nil {
 		return err
 	}
@@ -368,10 +523,13 @@ func prune(dir string, keep int, metaOnly bool, now time.Time) error {
 // tampered manifest can't make restore write outside the data folder.
 func validPath(p string) bool {
 	switch p {
-	case "meta.db", "secrets/service-token":
+	case "meta.db", "secrets/service-token", "secrets/access-key-encryption-key":
 		return true
 	}
 	parts := strings.Split(p, "/")
+	if len(parts) == 4 && parts[0] == "objects" && path.Clean(p) == p {
+		return ids.IsID(parts[1], ids.Bucket) && ids.IsID(parts[3], ids.Blob) && parts[2] == parts[3][3:5]
+	}
 	return len(parts) == 3 && parts[0] == "dbs" && path.Clean(p) == p &&
 		ids.IsID(parts[1], ids.Database) && strings.HasSuffix(parts[2], ".db") &&
 		ids.IsID(strings.TrimSuffix(parts[2], ".db"), ids.Branch)
@@ -454,6 +612,7 @@ func Restore(ctx context.Context, from, dataDir string) (Manifest, error) {
 		return m, err
 	}
 	have := map[string]bool{}
+	blobs := map[string]bool{}
 	for _, f := range m.Files {
 		if err := copyFile(filepath.Join(from, filepath.FromSlash(f.Path)), filepath.Join(stage, filepath.FromSlash(f.Path))); err != nil {
 			return m, err
@@ -461,8 +620,12 @@ func Restore(ctx context.Context, from, dataDir string) (Manifest, error) {
 		if strings.HasPrefix(f.Path, "dbs/") {
 			have[strings.TrimSuffix(path.Base(f.Path), ".db")] = true
 		}
+		if strings.HasPrefix(f.Path, "objects/") {
+			blobs[path.Base(f.Path)] = true
+		}
 	}
-	if err := reconcile(ctx, staged.Meta(), meta.Present{Branches: have}); err != nil {
+	// Uploads in progress aren't backed up, so none survive a restore.
+	if err := reconcile(ctx, staged.Meta(), meta.Present{Branches: have, Blobs: blobs, Uploads: map[string]bool{}}); err != nil {
 		return m, err
 	}
 	names, err := os.ReadDir(stage)
@@ -542,9 +705,54 @@ func reconcile(ctx context.Context, metaPath string, p meta.Present) error {
 	return store.DropMissing(ctx, p)
 }
 
-// present lists the branch, snapshot and trash files in a data directory.
+// present lists the branch, snapshot, trash, object and upload files in a
+// data directory.
 func present(l storage.Layout) (meta.Present, error) {
-	p := meta.Present{Branches: map[string]bool{}, Snapshots: map[string]bool{}, Trash: map[string]bool{}}
+	p := meta.Present{Branches: map[string]bool{}, Snapshots: map[string]bool{}, Trash: map[string]bool{},
+		Blobs: map[string]bool{}, Uploads: map[string]bool{}, Parts: map[string]bool{}}
+	buckets, err := os.ReadDir(l.ObjectsDir())
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return p, err
+	}
+	for _, b := range buckets {
+		if !b.IsDir() || !ids.IsID(b.Name(), ids.Bucket) {
+			continue
+		}
+		shards, err := os.ReadDir(filepath.Join(l.ObjectsDir(), b.Name()))
+		if err != nil {
+			return p, err
+		}
+		for _, sh := range shards {
+			if !sh.IsDir() {
+				continue
+			}
+			files, err := os.ReadDir(filepath.Join(l.ObjectsDir(), b.Name(), sh.Name()))
+			if err != nil {
+				return p, err
+			}
+			for _, f := range files {
+				if ids.IsID(f.Name(), ids.Blob) {
+					p.Blobs[f.Name()] = true
+				}
+			}
+		}
+	}
+	uploads, err := os.ReadDir(l.UploadsDir())
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return p, err
+	}
+	for _, u := range uploads {
+		if u.IsDir() && ids.IsID(u.Name(), ids.Upload) {
+			p.Uploads[u.Name()] = true
+			parts, err := os.ReadDir(filepath.Join(l.UploadsDir(), u.Name()))
+			if err != nil {
+				return p, err
+			}
+			for _, f := range parts {
+				p.Parts[u.Name()+"/"+f.Name()] = true
+			}
+		}
+	}
 	files := func(dir string, prefix string, into map[string]bool) error {
 		dbs, err := os.ReadDir(dir)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -611,13 +819,30 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
+// fileSum hashes a file.
+func fileSum(path string) (string, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	return hex.EncodeToString(h.Sum(nil)), n, err
+}
+
 // ErrNoBackups means a backup folder holds none of the asked kind.
 var ErrNoBackups = errors.New("backup: no backups found")
 
 // Latest returns the newest full backup in a folder, or with metaOnly the
-// newest meta-only one.
+// newest meta-only one. Backups made with --skip-objects are never picked:
+// restore them by naming their folder.
 func Latest(dir string, metaOnly bool) (string, error) {
-	all, err := list(dir, metaOnly)
+	suffix := ""
+	if metaOnly {
+		suffix = metaSuffix
+	}
+	all, err := list(dir, suffix)
 	if err != nil {
 		return "", err
 	}

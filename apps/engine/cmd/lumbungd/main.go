@@ -2,7 +2,7 @@
 // tokens, and serves the REST API and MCP.
 //
 //	lumbungd                         serve (settings come from LUMBUNG_* environment variables)
-//	lumbungd backup --to DIR         copy meta.db and branches to a timestamped folder
+//	lumbungd backup --to DIR         copy meta.db, branches and object files to a timestamped folder
 //	lumbungd restore --from DIR --to DATA_DIR
 //	lumbungd restore --meta-only --from DIR   roll meta.db back, lumbungd stopped
 //	lumbungd healthcheck             exit 0 when the running engine answers /health
@@ -36,7 +36,7 @@ import (
 
 const usage = `Usage:
   lumbungd                         serve (settings come from LUMBUNG_* environment variables)
-  lumbungd backup --to DIR         copy meta.db and branches to a timestamped folder
+  lumbungd backup --to DIR         copy meta.db, branches and object files to a timestamped folder
   lumbungd restore --from DIR --to DATA_DIR
   lumbungd restore --meta-only --from DIR   roll meta.db back, with lumbungd stopped
   lumbungd healthcheck             exit 0 when the running engine answers /health
@@ -121,6 +121,7 @@ func runBackup(args []string) error {
 	to := fs.String("to", "", "folder for backups (required); each backup is a timestamped subfolder")
 	all := fs.Bool("all-branches", false, "copy every branch, not only each database's default branch")
 	metaOnly := fs.Bool("meta-only", false, "copy only meta.db, as before an upgrade (named <time>-meta)")
+	skipObjects := fs.Bool("skip-objects", false, "leave object files out; meta.db still lists the objects, and a restore drops them")
 	keep := fs.Int("keep", 0, "keep the newest N backups of this kind in --to and delete older ones (0 keeps all)")
 	if err := fs.Parse(args); err != nil {
 		return helpOK(err)
@@ -134,11 +135,11 @@ func runBackup(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	dir, m, err := backup.Run(ctx, backup.Options{DataDir: cfg.DataDir, To: *to, AllBranches: *all, MetaOnly: *metaOnly, Keep: *keep, Limits: engine.Limits(cfg)})
+	dir, m, err := backup.Run(ctx, backup.Options{DataDir: cfg.DataDir, To: *to, AllBranches: *all, MetaOnly: *metaOnly, SkipObjects: *skipObjects, Keep: *keep, Limits: engine.Limits(cfg)})
 	if dir == "" && err != nil {
 		return err
 	}
-	out := map[string]any{"backup": dir, "files": len(m.Files), "bytes": m.Bytes()}
+	out := map[string]any{"backup": dir, "files": len(m.Files), "bytes": m.Bytes(), "object_files": m.ObjectFiles(), "linked": m.Linked, "skipped": len(m.Skipped)}
 	if len(m.Skipped) > 0 {
 		out["skipped"] = m.Skipped
 	}

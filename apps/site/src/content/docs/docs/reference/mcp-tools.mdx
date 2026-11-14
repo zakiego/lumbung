@@ -12,16 +12,23 @@ The engine serves MCP over streamable HTTP at `/mcp`, with the same bearer token
 | Tool | Read-only | Destructive | What it does |
 |---|---|---|---|
 | `create_branch` | no | no | Create a branch as a full copy of another branch (default: the default branch). Changes on it never merge back. Use it to test migrations safely. |
+| `create_bucket` | no | no | Create an empty bucket. Needs an instance admin token. Names: 3 to 63 lowercase letters, digits and hyphens. |
 | `create_database` | no | no | Create a database with an empty default branch named main. Needs an instance admin token. Names: lowercase letters, digits and hyphens. |
 | `create_snapshot` | no | no | Take a snapshot of a branch. Restoring one later makes a new branch; it never overwrites. |
 | `delete_branch` | no | yes | Delete a branch and its data. Protected branches and the default branch can't be deleted. This can't be undone. |
+| `delete_object` | no | yes | Delete an object. This can't be undone. Deleting a key that doesn't exist succeeds. |
 | `diff_branches` | yes | no | Compare the schema (tables, columns, indexes, views, triggers) of a branch against another branch. Data isn't compared. |
 | `execute` | no | yes | Run one SQL statement that changes data or schema (INSERT, UPDATE, DELETE, CREATE, ALTER, DROP) in its own transaction. Needs a write token. Prefer testing schema changes on a branch first. Rows from RETURNING are shown up to 1000 rows and about 64 KB. |
 | `get_database` | yes | no | Get one database: its id, default branch, branch count and size. |
+| `get_object` | yes | no | Read an object. Text comes back as text, up to about 64 KB from offset; for binary content only the metadata comes back (use presign_object for a download URL). |
 | `get_schema` | yes | no | Get a branch's schema: tables with their columns, indexes, views and triggers, with the CREATE statements. Pass table to get one table with its indexes and triggers. A schema over about 64 KB comes back as names only. |
 | `list_branches` | yes | no | List a database's branches, marking the default and protected ones. |
+| `list_buckets` | yes | no | List the buckets this token can see, with object counts and sizes. |
 | `list_databases` | yes | no | List the databases this token can see, with their default branch and size. |
+| `list_objects` | yes | no | List objects in a bucket in key order. With delimiter "/", keys below the prefix roll up into folder-like prefixes. Pass the returned cursor to see more. |
 | `list_snapshots` | yes | no | List a branch's snapshots, newest first. |
+| `presign_object` | no | no | Make a URL anyone can use to download (GET) or upload (PUT) one object until it expires. Needs a token with an access key; PUT needs write access. |
+| `put_object` | no | yes | Write an object from text or base64, at most 1 MB. Replaces an object with the same key. Needs a write token. |
 | `query` | yes | no | Run one read-only SQL statement (SELECT, PRAGMA table_info, ...) on a read-only connection. Returns at most max_rows rows (default 100) and about 64 KB; truncated results say so. |
 | `reset_branch` | no | yes | Throw away a branch's changes by copying its parent again. Not allowed on protected branches or the default branch. |
 
@@ -35,6 +42,14 @@ Create a branch as a full copy of another branch (default: the default branch). 
 | `expires_in_days` | integer | delete the branch automatically after this many days |
 | `from` | string | branch to copy; defaults to the default branch |
 | `name` (required) | string | name for the new branch: lowercase letters, digits and hyphens |
+
+## create_bucket
+
+Create an empty bucket. Needs an instance admin token. Names: 3 to 63 lowercase letters, digits and hyphens.
+
+| Input | Type | Description |
+|---|---|---|
+| `name` (required) | string | 3 to 63 lowercase letters, digits and hyphens, starting and ending with a letter or digit |
 
 ## create_database
 
@@ -62,6 +77,15 @@ Delete a branch and its data. Protected branches and the default branch can't be
 |---|---|---|
 | `branch` (required) | string | branch name or id to delete |
 | `database` (required) | string | database name or id |
+
+## delete_object
+
+Delete an object. This can't be undone. Deleting a key that doesn't exist succeeds.
+
+| Input | Type | Description |
+|---|---|---|
+| `bucket` (required) | string | bucket name |
+| `key` (required) | string | object key |
 
 ## diff_branches
 
@@ -92,6 +116,16 @@ Get one database: its id, default branch, branch count and size.
 |---|---|---|
 | `database` (required) | string | database name or id |
 
+## get_object
+
+Read an object. Text comes back as text, up to about 64 KB from offset; for binary content only the metadata comes back (use presign_object for a download URL).
+
+| Input | Type | Description |
+|---|---|---|
+| `bucket` (required) | string | bucket name |
+| `key` (required) | string | object key |
+| `offset` | integer | byte to start reading at, for long text |
+
 ## get_schema
 
 Get a branch's schema: tables with their columns, indexes, views and triggers, with the CREATE statements. Pass table to get one table with its indexes and triggers. A schema over about 64 KB comes back as names only.
@@ -110,11 +144,28 @@ List a database's branches, marking the default and protected ones.
 |---|---|---|
 | `database` (required) | string | database name or id |
 
+## list_buckets
+
+List the buckets this token can see, with object counts and sizes.
+
+No inputs.
+
 ## list_databases
 
 List the databases this token can see, with their default branch and size.
 
 No inputs.
+
+## list_objects
+
+List objects in a bucket in key order. With delimiter "/", keys below the prefix roll up into folder-like prefixes. Pass the returned cursor to see more.
+
+| Input | Type | Description |
+|---|---|---|
+| `bucket` (required) | string | bucket name |
+| `cursor` | string | the cursor from the previous call |
+| `delimiter` | string | usually /, to list one folder level |
+| `prefix` | string | only keys starting with this, e.g. photos/2026/ |
 
 ## list_snapshots
 
@@ -124,6 +175,30 @@ List a branch's snapshots, newest first.
 |---|---|---|
 | `branch` | string | branch name or id; defaults to the database's default branch |
 | `database` (required) | string | database name or id |
+
+## presign_object
+
+Make a URL anyone can use to download (GET) or upload (PUT) one object until it expires. Needs a token with an access key; PUT needs write access.
+
+| Input | Type | Description |
+|---|---|---|
+| `bucket` (required) | string | bucket name |
+| `expires_in_seconds` | integer | how long the URL works; default 3600 |
+| `key` (required) | string | object key |
+| `method` | string | GET (default) or PUT |
+
+## put_object
+
+Write an object from text or base64, at most 1 MB. Replaces an object with the same key. Needs a write token.
+
+| Input | Type | Description |
+|---|---|---|
+| `bucket` (required) | string | bucket name |
+| `content_base64` | string | the content as standard base64, for binary data; not with text |
+| `content_type` | string | e.g. text/markdown; default text/plain for text, application/octet-stream for base64 |
+| `key` (required) | string | object key |
+| `metadata` | object | custom metadata, lowercase names |
+| `text` | string | the content as text (UTF-8) |
 
 ## query
 
