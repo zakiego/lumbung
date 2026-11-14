@@ -1,7 +1,10 @@
 package api_test
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -106,5 +109,63 @@ func TestMCPObjectTools(t *testing.T) {
 	}
 	if _, msg := call(t, rs, "query", map[string]any{"database": "app", "sql": "SELECT 1"}); !strings.Contains(msg, "database_not_found") {
 		t.Errorf("bucket token query: %q", msg)
+	}
+}
+
+func TestMCPGetObjectText(t *testing.T) {
+	e := newEnv(t, nil)
+	s := e.mcp(e.admin)
+	if _, msg := call(t, s, "create_bucket", map[string]any{"name": "texts"}); msg != "" {
+		t.Fatal(msg)
+	}
+	put := func(key, ct string, b []byte) {
+		t.Helper()
+		if _, msg := call(t, s, "put_object", map[string]any{"bucket": "texts", "key": key, "content_type": ct, "content_base64": base64.StdEncoding.EncodeToString(b)}); msg != "" {
+			t.Fatal(msg)
+		}
+	}
+	// Latin-1 text labeled text/plain is not valid UTF-8: binary, not a loop.
+	latin := append(bytes.Repeat([]byte("a"), 10), 0xe9)
+	latin = append(latin, bytes.Repeat([]byte("b"), 100000)...)
+	put("latin.txt", "text/plain", latin)
+	got, _ := call(t, s, "get_object", map[string]any{"bucket": "texts", "key": "latin.txt"})
+	if got["binary"] != true {
+		t.Fatalf("latin-1: %v", got["note"])
+	}
+	// Valid UTF-8 cut mid-character at the cap is still text, and paging
+	// moves forward every call.
+	long := []byte(strings.Repeat("é", 50000))
+	put("long.bin", "application/octet-stream", long)
+	var all strings.Builder
+	offset := float64(0)
+	for i := 0; i < 10; i++ {
+		got, msg := call(t, s, "get_object", map[string]any{"bucket": "texts", "key": "long.bin", "offset": offset})
+		if msg != "" || got["binary"] != false {
+			t.Fatalf("page %d: %v %s", i, got["note"], msg)
+		}
+		all.WriteString(got["text"].(string))
+		if got["truncated"] != true {
+			break
+		}
+		var next float64
+		if _, err := fmt.Sscanf(got["note"].(string)[strings.Index(got["note"].(string), "offset ")+7:], "%f", &next); err != nil || next <= offset {
+			t.Fatalf("page %d doesn't move forward: %v", i, got["note"])
+		}
+		offset = next
+	}
+	if all.String() != string(long) {
+		t.Fatalf("paged text differs: %d of %d bytes", all.Len(), len(long))
+	}
+	// An offset inside a character starts at the next one.
+	got, _ = call(t, s, "get_object", map[string]any{"bucket": "texts", "key": "long.bin", "offset": 1})
+	if !strings.HasPrefix(got["text"].(string), "é") {
+		t.Fatalf("mid-character offset: %q", got["text"].(string)[:4])
+	}
+	// Escapes count: text full of < still fits the cap once encoded.
+	put("angles.txt", "text/plain", bytes.Repeat([]byte("<"), 60000))
+	got, _ = call(t, s, "get_object", map[string]any{"bucket": "texts", "key": "angles.txt"})
+	enc, _ := json.Marshal(got["text"])
+	if len(enc) > 64<<10 || got["truncated"] != true {
+		t.Fatalf("escaped text: %d bytes encoded, truncated %v", len(enc), got["truncated"])
 	}
 }

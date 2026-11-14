@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,15 +50,54 @@ type objectIn struct {
 	Key    string `json:"key" jsonschema:"object key"`
 }
 
-// textual reports whether content should be shown as text.
-func textual(contentType string, b []byte) bool {
-	ct := strings.ToLower(contentType)
-	for _, t := range []string{"text/", "json", "xml", "javascript", "yaml", "csv", "x-sh", "sql", "markdown", "toml"} {
-		if strings.Contains(ct, t) {
-			return utf8.Valid(b) || len(b) >= 3 // a cut-off multibyte character at the end is fine
+// textPrefix returns the longest prefix of b that is valid UTF-8 when only
+// an incomplete character at the end (at most 3 bytes, where a read was
+// cut) is invalid, and whether b is text at all. NUL bytes mean binary.
+func textPrefix(b []byte, cut bool) ([]byte, bool) {
+	if bytes.IndexByte(b, 0) >= 0 {
+		return nil, false
+	}
+	if utf8.Valid(b) {
+		return b, true
+	}
+	if cut {
+		for n := 1; n <= 3 && n <= len(b); n++ {
+			if p := b[:len(b)-n]; utf8.Valid(p) {
+				return p, true
+			}
 		}
 	}
-	return utf8.Valid(b) && !bytes.ContainsRune(b, 0)
+	return nil, false
+}
+
+// skipContinuation moves an offset that lands inside a character forward
+// to the next character's start, at most 3 bytes.
+func skipContinuation(b []byte) int {
+	n := 0
+	for n < len(b) && n < 3 && !utf8.RuneStart(b[n]) {
+		n++
+	}
+	return n
+}
+
+// fitJSON shortens text until its JSON encoding fits max bytes, on
+// character boundaries: escapes can make JSON several times the raw size.
+func fitJSON(text []byte, max int) []byte {
+	for len(text) > 0 {
+		enc, _ := json.Marshal(string(text))
+		if len(enc) <= max {
+			return text
+		}
+		cut := len(text) * max / len(enc)
+		if cut >= len(text) {
+			cut = len(text) - 1
+		}
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut]
+	}
+	return text
 }
 
 func (s *Server) addObjectTools(server *mcp.Server) {
@@ -224,20 +264,23 @@ func (s *Server) addObjectTools(server *mcp.Server) {
 				return nil, out, s.toolErr(req, err)
 			}
 			buf = buf[:n]
-			if !textual(o.ContentType, buf) {
+			start := in.Offset
+			if start > 0 {
+				skip := skipContinuation(buf)
+				buf, start = buf[skip:], start+int64(skip)
+			}
+			text, ok := textPrefix(buf, start+int64(len(buf)) < o.Size)
+			if !ok {
 				out.Binary = true
 				out.Note = "Binary content isn't shown. Use presign_object for a download URL."
 				return nil, out, nil
 			}
-			out.Truncated = in.Offset+int64(n) < o.Size
-			if out.Truncated {
-				// Don't split a UTF-8 character at the cut.
-				for len(buf) > 0 && !utf8.Valid(buf) {
-					buf = buf[:len(buf)-1]
-				}
-				out.Note = fmt.Sprintf("Only bytes %d to %d of %d are shown. Call again with offset %d for more.", in.Offset, in.Offset+int64(len(buf)), o.Size, in.Offset+int64(len(buf)))
+			text = fitJSON(text, mcpMaxBytes)
+			end := start + int64(len(text))
+			if out.Truncated = end < o.Size; out.Truncated {
+				out.Note = fmt.Sprintf("Only bytes %d to %d of %d are shown. Call again with offset %d for more.", start, end, o.Size, end)
 			}
-			out.Text = string(buf)
+			out.Text = string(text)
 			return nil, out, nil
 		})
 
