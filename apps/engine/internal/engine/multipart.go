@@ -155,10 +155,12 @@ func (e *Engine) CompleteUpload(ctx context.Context, uploadID, bucketID, key str
 	parts := make([]meta.Part, 0, len(list))
 	var total int64
 	digests := md5.New()
-	for i, c := range list {
-		if i > 0 && c.Number <= list[i-1].Number {
+	for i := 1; i < len(list); i++ {
+		if list[i].Number <= list[i-1].Number {
 			return meta.Object{}, apierr.New(apierr.InvalidPart, "list the parts in ascending order, each once")
 		}
+	}
+	for i, c := range list {
 		p, ok := byNum[c.Number]
 		if !ok || normETag(c.ETag) != p.ETag {
 			return meta.Object{}, apierr.Newf(apierr.InvalidPart, "part %d wasn't uploaded or its ETag doesn't match", c.Number)

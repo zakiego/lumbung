@@ -42,10 +42,13 @@ type Server struct {
 	stats    *stats.Recorder
 	perToken *ratelimit.Limiter
 	failures *ratelimit.Limiter
-	proxies  []*net.IPNet
-	ipHeader string
-	now      func() time.Time
-	extra    []func(huma.API) // more operations, added by other packages (MCP)
+	// publicLimit counts requests without a token (public object reads and
+	// CORS preflights) per client address.
+	publicLimit *ratelimit.Limiter
+	proxies     []*net.IPNet
+	ipHeader    string
+	now         func() time.Time
+	extra       []func(huma.API) // more operations, added by other packages (MCP)
 
 	touchMu sync.Mutex
 	touched map[string]time.Time
@@ -71,18 +74,19 @@ func New(eng *engine.Engine, log *slog.Logger, opts ...Option) *Server {
 	}
 	cfg := eng.Config()
 	s := &Server{
-		eng:      eng,
-		store:    eng.Meta(),
-		log:      log,
-		mux:      http.NewServeMux(),
-		stats:    stats.NewRecorder(),
-		perToken: ratelimit.New(float64(cfg.RateLimit), cfg.RateBurst),
-		failures: ratelimit.New(float64(cfg.AuthFailuresPerMin)/60, cfg.AuthFailuresPerMin),
-		now:      time.Now,
-		touched:  map[string]time.Time{},
-		slowQ:    make(chan slowEntry, 64),
-		stop:     make(chan struct{}),
-		ipHeader: cfg.ClientIPHeader,
+		eng:         eng,
+		store:       eng.Meta(),
+		log:         log,
+		mux:         http.NewServeMux(),
+		stats:       stats.NewRecorder(),
+		perToken:    ratelimit.New(float64(cfg.RateLimit), cfg.RateBurst),
+		failures:    ratelimit.New(float64(cfg.AuthFailuresPerMin)/60, cfg.AuthFailuresPerMin),
+		publicLimit: ratelimit.New(float64(cfg.PublicRateLimit), 2*cfg.PublicRateLimit),
+		now:         time.Now,
+		touched:     map[string]time.Time{},
+		slowQ:       make(chan slowEntry, 64),
+		stop:        make(chan struct{}),
+		ipHeader:    cfg.ClientIPHeader,
 	}
 	for _, o := range opts {
 		o(s)
@@ -131,10 +135,16 @@ func stampRequestID(ctx huma.Context, _ string, v any) (any, error) {
 	return v, nil
 }
 
-// Handler returns the HTTP handler. Requests no route matches get a
-// problem+json 404 or 405 instead of the router's plain text.
+// Handler returns the HTTP handler. The S3-compatible API is matched on the
+// raw path first: the router cleans paths, which would change object keys.
+// Requests no route matches get a problem+json 404 or 405 instead of the
+// router's plain text.
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isS3Path(r.URL.EscapedPath()) {
+			s.serveS3(w, r)
+			return
+		}
 		s.mux.ServeHTTP(&problemFallback{ResponseWriter: w}, r)
 	})
 }

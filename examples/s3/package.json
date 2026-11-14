@@ -1,0 +1,20 @@
+{
+  "name": "@lumbung/example-s3",
+  "private": true,
+  "type": "module",
+  "description": "The AWS SDK for JavaScript, unchanged, against Lumbung's S3-compatible API.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1168.0",
+    "@aws-sdk/lib-storage": "3.1168.0",
+    "@aws-sdk/s3-request-presigner": "3.1168.0"
+  }
+}
