@@ -129,11 +129,155 @@ Once a fixed engine is deployed, the whole full backup can also go back into a f
 docker run --rm --network none --user 65532 -v lumbung_data:/data --entrypoint rm lumbung-dashboard:latest -rf /data/backups/pre-rollback/<time>
 ```
 
+## Upgrading to workspaces
+
+One deploy brings in workspaces (PLAN 17, ADR 0008): `meta.db` goes from version 5 to 6, and the dashboard gets roles per workspace. Nothing here has been run against the live instance. The steps were run against a local copy shaped like it (`pnpm rehearse:upgrade`, below), and that run passes.
+
+What the deploy does by itself, with no step from us:
+
+- Migration 6 makes a workspace called `default` and puts everything in it: databases `testing` and `palui`, buckets `photos` and `palui-files`, and every token that isn't an instance token.
+- Every token keeps working, on the same URLs. mcporter's instance admin token and the dashboard's service token stay instance tokens. Palui's grants token still reaches its database and its bucket.
+- Public links to `photos` keep working: short URLs mean the default workspace.
+- The first time the dashboard is opened, the people who were Member or Read-only get that role in `default`. Owners stay owners.
+
+So after step 2 the instance behaves as before. Steps 3 to 6 give Palui its own workspace, which is the point of the change.
+
+### 1. Before
+
+1. Check the last nightly backup and take one more by hand:
+
+   ```bash
+   tail -n 5 ~/selfhost/lumbung-backup.log
+   launchctl kickstart gui/$(id -u)/com.zakiego.lumbung-backup
+   tail -n 20 ~/selfhost/lumbung-backup.log
+   ```
+
+2. Run the restore drill on it. It must print PASS.
+
+   ```bash
+   cd ~/selfhost/lumbung && ./ops/restore-drill.sh
+   ```
+
+3. Write down what exists now, to compare after:
+
+   ```bash
+   lumbung db list
+   lumbung bucket list
+   lumbung token list
+   ```
+
+### 2. Deploy
+
+Merge the stack to `main` in order (#31, #32, #33, then the dashboard and these notes), or deploy by hand:
+
+```bash
+~/.agents/skills/zaki-selfhost/scripts/deploy.sh lumbung
+```
+
+`deploy-up.sh` copies `meta.db` and `dashboard.db` right before the swap, as on every deploy. Migration 6 runs when the new engine starts and takes well under a second on an instance this size.
+
+Check:
+
+```bash
+curl -s https://lumbung.zakiego.com/health          # "meta_version": 6
+lumbung workspace list                               # default, with 2 databases and 2 buckets
+lumbung db list && lumbung bucket list               # the same as before
+```
+
+Then the things that must not have noticed:
+
+- Palui: ask it to read something from its database and list its files.
+- mcporter: `~/.mcporter/mcporter-call.sh lumbung.list_databases` shows `testing` and `palui`.
+- A public `photos` link opens.
+- The dashboard at https://lumbung.zakiego.com/app opens on `/app/w/default`, with the same databases and buckets.
+
+If the new engine is unhealthy, `deploy-up.sh` rolls back by itself, and `rollback-meta.sh` puts the version 5 `meta.db` back from the copy taken before the swap. The old dashboard reads the same `dashboard.db`: the upgrade adds a table and a column and changes nothing the old dashboard reads.
+
+Rolling back by hand later (Deploy and roll back, above) has one more cost after step 4: the version 5 `meta.db` knows no workspaces, so the Palui token from step 5 doesn't exist in it and Palui's old token is the one that works again.
+
+### 3. Make Palui's workspace
+
+With the CLI logged in as the instance admin (the same token mcporter uses):
+
+```bash
+lumbung workspace create palui
+```
+
+It gets the default limits (20 databases, 20 buckets, 2 GiB of databases, 5 GiB of objects). Check `palui-files` fits before moving it, and raise the limit if not:
+
+```bash
+lumbung bucket list                                  # the size of palui-files
+lumbung workspace update palui --max-object-bytes 20GiB
+```
+
+### 4. Mint Palui's new token first
+
+A workspace token made before the move already reaches whatever is in the workspace later, so Palui's outage is only the time between step 5 and step 6.
+
+```bash
+(umask 077; lumbung token create --name palui --access admin --workspace palui > ~/selfhost/palui.token)
+```
+
+`admin` is what lets Palui create and delete its own databases and buckets. It can do nothing outside `palui`: no other workspace exists as far as that token can tell.
+
+### 5. Move Palui's database and bucket
+
+Each move revokes the tokens that reached what moved. Palui's old grants token reaches both, so it stops working at the first move. Do the two moves and step 6 back to back.
+
+```bash
+lumbung db move palui --to palui
+lumbung bucket move palui-files --to palui
+lumbung db list --workspace palui                    # palui
+lumbung bucket list --workspace palui                # palui-files
+```
+
+`testing` and `photos` stay in `default`. `photos` has public links in use, and a public link outside the default workspace needs the workspace in its URL, so leave it.
+
+### 6. Give Palui the token
+
+In Palui, open the Lumbung MCP connector and replace the bearer token with the content of `~/selfhost/palui.token`. The MCP URL stays `https://lumbung.zakiego.com/mcp`: the token says which workspace. Nothing else in Palui changes. Then:
+
+```bash
+rm ~/selfhost/palui.token
+```
+
+Check from Palui: read a row, list its files, and have it create a database and delete it again (it couldn't before).
+
+Check the token from outside with curl, not with an ad-hoc mcporter call: mcporter reuses the saved `lumbung` server's header for any URL that matches it, so it would test the instance token instead.
+
+```bash
+curl -s https://lumbung.zakiego.com/v1/databases -H "Authorization: Bearer $(pbpaste)" | jq -r '.data[].name'   # palui, and nothing else
+curl -s https://lumbung.zakiego.com/v1/workspaces -H "Authorization: Bearer $(pbpaste)" | jq -r '.data[].name'  # palui
+```
+
+### 7. After
+
+- mcporter keeps its instance token. It acts in `default` on the saved URL. To work inside Palui's workspace, call `https://lumbung.zakiego.com/v1/workspaces/palui/mcp`, or save that as a second server.
+- Dashboard: under **Members**, give each person the workspaces they need. Anyone who was a Member and should still create databases or read the audit log needs **Admin** in that workspace.
+- Publish `@lumbung/client` 0.2.0 (Releasing the SDK, below) only now. It needs an engine with workspaces.
+
+  ```bash
+  git tag -a client-v0.2.0 -m "@lumbung/client 0.2.0"
+  git push origin client-v0.2.0
+  ```
+
+- Run the restore drill once more. It now walks every workspace.
+
+### The rehearsal
+
+`pnpm rehearse:upgrade` (`scripts/upgrade-rehearsal.sh`) runs all of this on one machine, against nothing live. It builds the engine from before workspaces (`meta.db` version 5), fills it like our instance (databases `testing` and `palui`, a public bucket `photos`, a bucket `palui-files`, an instance admin token, a grants token and the service token), starts the new engine on the same data folder, and checks each claim above: every old token still works, the public link still opens, the moves revoke the grants token, the new workspace token reaches Palui's things and nothing else, and a backup of the upgraded instance restores with every workspace in place.
+
+```bash
+REHEARSAL_OLD_REF=<the commit running in production> pnpm rehearse:upgrade
+```
+
+It doesn't cover the dashboard's own upgrade (people's roles moving into the default workspace). That is covered by `apps/dashboard/src/server/access.test.ts`, and by `pnpm e2e` for a fresh dashboard.
+
 ## Palui's agent
 
-Palui's agent keeps its own rows and files here through MCP, with one token that reaches only its database and its bucket (ADR 0007).
+Palui's agent keeps its own rows and files here through MCP, in a workspace of its own. Its token is an admin of that workspace: it makes the databases and buckets it needs, and nothing outside the workspace exists for it (ADR 0008). Before workspaces it had one token for one database and one bucket (ADR 0007).
 
-1. In the dashboard: **Tokens**, **New token**. Pick the agent's database with **Read and write**, **Add another**, pick its bucket, then create. Skip either one if the agent only needs the other.
+1. Its token is a workspace token for the workspace `palui` (Upgrading to workspaces, above). To make another, open the `palui` workspace in the dashboard: **Tokens**, **New token**, keep **Whole workspace**, pick **Admin**, then create. For a narrower one, pick a database or a bucket instead.
 2. In Palui: add an **MCP server** connector with the MCP URL and the token shown after creating, and bearer auth.
 3. Pick which tools Palui may use. `execute`, `put_object`, `delete_object` and the branch tools change data, so Palui asks before running them.
 
@@ -224,8 +368,8 @@ The repository is private, so npm doesn't attach provenance.
 2. Tag that commit and push the tag:
 
    ```bash
-   git tag -a client-v0.1.1 -m "@lumbung/client 0.1.1"
-   git push origin client-v0.1.1
+   git tag -a client-v0.2.0 -m "@lumbung/client 0.2.0"
+   git push origin client-v0.2.0
    ```
 
 3. Watch the run in the Actions tab, then check https://www.npmjs.com/package/@lumbung/client.
