@@ -34,7 +34,7 @@ The host folder must be writable by uid 65532, the user the image runs as.
 
 ## Off the machine
 
-A backup on the same disk doesn't survive the disk. Copy each new backup somewhere else after it's made, with whatever you already use: `rclone`, `restic`, `rsync` to another machine. Backups hold your data and the service token, so encrypt them in transit and at rest.
+A backup on the same disk doesn't survive the disk. Copy each new backup somewhere else after it's made, with whatever you already use: `rclone`, `restic`, `rsync` to another machine. Backups hold your data, the service token and the key that encrypts S3 access key secrets, so encrypt them in transit and at rest. Object files are hard-linked between backups in one folder; copy tools that follow hard links copy each file once per backup, while `rsync -H` and `restic` keep the space savings.
 
 ## Before an upgrade
 
@@ -55,4 +55,4 @@ LUMBUNG_DATA_DIR=/tmp/restore-check LUMBUNG_ADDR=127.0.0.1:4871 lumbungd &
 curl -s http://127.0.0.1:4871/health
 ```
 
-Then query a few tables against port 4871, stop that engine and delete the folder.
+Then query a few tables and download a few objects against port 4871, stop that engine and delete the folder.
