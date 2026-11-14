@@ -1,12 +1,12 @@
 import type { AuditOut } from "@lumbung/client"
-import { Await, Link, createFileRoute, useNavigate } from "@tanstack/react-router"
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { CircleAlertIcon, DatabaseIcon } from "lucide-react"
 import { RecentActivity } from "@/components/app/activity"
 import { DatabaseTable } from "@/components/app/database-table"
 import { CreateDatabaseDialog, useCreateDatabase } from "@/components/app/name-dialog"
 import { RequestsChart } from "@/components/app/requests-chart"
 import { PageBody, PageHeader, PageTitle } from "@/components/app/shell"
-import { ChartFailed, Deferred, Stat, StatGrid, WindowSelect } from "@/components/app/stats"
+import { AwaitLatest, ChartFailed, Deferred, Stat, StatGrid, WindowSelect } from "@/components/app/stats"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
 import { Card, CardContent, CardHeader, CardTitle, Empty, Skeleton, StatusText } from "@/components/ui/surface"
 import { listAudit } from "@/fns/admin"
@@ -119,9 +119,9 @@ function OverviewPage() {
           <h2 id="databases-heading" className="text-[13px] font-[590]">
             Databases
           </h2>
-          <Await promise={workspace} fallback={<DatabaseTable databases={databases} usage={undefined} />}>
+          <AwaitLatest promise={workspace} fallback={<DatabaseTable databases={databases} usage={undefined} />}>
             {(r) => <DatabaseTable databases={databases} usage={r.ok ? (r.value?.byDb ?? {}) : null} />}
-          </Await>
+          </AwaitLatest>
         </section>
 
         <div className={activity ? "grid gap-4 lg:grid-cols-3" : "grid gap-4"}>
@@ -131,7 +131,7 @@ function OverviewPage() {
               <WindowSelect value={range} onChange={(w) => navigate({ search: { window: w === DEFAULT_WINDOW ? undefined : w }, replace: true })} />
             </CardHeader>
             <CardContent>
-              <Await promise={workspace} fallback={<Skeleton className="h-60" />}>
+              <AwaitLatest promise={workspace} fallback={<Skeleton className="h-60" />} dim>
                 {(r) =>
                   r.ok ? (
                     <div className="flex flex-col gap-3">
@@ -146,7 +146,7 @@ function OverviewPage() {
                     <ChartFailed message={r.error} />
                   )
                 }
-              </Await>
+              </AwaitLatest>
             </CardContent>
           </Card>
           {activity && (
@@ -161,9 +161,9 @@ function OverviewPage() {
                 </Link>
               </CardHeader>
               <CardContent className="flex-1 pt-2">
-                <Await promise={activity} fallback={<RowsSkeleton rows={4} />}>
+                <AwaitLatest promise={activity} fallback={<RowsSkeleton rows={4} />}>
                   {(r) => (r.ok ? <RecentActivity entries={r.value} names={new Map(databases.map((d) => [d.id, d.name]))} /> : <ChartFailed message={r.error} />)}
-                </Await>
+                </AwaitLatest>
               </CardContent>
             </Card>
           )}
