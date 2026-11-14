@@ -1,0 +1,8 @@
+# GitGuardian secret scanning settings.
+version: 2
+secret:
+  ignored-paths:
+    # The SigV4 test vectors use the example access key from the published
+    # Signature Version 4 documentation. It is a placeholder, not a
+    # credential, and the documented signatures only verify with it.
+    - "apps/engine/internal/s3proto/s3proto_test.go"
