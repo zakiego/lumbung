@@ -1,9 +1,9 @@
-import { Link, createFileRoute, redirect, useNavigate, useRouter } from "@tanstack/react-router"
+import { createFileRoute, redirect, useNavigate, useRouter } from "@tanstack/react-router"
 import { Trash2Icon } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import { SettingsSection } from "@/components/app/db-settings"
 import { errorText } from "@/components/app/form-dialog"
-import { PageBody, PageHeader } from "@/components/app/shell"
+import { BucketFrame } from "@/components/app/bucket-frame"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
 import { TypedConfirm } from "@/components/ui/alert-dialog"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -11,7 +11,6 @@ import { Switch } from "@/components/ui/checkbox"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Textarea } from "@/components/ui/input"
 import { toast } from "@/components/ui/toast"
-import { TruncatedTip } from "@/components/ui/tooltip"
 import { deleteBucket, getBucket, updateBucket } from "@/fns/buckets"
 import { number } from "@/lib/format"
 import { pageTitle } from "@/lib/paths"
@@ -39,38 +38,9 @@ export const Route = createFileRoute("/_app/buckets/$bucket/settings")({
 function Frame({ children }: { children: React.ReactNode }) {
   const { bucket } = Route.useParams()
   return (
-    <>
-      <PageHeader>
-        <nav aria-label="Breadcrumb" className="min-w-0">
-          <ol className="flex min-w-0 items-center gap-1.5 text-[13px]">
-            <li className="hidden sm:block">
-              <Link to="/buckets" className="text-muted-foreground transition-colors duration-100 hover:text-foreground">
-                Buckets
-              </Link>
-            </li>
-            <li aria-hidden="true" className="hidden text-faint sm:block">
-              /
-            </li>
-            <li className="min-w-0">
-              <TruncatedTip text={bucket} side="bottom">
-                <Link to="/buckets/$bucket" params={{ bucket }} className="block truncate font-mono text-muted-foreground hover:text-foreground">
-                  {bucket}
-                </Link>
-              </TruncatedTip>
-            </li>
-            <li aria-hidden="true" className="text-faint">
-              /
-            </li>
-            <li>
-              <h1 aria-current="page" className="font-[590]">
-                Settings
-              </h1>
-            </li>
-          </ol>
-        </nav>
-      </PageHeader>
-      <PageBody>{children}</PageBody>
-    </>
+    <BucketFrame bucket={bucket} section="settings">
+      {children}
+    </BucketFrame>
   )
 }
 
@@ -107,15 +77,6 @@ function SettingsPage() {
               await router.invalidate()
             }}
           />
-        </SettingsSection>
-        <SettingsSection title="S3 endpoint" description="For S3 clients, with path-style addressing and any region.">
-          <p className="font-mono text-[13px] [overflow-wrap:anywhere]">{s3Endpoint}</p>
-          <Link to="/tokens" className="group/link inline-flex items-center gap-1 self-start rounded-sm text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground hover:duration-0">
-            Create an access key
-            <span aria-hidden="true" className="transition-transform duration-100 ease-out-quad motion-safe:group-hover/link:translate-x-0.5">
-              →
-            </span>
-          </Link>
         </SettingsSection>
         <SettingsSection
           title="Delete bucket"

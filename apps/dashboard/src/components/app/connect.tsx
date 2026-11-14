@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/layout"
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs"
 import { toast } from "@/components/ui/toast"
+import type { Snippet } from "@/lib/snippets"
 import { cn } from "@/lib/utils"
 
 export function CopyButton({ text, label, className }: { text: string; label: string; className?: string }) {
@@ -53,11 +54,11 @@ function selectNear(button: HTMLElement) {
 export function CodeBlock({ code, copyLabel, className }: { code: string; copyLabel: string; className?: string }) {
   return (
     <div className={cn("group/code relative rounded-lg border bg-code", className)}>
-      <ScrollArea axis="x">
-        <pre className="py-4 pr-14 pl-4 font-mono text-[13px] leading-[1.6] text-foreground/90">
-          <code>{code}</code>
-        </pre>
-      </ScrollArea>
+      {/* Long lines wrap instead of scrolling; the float keeps the first lines clear of the copy button. */}
+      <pre className="px-4 py-4 font-mono text-[13px] leading-[1.6] whitespace-pre-wrap text-foreground/90 [overflow-wrap:anywhere]">
+        <span aria-hidden="true" className="float-right ml-2 h-6 w-8" />
+        <code>{code}</code>
+      </pre>
       <CopyButton
         text={code}
         label={copyLabel}
@@ -67,52 +68,41 @@ export function CodeBlock({ code, copyLabel, className }: { code: string; copyLa
   )
 }
 
-export function snippets({ url, db, branch }: { url: string; db: string; branch?: string }) {
-  const sdkBranch = branch ? `\n  branch: "${branch}",` : ""
-  const cliBranch = branch ? ` --branch ${branch}` : ""
-  const path = branch ? `/v1/databases/${db}/branches/${branch}/query` : `/v1/databases/${db}/query`
-  return {
-    sdk: `import { createClient } from "@lumbung/client"
+export type DetailRow = { label: string; value: string; copy?: boolean }
 
-const db = createClient({
-  url: "${url}",
-  token: process.env.LUMBUNG_TOKEN!,
-  database: "${db}",${sdkBranch}
-})
-
-const { rows } = await db.query("SELECT 1")`,
-    cli: `echo "$LUMBUNG_TOKEN" | lumbung login --url ${url}
-lumbung query "SELECT 1" --db ${db}${cliBranch}`,
-    curl: `curl -s ${url}${path} \\
-  -H "Authorization: Bearer $LUMBUNG_TOKEN" \\
-  -H "Content-Type: application/json" \\
-  -d '{"sql": "SELECT 1"}'`,
-    mcp: `claude mcp add --transport http lumbung ${url}/mcp \\
-  --header "Authorization: Bearer $LUMBUNG_TOKEN"`,
-  }
+/** Connection values, one per row, each with a copy button. */
+export function ConnectDetails({ rows }: { rows: DetailRow[] }) {
+  return (
+    <dl className="divide-y rounded-lg border">
+      {rows.map((r) => (
+        <div key={r.label} className="grid gap-1 px-4 py-2.5 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-center sm:gap-4">
+          <dt className="text-[13px] text-muted-foreground">{r.label}</dt>
+          <dd className="flex min-h-7 min-w-0 items-center gap-2">
+            <code className="min-w-0 flex-1 font-mono text-[13px] [overflow-wrap:anywhere]">{r.value}</code>
+            {r.copy !== false && <CopyButton text={r.value} label={`Copy ${r.label}`} className="-my-1 shrink-0" />}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
 }
 
-const TABS = [
-  { value: "sdk", label: "SDK" },
-  { value: "cli", label: "CLI" },
-  { value: "curl", label: "curl" },
-  { value: "mcp", label: "MCP" },
-] as const
-
-export function Connect({ url, db, branch }: { url: string; db: string; branch?: string }) {
-  const code = snippets({ url, db, branch })
+/** Code snippets behind line tabs, one per client. */
+export function SnippetTabs({ snippets, label }: { snippets: Snippet[]; label: string }) {
   return (
-    <Tabs defaultValue="sdk" className="flex flex-col gap-3">
-      <TabsList aria-label="Connect with" className="gap-4">
-        {TABS.map((t) => (
-          <TabsTab key={t.value} value={t.value} className="h-9">
-            {t.label}
-          </TabsTab>
-        ))}
-      </TabsList>
-      {TABS.map((t) => (
+    <Tabs defaultValue={snippets[0]?.value} className="flex min-w-0 flex-col gap-3">
+      <ScrollArea axis="x" fade bare>
+        <TabsList aria-label={label} className="w-full min-w-max gap-4">
+          {snippets.map((t) => (
+            <TabsTab key={t.value} value={t.value} className="h-9">
+              {t.label}
+            </TabsTab>
+          ))}
+        </TabsList>
+      </ScrollArea>
+      {snippets.map((t) => (
         <TabsPanel key={t.value} value={t.value}>
-          <CodeBlock code={code[t.value]} copyLabel={`Copy ${t.label} snippet`} />
+          <CodeBlock code={t.code} copyLabel={`Copy ${t.label} snippet`} />
         </TabsPanel>
       ))}
     </Tabs>
