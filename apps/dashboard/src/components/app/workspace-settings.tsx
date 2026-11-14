@@ -130,7 +130,7 @@ export function MoveForm({ what, name, targets, onMove }: { what: "database" | "
           <SelectTrigger className="max-w-sm font-mono" />
           <SelectContent>
             {targets.map((t) => (
-              <SelectItem key={t.id} value={t.id} className="font-mono">
+              <SelectItem key={t.id} value={t.id} className="h-auto min-h-8 py-1.5 font-mono">
                 {t.name}
               </SelectItem>
             ))}
@@ -175,7 +175,7 @@ export function DeletedWorkspaces({ workspaces, onRestore }: { workspaces: Works
       <tbody>
         {workspaces.map((w) => (
           <TableRow key={w.id}>
-            <TableCell className="max-w-0 w-1/2 py-2">
+            <TableCell className="max-w-0 py-2 sm:w-1/2">
               <span title={w.name} className="block font-mono font-[510] [overflow-wrap:anywhere] sm:truncate">
                 {w.name}
               </span>
@@ -184,7 +184,9 @@ export function DeletedWorkspaces({ workspaces, onRestore }: { workspaces: Works
             <TableCell className="hidden text-right whitespace-nowrap text-muted-foreground sm:table-cell">{w.deleted_at ? formatDate(w.deleted_at) : "-"}</TableCell>
             <TableCell className="hidden text-right whitespace-nowrap text-muted-foreground sm:table-cell">{w.purge_after ? formatDate(w.purge_after) : "-"}</TableCell>
             <TableCell className="w-px">
-              <RestoreWorkspace workspace={w} onRestore={onRestore} />
+              <div className="flex justify-end">
+                <RestoreWorkspace workspace={w} onRestore={onRestore} />
+              </div>
             </TableCell>
           </TableRow>
         ))}

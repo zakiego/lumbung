@@ -58,17 +58,22 @@ export function NameDialog({
   const [openState, setOpenState] = useState(false)
   const open = openProp ?? openState
   const setOpen = (next: boolean) => {
-    // Cleared on the way out too: a dialog opened from outside never passes through its own trigger.
-    if (!next) {
-      setName("")
-      setError("")
-    }
     setOpenState(next)
     onOpenChange?.(next)
   }
   const [name, setName] = useState("")
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
+  // Empty each time it opens, whoever opens it. Not on the way out: the
+  // field would blank while the dialog is still fading.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) {
+      setName("")
+      setError("")
+    }
+  }
 
   async function handle(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -91,10 +96,6 @@ export function NameDialog({
       onOpenChange={(next, details) => {
         if (!next && pending) return details.cancel()
         setOpen(next)
-        if (next) {
-          setName("")
-          setError("")
-        }
       }}
     >
       {trigger !== undefined &&

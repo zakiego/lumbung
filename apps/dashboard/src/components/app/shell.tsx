@@ -26,7 +26,7 @@ import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger, createDrawerControll
 import { ScrollArea, Separator } from "@/components/ui/layout"
 import { Menu, MenuContent, MenuGroup, MenuGroupLabel, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu"
 import { toast } from "@/components/ui/toast"
-import { Tooltip } from "@/components/ui/tooltip"
+import { Tooltip, TruncatedTip } from "@/components/ui/tooltip"
 import { authClient } from "@/lib/auth-client"
 import { createWorkspace } from "@/fns/workspaces"
 import { ROLE_LABEL, can } from "@/lib/roles"
@@ -228,9 +228,11 @@ function WorkspaceSwitcher({
   // With one workspace and no way to make another, there is nothing to switch to.
   if (workspaces.length < 2 && !viewer.owner) {
     return (
-      <div title={workspace.name} className="flex w-full min-w-0 items-center gap-2 rounded-md p-1">
-        {brand}
-      </div>
+      <TruncatedTip text={workspace.name} side="right">
+        <Link to="/w/$ws" params={{ ws: workspace.name }} onClick={onNavigate} className="flex w-full min-w-0 items-center gap-2 rounded-md p-1">
+          {brand}
+        </Link>
+      </TruncatedTip>
     )
   }
   return (
@@ -244,8 +246,8 @@ function WorkspaceSwitcher({
           {brand}
           <ChevronsUpDownIcon aria-hidden="true" className="size-3.5 shrink-0 text-faint sidebar-collapsed:hidden" />
         </MenuTrigger>
-        <MenuContent align="start" className="max-h-(--available-height) w-64 overflow-y-auto overscroll-contain">
-          <MenuGroup>
+        <MenuContent align="start" className="flex max-h-(--available-height) w-64 flex-col">
+          <MenuGroup className="min-h-0 overflow-y-auto overscroll-contain">
             <MenuGroupLabel>Workspaces</MenuGroupLabel>
             <MenuRadioGroup
               value={workspace.id}
@@ -412,7 +414,7 @@ export function UserMenu({ viewer, placed = true }: { viewer: Person; placed?: b
 
   return (
     <Menu onOpenChange={syncTheme}>
-      <MenuTrigger className="flex w-full min-w-0 cursor-default items-center gap-2 rounded-md p-1 text-left transition-colors duration-150 hover:bg-sidebar-accent hover:duration-0 data-open:bg-sidebar-accent">
+      <MenuTrigger className="flex w-full min-w-0 cursor-default items-center gap-2 rounded-md p-1 text-left transition-colors duration-150 select-none hover:bg-sidebar-accent hover:duration-0 active:bg-sidebar-accent active:duration-0 data-open:bg-sidebar-accent">
         <Avatar name={viewer.name || viewer.email} />
         <span className="grid min-w-0 leading-tight sidebar-collapsed:sr-only">
           <span className="truncate text-[13px] font-[510] text-foreground">{viewer.name || viewer.email}</span>
@@ -469,16 +471,23 @@ export function PageHeader({ children, actions }: { children: ReactNode; actions
       </Button>
       <Separator orientation="vertical" className="mr-1 hidden md:block" />
       {inside && (
-        <span className={cn("flex min-w-0 max-w-[40%] shrink-0 items-center gap-2 text-[13px]", !collapsed && "md:hidden")}>
-          <span className="truncate font-mono text-muted-foreground" title={workspace.name}>
-            {workspace.name}
-          </span>
-          <span aria-hidden="true" className="text-faint">
+        // It starts at no width and takes only the room the title leaves, so the title is never the one cut.
+        <span className={cn("flex min-w-0 max-w-fit grow-[9999] basis-0 items-center gap-1.5 overflow-hidden px-0.5 py-1 text-[13px]", !collapsed && "md:hidden")}>
+          <TruncatedTip text={workspace.name}>
+            <Link
+              to="/w/$ws"
+              params={{ ws: workspace.name }}
+              className="block min-w-0 truncate rounded-sm font-mono text-muted-foreground transition-colors duration-100 hover:text-foreground"
+            >
+              {workspace.name}
+            </Link>
+          </TruncatedTip>
+          <span aria-hidden="true" className="shrink-0 text-faint">
             /
           </span>
         </span>
       )}
-      <div className="flex min-w-0 flex-1 items-center gap-2">{children}</div>
+      <div className="flex min-w-0 flex-auto items-center gap-2">{children}</div>
       <DialogTrigger controller={palette} aria-label="Search" className={buttonVariants({ variant: "ghost", size: "icon-sm", className: "md:hidden" })}>
         <SearchIcon aria-hidden="true" />
       </DialogTrigger>
@@ -499,9 +508,20 @@ export function PageBody({ children, className }: { children: ReactNode; classNa
 }
 
 /** The shell for someone who isn't in a workspace: none yet, one that doesn't exist, or an engine that didn't answer. */
-export function LoneShell({ account, title, children }: { account: Omit<Person, "role">; title: string; children: ReactNode }) {
+export function LoneShell({
+  account,
+  title,
+  workspaces = [],
+  children,
+}: {
+  account: Omit<Person, "role">
+  title: string
+  /** The workspaces the person may use, for search. */
+  workspaces?: WorkspaceInfo[]
+  children: ReactNode
+}) {
   return (
-    <AppShell viewer={{ ...account, role: account.owner ? "owner" : "readonly" }} workspace={null} workspaces={[]} databases={[]} buckets={[]}>
+    <AppShell viewer={{ ...account, role: account.owner ? "owner" : "readonly" }} workspace={null} workspaces={workspaces} databases={[]} buckets={[]}>
       <PageHeader>
         <PageTitle>{title}</PageTitle>
       </PageHeader>

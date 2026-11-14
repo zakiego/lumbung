@@ -75,8 +75,8 @@ function MembersPage() {
             invites={invites}
             workspaces={workspaces}
             deleted={deleted}
-            // A workspace deleted since the invite was made is left out of the new one.
-            onResend={(i) => invite(i.email, i.owner ? { owner: true } : { owner: false, grants: i.grants.filter((g) => workspaces.some((w) => w.id === g.workspace)) })}
+            // A workspace gone for good since the invite was made is left out of the new one.
+            onResend={(i) => invite(i.email, i.owner ? { owner: true } : { owner: false, grants: i.grants.filter((g) => [...workspaces, ...deleted].some((w) => w.id === g.workspace)) })}
             onChanged={() => void router.invalidate()}
             onCancel={async (i) => {
               await cancelInvite({ data: { id: i.id } })

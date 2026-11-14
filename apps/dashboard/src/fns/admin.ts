@@ -9,7 +9,7 @@ import { allWorkspaces } from "@/server/access"
 import { config } from "@/server/config"
 import { allPages, call, engineFor } from "@/server/engine"
 import { forgetMinted, recordMinted, revokeOutlived } from "@/server/minted"
-import { requireIn, requireOwner } from "@/server/session"
+import { type Viewer, requireIn, requireOwner } from "@/server/session"
 import { UserError, createInvite, listInvites, listMembers, removeMember, revokeInvite, setAccess } from "@/server/users"
 
 const ref = z.string().min(1).max(100)
@@ -154,9 +154,13 @@ const memberAccess = z.discriminatedUnion("owner", [z.object({ owner: z.literal(
  * instance-wide roles first, so it never mistakes someone invited just now
  * for a member from before workspaces.
  */
-async function known(access: z.infer<typeof memberAccess>) {
+async function known(viewer: Viewer, access: z.infer<typeof memberAccess>) {
   const ids = new Set((await call(() => allWorkspaces())).map((w) => w.id))
   if (access.owner) return
+  if (access.grants.every((g) => ids.has(g.workspace))) return
+  // A role in a deleted workspace is kept across a save, for the restore.
+  const e = engineFor(viewer)
+  for (const w of await call(() => allPages((cursor) => e.workspaces.trash({ limit: 200, cursor })))) ids.add(w.id)
   for (const g of access.grants) if (!ids.has(g.workspace)) throw new Error("That workspace doesn't exist.")
 }
 
@@ -177,7 +181,7 @@ export const inviteMember = createServerFn({ method: "POST" })
   .validator(z.object({ email: z.string().trim().email().max(200), access: memberAccess }))
   .handler(async ({ data }) => {
     const viewer = await requireOwner()
-    await known(data.access)
+    await known(viewer, data.access)
     const { invite, token } = await userError(() => createInvite(viewer.id, data.email, data.access))
     return { invite, url: `${config().publicUrl}${APP_BASE}/invite/${token}` }
   })
@@ -194,7 +198,7 @@ export const changeAccess = createServerFn({ method: "POST" })
   .validator(z.object({ id: ref, access: memberAccess }))
   .handler(async ({ data }) => {
     const viewer = await requireOwner()
-    await known(data.access)
+    await known(viewer, data.access)
     await userError(() => setAccess(viewer.id, data.id, data.access))
     // Tokens they made where they are no longer an admin stop working with their access.
     return { ok: true, revoked: await revokeOutlived(viewer).catch(() => 0) }
