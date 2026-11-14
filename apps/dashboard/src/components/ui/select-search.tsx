@@ -25,7 +25,9 @@ export function SelectList({ className, ...props }: Styled<typeof SelectListPart
 }
 
 export function SelectEmpty({ className, ...props }: Styled<typeof SelectEmptyPart>) {
-  return <SelectEmptyPart className={cn("px-2 py-6 text-center font-sans text-[13px] text-muted-foreground", className)} {...props} />
+  // ui-sdk keeps this live region mounted and only fills it while nothing matches,
+  // so the padding goes on data-empty or it shows as a gap above the list.
+  return <SelectEmptyPart className={cn("px-2 data-empty:py-6 text-center font-sans text-[13px] text-muted-foreground", className)} {...props} />
 }
 
 export function SelectGroupLabel({ className, ...props }: Styled<typeof SelectGroupLabelPart>) {
