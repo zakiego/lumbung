@@ -3,15 +3,15 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createAgent } from "@ui-sdk/react/agent"
 import { expect, test, vi } from "vitest"
-import { CreateTokenDialog, type NewToken, TokenTable } from "./tokens"
+import { type CreatedToken, CreateTokenDialog, type NewToken, TokenTable } from "./tokens"
 
 let approve = false
 const agent = createAgent({ allow: (step) => !step.confirm || approve })
 
 const SECRET = "lmb_abc123_s3cr3tvalue"
 
-function Create({ onCreate }: { onCreate: (t: NewToken) => Promise<{ token: string }> }) {
-  return <CreateTokenDialog databases={["shop", "blog"]} loadBranches={async () => ["main", "preview"]} onCreate={onCreate} />
+function Create({ onCreate }: { onCreate: (t: NewToken) => Promise<CreatedToken> }) {
+  return <CreateTokenDialog databases={["shop", "blog"]} buckets={["photos"]} loadBranches={async () => ["main", "preview"]} onCreate={onCreate} />
 }
 
 test("a person creates a branch-limited token and sees it once", async () => {
@@ -28,8 +28,10 @@ test("a person creates a branch-limited token and sees it once", async () => {
   expect(onCreate).not.toHaveBeenCalled()
 
   await user.type(screen.getByLabelText("Token name"), "ci deploy")
+  expect(screen.getByRole("checkbox", { name: "S3 access key" })).toBeTruthy()
   await user.click(screen.getByRole("combobox", { name: "Reaches" }))
   await user.click(screen.getByRole("option", { name: "shop" }))
+  expect(screen.queryByRole("checkbox", { name: "S3 access key" })).toBeNull()
   await user.click(await screen.findByRole("combobox", { name: "Branch" }))
   await user.click(await screen.findByRole("option", { name: "preview" }))
   await user.click(screen.getByRole("combobox", { name: "Access" }))
@@ -50,6 +52,27 @@ test("a person creates a branch-limited token and sees it once", async () => {
   await user.click(trigger)
   expect(screen.queryByText(SECRET)).toBeNull()
   expect((screen.getByLabelText("Token name") as HTMLInputElement).value).toBe("")
+})
+
+test("a bucket token with an access key shows all three values once", async () => {
+  const user = userEvent.setup()
+  const created = { token: SECRET, access_key_id: "LMBABC123", secret_access_key: "s3-secret-value" }
+  const onCreate = vi.fn(async (_t: NewToken) => created)
+  render(<Create onCreate={onCreate} />)
+
+  await user.click(screen.getByRole("button", { name: "New token" }))
+  await user.type(screen.getByLabelText("Token name"), "uploads")
+  await user.click(screen.getByRole("combobox", { name: "Reaches" }))
+  expect(screen.getByRole("group", { name: "Buckets" })).toBeTruthy()
+  await user.click(screen.getByRole("option", { name: "photos" }))
+  expect(screen.queryByRole("combobox", { name: "Branch" })).toBeNull()
+  await user.click(screen.getByRole("checkbox", { name: "S3 access key" }))
+  await user.click(screen.getByRole("button", { name: "Create token" }))
+
+  await waitFor(() => expect(onCreate).toHaveBeenCalledOnce())
+  expect(onCreate.mock.calls[0]?.[0]).toEqual({ name: "uploads", access: "read", bucket: "photos", accessKey: true })
+  for (const value of Object.values(created)) expect(await screen.findByText(value)).toBeTruthy()
+  for (const label of ["Copy token", "Copy access key ID", "Copy secret access key"]) expect(screen.getByRole("button", { name: label })).toBeTruthy()
 })
 
 test("a server error stays in the dialog", async () => {
@@ -81,7 +104,7 @@ test("an agent can create a token but never read it", async () => {
   const open = agent.snapshot().filter((e) => !e.offPage && e.component !== "more")
   for (const entry of open) expect(entry.label, `${entry.component} ${entry.ref} has no name`).toBeTruthy()
   const labels = open.map((e) => e.label)
-  for (const label of ["Create token", "Token name", "Reaches", "Access", "Expires in (days)"]) expect(labels).toContain(label)
+  for (const label of ["Create token", "Token name", "Reaches", "Access", "Expires in (days)", "S3 access key"]) expect(labels).toContain(label)
 
   const result = await agent.act({
     steps: [
@@ -118,14 +141,15 @@ test("the service token can't be revoked, and revoking needs a person's yes", as
   const onRevoke = vi.fn(async () => {})
   render(
     <TokenTable
-      tokens={[token({ id: "svc", name: "dashboard", scope: "instance", access: "admin", service: true }), token({ id: "t2", name: "ci", branch_id: "b1" })]}
-      names={{ databases: { db1: "shop" }, branches: { b1: "preview" } }}
+      tokens={[token({ id: "svc", name: "dashboard", scope: "instance", access: "admin", service: true }), token({ id: "t2", name: "ci", branch_id: "b1" }), token({ id: "t3", name: "uploads", scope: "bucket", database_id: "", bucket_id: "bk1" })]}
+      names={{ databases: { db1: "shop" }, branches: { b1: "preview" }, buckets: { bk1: "photos" } }}
       onRevoke={onRevoke}
     />,
   )
   expect(screen.getByText("service")).toBeTruthy()
   expect(screen.queryByRole("button", { name: "Revoke dashboard" })).toBeNull()
   expect(screen.getByText("shop / preview")).toBeTruthy()
+  expect(screen.getByText("Bucket photos")).toBeTruthy()
 
   const revoke = { steps: [{ ref: "Revoke ci", action: "press", args: ["Revoke token"] }] }
   approve = false

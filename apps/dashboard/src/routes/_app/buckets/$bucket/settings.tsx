@@ -108,8 +108,14 @@ function SettingsPage() {
             }}
           />
         </SettingsSection>
-        <SettingsSection title="S3 endpoint" description="For S3 clients, with path-style addressing and any region. They need a token with an access key.">
+        <SettingsSection title="S3 endpoint" description="For S3 clients, with path-style addressing and any region.">
           <p className="font-mono text-[13px] [overflow-wrap:anywhere]">{s3Endpoint}</p>
+          <Link to="/tokens" className="group/link inline-flex items-center gap-1 self-start rounded-sm text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground hover:duration-0">
+            Create an access key
+            <span aria-hidden="true" className="transition-transform duration-100 ease-out-quad motion-safe:group-hover/link:translate-x-0.5">
+              →
+            </span>
+          </Link>
         </SettingsSection>
         <SettingsSection
           title="Delete bucket"

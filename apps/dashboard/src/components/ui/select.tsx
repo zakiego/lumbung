@@ -9,7 +9,7 @@ import { CheckIcon, ChevronDownIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { type Styled, cn } from "@/lib/utils"
 
-export { Select, SelectGroup, SelectGroupLabel, SelectSeparator, SelectValue } from "@ui-sdk/react/select"
+export { type ListData, Select, SelectGroup, SelectGroupLabel, SelectSeparator, SelectValue } from "@ui-sdk/react/select"
 
 export const popupSurface =
   "rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg shadow-black/10 outline-none origin-(--transform-origin) transition-[opacity,scale] duration-100 ease-out-quad data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0 motion-reduce:transition-none dark:shadow-black/50"

@@ -1,13 +1,15 @@
 import type { TokenOut } from "@lumbung/client"
 import { KeyRoundIcon, PlusIcon, ShieldIcon, Trash2Icon } from "lucide-react"
 import { useEffect, useState } from "react"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { NumberInput } from "@/components/ui/number-input"
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
+import { type ListData, Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select"
+import { SelectGroupLabel } from "@/components/ui/select-search"
 import { Badge, Empty, Table, TableCell, TableHead, TableRow } from "@/components/ui/surface"
 import { formatDate, timeAgo } from "@/lib/format"
-import { Confirm, FormDialog, ShownOnce } from "./form-dialog"
+import { Confirm, FormDialog, SecretValue, ShownOnce } from "./form-dialog"
 
 export type Access = TokenOut["access"]
 
@@ -83,28 +85,39 @@ export function TokenTable({ tokens, names, onRevoke }: { tokens: TokenOut[]; na
   )
 }
 
-export type NewToken = { name: string; access: Access; database?: string; branch?: string; expiresInDays?: number }
+export type NewToken = { name: string; access: Access; database?: string; branch?: string; bucket?: string; accessKey?: boolean; expiresInDays?: number }
+
+export type CreatedToken = { token: string; access_key_id?: string; secret_access_key?: string }
 
 const ALL = "*"
+const DB = "db:"
+const BUCKET = "bucket:"
 
 type CreateTokenProps = {
   databases: string[]
+  buckets?: string[]
   loadBranches: (db: string) => Promise<string[]>
-  onCreate: (t: NewToken) => Promise<{ token: string }>
+  onCreate: (t: NewToken) => Promise<CreatedToken>
 }
 
-export function CreateTokenDialog({ databases, loadBranches, onCreate }: CreateTokenProps) {
+export function CreateTokenDialog({ databases, buckets = [], loadBranches, onCreate }: CreateTokenProps) {
   const [name, setName] = useState("")
   const [access, setAccess] = useState<Access>("read")
-  const [database, setDatabase] = useState(ALL)
+  const [target, setTarget] = useState(ALL)
   const [branch, setBranch] = useState(ALL)
   const [branches, setBranches] = useState<string[]>([])
+  const [accessKey, setAccessKey] = useState(false)
   const [days, setDays] = useState<number | null>(null)
+
+  const database = target.startsWith(DB) ? target.slice(DB.length) : ""
+  const bucket = target.startsWith(BUCKET) ? target.slice(BUCKET.length) : ""
+  // A database token never reaches a bucket, so its access key would sign nothing.
+  const canSign = !database
 
   useEffect(() => {
     setBranch(ALL)
     setBranches([])
-    if (database === ALL) return
+    if (!database) return
     let live = true
     loadBranches(database)
       .then((list) => live && setBranches(list))
@@ -113,6 +126,12 @@ export function CreateTokenDialog({ databases, loadBranches, onCreate }: CreateT
       live = false
     }
   }, [database, loadBranches])
+
+  const targets: ListData = [
+    { value: ALL, label: "Everything" },
+    ...(databases.length > 0 ? [{ type: "group" as const, label: "Databases", items: databases.map((d) => ({ value: DB + d, label: d })) }] : []),
+    ...(buckets.length > 0 ? [{ type: "group" as const, label: "Buckets", items: buckets.map((b) => ({ value: BUCKET + b, label: `Bucket ${b}` })) }] : []),
+  ]
 
   return (
     <FormDialog
@@ -128,18 +147,32 @@ export function CreateTokenDialog({ databases, loadBranches, onCreate }: CreateT
       onOpen={() => {
         setName("")
         setAccess("read")
-        setDatabase(ALL)
+        setTarget(ALL)
+        setAccessKey(false)
         setDays(null)
       }}
       onSubmit={async () => {
-        const { token } = await onCreate({
+        const created = await onCreate({
           name: name.trim(),
           access,
-          database: database === ALL ? undefined : database,
-          branch: database === ALL || branch === ALL ? undefined : branch,
+          database: database || undefined,
+          branch: database && branch !== ALL ? branch : undefined,
+          bucket: bucket || undefined,
+          accessKey: canSign && accessKey ? true : undefined,
           expiresInDays: days ?? undefined,
         })
-        return <ShownOnce title={`${name.trim()} is ready`} value={token} copyLabel="Copy token" note="Copy it now. It won't be shown again." />
+        if (!created.secret_access_key) {
+          return <ShownOnce title={`${name.trim()} is ready`} value={created.token} copyLabel="Copy token" note="Copy it now. It won't be shown again." />
+        }
+        return (
+          <ShownOnce title={`${name.trim()} is ready`} note="Copy them now. The secrets won't be shown again.">
+            <div className="flex flex-col gap-3">
+              <Secret label="Token" value={created.token} copyLabel="Copy token" />
+              <Secret label="Access key ID" value={created.access_key_id ?? ""} copyLabel="Copy access key ID" />
+              <Secret label="Secret access key" value={created.secret_access_key} copyLabel="Copy secret access key" />
+            </div>
+          </ShownOnce>
+        )
       }}
     >
       <Field>
@@ -148,23 +181,34 @@ export function CreateTokenDialog({ databases, loadBranches, onCreate }: CreateT
       </Field>
       <Field>
         <FieldLabel>Reaches</FieldLabel>
-        <Select
-          items={[{ value: ALL, label: "Every database" }, ...databases.map((d) => ({ value: d, label: d }))]}
-          value={database}
-          onValueChange={(v) => typeof v === "string" && setDatabase(v)}
-        >
+        <Select items={targets} value={target} onValueChange={(v) => typeof v === "string" && setTarget(v)}>
           <SelectTrigger className="w-full" />
           <SelectContent>
-            <SelectItem value={ALL}>Every database</SelectItem>
-            {databases.map((d) => (
-              <SelectItem key={d} value={d} className="font-mono">
-                <span className="truncate">{d}</span>
-              </SelectItem>
-            ))}
+            <SelectItem value={ALL}>Everything</SelectItem>
+            {databases.length > 0 && (
+              <SelectGroup>
+                <SelectGroupLabel>Databases</SelectGroupLabel>
+                {databases.map((d) => (
+                  <SelectItem key={d} value={DB + d} className="font-mono">
+                    <span className="truncate">{d}</span>
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            )}
+            {buckets.length > 0 && (
+              <SelectGroup>
+                <SelectGroupLabel>Buckets</SelectGroupLabel>
+                {buckets.map((b) => (
+                  <SelectItem key={b} value={BUCKET + b} className="font-mono">
+                    <span className="truncate">{b}</span>
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            )}
           </SelectContent>
         </Select>
       </Field>
-      {database !== ALL && (
+      {database && (
         <Field>
           <FieldLabel>Branch</FieldLabel>
           <Select
@@ -207,6 +251,23 @@ export function CreateTokenDialog({ databases, loadBranches, onCreate }: CreateT
           <NumberInput value={days} onValueChange={setDays} min={1} max={3650} placeholder="Never" />
         </Field>
       </div>
+      {canSign && (
+        <Field className="flex-row items-center gap-2">
+          <Checkbox checked={accessKey} onCheckedChange={(next) => setAccessKey(next === true)} />
+          <FieldLabel>S3 access key</FieldLabel>
+        </Field>
+      )}
     </FormDialog>
+  )
+}
+
+function Secret({ label, value, copyLabel }: { label: string; value: string; copyLabel: string }) {
+  return (
+    <div role="group" aria-label={label} className="flex flex-col gap-1.5">
+      <span aria-hidden="true" className="text-xs text-muted-foreground">
+        {label}
+      </span>
+      <SecretValue value={value} copyLabel={copyLabel} />
+    </div>
   )
 }
