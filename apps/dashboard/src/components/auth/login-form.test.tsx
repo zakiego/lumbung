@@ -84,3 +84,10 @@ test("the password toggle shows and hides it", async () => {
   await user.click(screen.getByRole("button", { name: "Show password" }))
   expect(input.type).toBe("text")
 })
+
+test("on an extra origin the passkey button gives way to a note", () => {
+  render(<LoginForm onSignIn={async () => {}} onPasskey={async () => {}} passkeysOnlyAt="https://db.example.com" />)
+  expect(screen.queryByRole("button", { name: "Sign in with a passkey" })).toBeNull()
+  expect(screen.getByText("https://db.example.com")).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy()
+})

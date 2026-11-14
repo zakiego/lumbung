@@ -12,6 +12,7 @@ export const Route = createFileRoute("/login")({
     const session = await getSession()
     if (session.needsSetup) throw redirect({ to: "/setup" })
     if (session.viewer) throw redirect({ href: safeNext(search.next) })
+    return { passkeys: session.passkeys, dashboardUrl: session.dashboardUrl }
   },
   head: () => ({ meta: [{ title: pageTitle("Sign in") }] }),
   component: LoginPage,
@@ -20,6 +21,7 @@ export const Route = createFileRoute("/login")({
 function LoginPage() {
   const router = useRouter()
   const { next } = Route.useSearch()
+  const { passkeys, dashboardUrl } = Route.useRouteContext()
   const done = async () => {
     forgetSession()
     await router.navigate({ href: safeNext(next) })
@@ -35,6 +37,7 @@ function LoginPage() {
           unwrap(await authClient().signIn.passkey())
           await done()
         }}
+        passkeysOnlyAt={passkeys ? undefined : dashboardUrl}
       />
     </AuthLayout>
   )

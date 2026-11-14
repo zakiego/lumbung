@@ -40,7 +40,7 @@ An owner's bucket settings turn public read on or off, set the CORS origins for 
 
 ## Passkeys
 
-Under **Account** (in the menu at the bottom of the sidebar), add a passkey, then use **Sign in with a passkey** next time. Passkeys are bound to the dashboard's address, `LUMBUNG_DASHBOARD_URL`, so set that to the address people really open before anyone adds one.
+Under **Account** (in the menu at the bottom of the sidebar), add a passkey, then use **Sign in with a passkey** next time. Passkeys are bound to the dashboard's address, `LUMBUNG_DASHBOARD_URL`, so set that to the address people really open before anyone adds one. They don't work on the extra addresses in `LUMBUNG_DASHBOARD_EXTRA_ORIGINS`: there the login page and **Account** say where passkeys work, and you sign in with your password.
 
 ## Overview and search
 
@@ -55,5 +55,7 @@ The dashboard calls the engine with its service token and names the signed-in pe
 ## Settings
 
 The dashboard reads environment variables, listed in [Dashboard configuration](/docs/reference/dashboard-configuration/). The ones you usually set are `LUMBUNG_DASHBOARD_URL` (the address people open) and, behind a proxy, `LUMBUNG_CLIENT_IP_HEADER` and `LUMBUNG_TRUSTED_PROXIES`.
+
+To keep the dashboard usable when the public address is down (the proxy, the tunnel or the network), list the addresses you open it at on the server itself in `LUMBUNG_DASHBOARD_EXTRA_ORIGINS`, for example `http://127.0.0.1:4871,http://localhost:4871`. Password sign-in and everything after it work there. Each address has its own sign-in cookie, so you sign in once per address, and passkeys only work on `LUMBUNG_DASHBOARD_URL`. A request counts as sent to an extra address when its `Host` header matches it, so a proxy in front of the public address must pass the original `Host` through.
 
 Users and sessions live in the dashboard's own `dashboard.db`. Databases, branches and tokens live in the engine.

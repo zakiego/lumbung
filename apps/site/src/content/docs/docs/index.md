@@ -7,12 +7,13 @@ Lumbung runs on your own machine and holds many SQLite databases. Each database 
 
 You reach every database through:
 
-- an HTTP API under `/v1`
-- the `@lumbung/client` TypeScript SDK
-- the `lumbung` CLI
-- an MCP endpoint at `/mcp` for AI agents
-- a web dashboard
+- an [HTTP API](/docs/reference/rest-api/) under `/v1`
+- the `@lumbung/client` [SDK](/docs/reference/sdk/) for TypeScript
+- the [libSQL protocol](/docs/guides/libsql/), for `@libsql/client` and Drizzle
+- the `lumbung` [CLI](/docs/reference/cli/)
+- an [MCP endpoint](/docs/guides/ai-agents/) at `/mcp` for AI agents
+- a [web dashboard](/docs/guides/dashboard/)
+
+Files go in [buckets](/docs/concepts/buckets/), with an [S3-compatible API](/docs/reference/s3-api/).
 
 One instance is one team. There's no public sign-up and no billing.
-
-This documentation grows with each release. The quickstart, concepts and reference pages arrive as the features they describe ship.

@@ -51,9 +51,11 @@ function useSubmit<T>(run: (values: T) => Promise<unknown>) {
 type LoginProps = {
   onSignIn: (email: string, password: string) => Promise<unknown>
   onPasskey: () => Promise<unknown>
+  /** Set on an extra origin: passkeys only work at this address, so the passkey button is replaced by a note. */
+  passkeysOnlyAt?: string
 }
 
-export function LoginForm({ onSignIn, onPasskey }: LoginProps) {
+export function LoginForm({ onSignIn, onPasskey, passkeysOnlyAt }: LoginProps) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const form = useSubmit(({ email, password }: { email: string; password: string }) => onSignIn(email, password))
@@ -81,27 +83,41 @@ export function LoginForm({ onSignIn, onPasskey }: LoginProps) {
           {form.pending ? "Signing in…" : "Sign in"}
         </Button>
       </form>
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <Separator className="flex-1" />
-        or
-        <Separator className="flex-1" />
-      </div>
-      <Button
-        variant="secondary"
-        className="w-full"
-        onClick={async () => {
-          form.setError("")
-          try {
-            await onPasskey()
-          } catch (e) {
-            form.setError(message(e))
-          }
-        }}
-      >
-        <FingerprintIcon aria-hidden="true" />
-        Sign in with a passkey
-      </Button>
+      {passkeysOnlyAt ? (
+        <p className="text-center text-xs text-muted-foreground">
+          Passkeys only work on <span className="break-all text-foreground">{passkeysOnlyAt}</span>.
+        </p>
+      ) : (
+        <>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <Separator className="flex-1" />
+            or
+            <Separator className="flex-1" />
+          </div>
+          <PasskeyButton onPasskey={onPasskey} setError={form.setError} />
+        </>
+      )}
     </div>
+  )
+}
+
+function PasskeyButton({ onPasskey, setError }: { onPasskey: () => Promise<unknown>; setError: (message: string) => void }) {
+  return (
+    <Button
+      variant="secondary"
+      className="w-full"
+      onClick={async () => {
+        setError("")
+        try {
+          await onPasskey()
+        } catch (e) {
+          setError(message(e))
+        }
+      }}
+    >
+      <FingerprintIcon aria-hidden="true" />
+      Sign in with a passkey
+    </Button>
   )
 }
 

@@ -1,9 +1,11 @@
 import type { BucketOut, ObjectOut } from "@lumbung/client"
 import { RouterProvider, createMemoryHistory, createRootRoute, createRouter } from "@tanstack/react-router"
-import { render as rtlRender, screen } from "@testing-library/react"
+import { render as rtlRender, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { createAgent } from "@ui-sdk/react/agent"
 import { type ReactNode, useState } from "react"
-import { expect, test } from "vitest"
+import { expect, test, vi } from "vitest"
+import { publicObjectURL } from "@/lib/objects"
 import {
   BucketTable,
   DEFAULT_OBJECT_SORT,
@@ -19,6 +21,7 @@ import {
   ObjectTable,
   PART_BYTES,
   nextObjectSort,
+  objectURL,
   prefixTrail,
   sortFolders,
   sortObjects,
@@ -139,6 +142,72 @@ test("uploadFile: small files in one request, large ones in parts, aborted on fa
   calls.length = 0
   await expect(uploadFile("b", "", big, fake(2))).rejects.toThrow("disk full")
   expect(calls.at(-1)!.method).toBe("DELETE")
+})
+
+test("object details: a row opens its details, with links only on a public bucket", async () => {
+  const photo: ObjectOut = {
+    key: "trips/🍚 rice.png",
+    size: 2048,
+    etag: "6f53033011e5582c3b06a3969cc0675a",
+    content_type: "image/png",
+    last_modified: at,
+    headers: { "cache-control": "max-age=3600" },
+    metadata: { camera: "x".repeat(300) },
+  }
+  const access = { publicRead: true, s3Endpoint: "https://db.example.com/v1/s3", canAdmin: true }
+  const { unmount } = await render(<ObjectTable bucket="docs" prefix="trips/" objects={[photo]} prefixes={[]} canWrite onDelete={noop} access={access} />)
+  fireEvent.click(screen.getByRole("button", { name: "Details of trips/🍚 rice.png" }))
+  const sheet = await screen.findByRole("dialog", { name: "🍚 rice.png" })
+  expect(within(sheet).getByText("https://db.example.com/v1/s3/docs/trips/%F0%9F%8D%9A%20rice.png")).toBeTruthy()
+  expect(within(sheet).getByText("max-age=3600")).toBeTruthy()
+  expect(within(sheet).getByText("x".repeat(300))).toBeTruthy()
+  expect(within(sheet).getByRole("link", { name: "Download" }).getAttribute("href")).toBe(objectURL("docs", photo.key))
+  expect(within(sheet).getByRole("button", { name: "Delete" })).toBeTruthy()
+  unmount()
+
+  await render(<ObjectTable bucket="docs" prefix="" objects={[obj("a.pdf")]} prefixes={[]} canWrite={false} onDelete={noop} access={{ ...access, publicRead: false }} />)
+  fireEvent.click(screen.getByRole("button", { name: "Details of a.pdf" }))
+  const priv = await screen.findByRole("dialog", { name: "a.pdf" })
+  expect(within(priv).queryByRole("button", { name: "Copy public link" })).toBeNull()
+  expect(within(priv).getByRole("link", { name: "Bucket settings" })).toBeTruthy()
+  expect(within(priv).queryByRole("button", { name: "Delete" })).toBeNull()
+})
+
+test("object details: no settings link for non-admins, dot keys aren't linked", async () => {
+  const access = { publicRead: false, s3Endpoint: "https://h/v1/s3", canAdmin: false }
+  const { unmount } = await render(<ObjectTable bucket="docs" prefix="" objects={[obj("a.pdf")]} prefixes={[]} canWrite={false} onDelete={noop} access={access} />)
+  fireEvent.click(screen.getByRole("button", { name: "Details of a.pdf" }))
+  const priv = await screen.findByRole("dialog", { name: "a.pdf" })
+  expect(within(priv).queryByRole("link", { name: "Bucket settings" })).toBeNull()
+  unmount()
+  await render(<ObjectTable bucket="docs" prefix="" objects={[obj("x/../y")]} prefixes={[]} canWrite={false} onDelete={noop} access={{ ...access, publicRead: true }} />)
+  fireEvent.click(screen.getByRole("button", { name: "Details of x/../y" }))
+  const dotted = await screen.findByRole("dialog", { name: "x/../y" })
+  expect(within(dotted).getByText("This key can't be linked.")).toBeTruthy()
+})
+
+test("public object URL: segments encoded, dot segments refused", () => {
+  expect(publicObjectURL("https://h/v1/s3", "b", "a b/c#d?.txt")).toBe("https://h/v1/s3/b/a%20b/c%23d%3F.txt")
+  expect(publicObjectURL("https://h/v1/s3", "b", "a/../c")).toBeNull()
+})
+
+test("an agent opens an object's details, and deleting it needs a person's approval", async () => {
+  let approve = false
+  const agent = createAgent({ allow: (step) => !step.confirm || approve })
+  const onDelete = vi.fn(async () => {})
+  await render(<ObjectTable bucket="docs" prefix="" objects={[obj("a.pdf")]} prefixes={[]} canWrite onDelete={onDelete} access={{ publicRead: false, s3Endpoint: "https://h/v1/s3", canAdmin: false }} />)
+  const opened = await agent.act({ steps: [{ ref: "Details of a.pdf", action: "press" }] })
+  expect(opened.ok, opened.error?.message).toBe(true)
+  const sheet = await screen.findByRole("dialog", { name: "a.pdf" })
+  for (const e of agent.snapshot().filter((e) => !e.offPage && e.component !== "more")) expect(e.label, `${e.component} ${e.ref} has no name`).toBeTruthy()
+  fireEvent.click(within(sheet).getByRole("button", { name: "Delete" }))
+  const confirm = [{ ref: "Delete a.pdf?", action: "press", args: ["Delete object"] }]
+  expect((await agent.act({ steps: confirm })).ok).toBe(false)
+  expect(onDelete).not.toHaveBeenCalled()
+  approve = true
+  const done = await agent.act({ steps: confirm })
+  expect(done.ok, done.error?.message).toBe(true)
+  await waitFor(() => expect(onDelete).toHaveBeenCalledWith("a.pdf"))
 })
 
 const sized = (key: string, size: number, type: string, modified: string): ObjectOut => ({ ...obj(key, size), content_type: type, last_modified: modified })

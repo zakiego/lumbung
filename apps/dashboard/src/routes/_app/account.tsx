@@ -18,7 +18,7 @@ export const Route = createFileRoute("/_app/account")({
 })
 
 function AccountPage() {
-  const { viewer } = Route.useRouteContext()
+  const { viewer, passkeys, dashboardUrl } = Route.useRouteContext()
   return (
     <>
       <PageHeader>
@@ -29,11 +29,28 @@ function AccountPage() {
           <p className="text-[13px] text-muted-foreground">
             Signed in as <span className="text-foreground">{viewer.email}</span>
           </p>
-          <Passkeys />
+          {passkeys ? <Passkeys /> : <PasskeysElsewhere url={dashboardUrl} />}
           <ChangePassword />
         </div>
       </PageBody>
     </>
+  )
+}
+
+// On an extra origin (LUMBUNG_DASHBOARD_EXTRA_ORIGINS) the browser can't use
+// passkeys bound to the dashboard URL, and the server refuses the endpoints.
+function PasskeysElsewhere({ url }: { url: string }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Passkeys</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-[13px] text-muted-foreground">
+          Passkeys only work on <span className="break-all text-foreground">{url}</span>. Open it there to add or use one.
+        </p>
+      </CardContent>
+    </Card>
   )
 }
 

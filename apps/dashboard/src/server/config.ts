@@ -11,6 +11,8 @@ export interface DashboardConfig {
   engineUrl: string
   /** The public origin people open, without /app. Better Auth and passkeys bind to it. */
   publicUrl: string
+  /** LUMBUNG_DASHBOARD_EXTRA_ORIGINS: more origins that may sign in, each on its own host. Passkeys stay on publicUrl. */
+  extraOrigins: string[]
   /** Folder for dashboard.db (users, sessions, invites) and generated secrets. */
   dataDir: string
   /** The engine URL people's apps use, shown in connect snippets. Defaults to publicUrl. */
@@ -47,6 +49,42 @@ function trustedProxiesFrom(value: string | undefined): BlockList {
   }
 }
 
+/**
+ * Comma-separated http or https origins, each normalized to scheme, host and
+ * port. Requests are matched to an origin by host, so no two may share one,
+ * and none may share the dashboard URL's.
+ */
+export function parseOrigins(list: string, publicUrl: string): string[] {
+  const out: string[] = []
+  const hosts = new Set([new URL(publicUrl).host])
+  for (const raw of list.split(",")) {
+    const part = raw.trim()
+    if (!part) continue
+    let url: URL
+    try {
+      url = new URL(part)
+    } catch {
+      throw new Error(`${JSON.stringify(part)} isn't a URL`)
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`${JSON.stringify(part)} isn't an http or https origin`)
+    if (url.pathname !== "/" || url.search || url.hash || url.username || url.password) {
+      throw new Error(`${JSON.stringify(part)} isn't an origin. Use the scheme, host and port only, like http://127.0.0.1:4806`)
+    }
+    if (hosts.has(url.host)) throw new Error(`${JSON.stringify(part)} repeats the host ${url.host}`)
+    hosts.add(url.host)
+    out.push(url.origin)
+  }
+  return out
+}
+
+function extraOriginsFrom(value: string | undefined, publicUrl: string): string[] {
+  try {
+    return parseOrigins(value ?? "", publicUrl)
+  } catch (e) {
+    throw new Error(`LUMBUNG_DASHBOARD_EXTRA_ORIGINS: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
 let cached: DashboardConfig | undefined
 
 export function config(): DashboardConfig {
@@ -57,6 +95,7 @@ export function config(): DashboardConfig {
   cached = {
     engineUrl: (env.LUMBUNG_ENGINE_URL || settingDefault("LUMBUNG_ENGINE_URL")).replace(/\/+$/, ""),
     publicUrl: origin,
+    extraOrigins: extraOriginsFrom(env.LUMBUNG_DASHBOARD_EXTRA_ORIGINS, origin),
     dataDir: resolve(env.LUMBUNG_DASHBOARD_DATA_DIR || settingDefault("LUMBUNG_DASHBOARD_DATA_DIR")),
     publicEngineUrl: (env.LUMBUNG_PUBLIC_ENGINE_URL || origin).replace(/\/+$/, ""),
     clientIpHeader: (env.LUMBUNG_CLIENT_IP_HEADER || "").trim(),
