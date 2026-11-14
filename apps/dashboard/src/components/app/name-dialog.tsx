@@ -1,9 +1,12 @@
+import { useRouter } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { type FormEvent, type ReactNode, useState } from "react"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { toast } from "@/components/ui/toast"
+import { createDatabase } from "@/fns/databases"
 
 // Engine names: lowercase letters, digits and dashes, starting with a letter or digit.
 export const NAME_PATTERN = "[a-z0-9][a-z0-9\\-]{0,62}"
@@ -107,6 +110,18 @@ export function NameDialog({
       </DialogContent>
     </Dialog>
   )
+}
+
+/** Creates a database and opens it. A failure shows under the dialog's field, so only success gets a toast. */
+export function useCreateDatabase(onDone?: () => void) {
+  const router = useRouter()
+  return async (name: string) => {
+    await createDatabase({ data: { name } })
+    toast.success(`Created ${name}`)
+    await router.invalidate()
+    await router.navigate({ to: "/db/$db", params: { db: name } })
+    onDone?.()
+  }
 }
 
 export function CreateDatabaseDialog({ onCreate }: { onCreate: (name: string) => Promise<unknown> }) {

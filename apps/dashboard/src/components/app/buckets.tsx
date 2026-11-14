@@ -1,10 +1,11 @@
 import type { BucketOut, ObjectOut } from "@lumbung/client"
-import { Link } from "@tanstack/react-router"
+import { Link, useRouter } from "@tanstack/react-router"
 import { ArchiveIcon, DownloadIcon, FileIcon, FolderIcon, GlobeIcon, Trash2Icon, UploadIcon } from "lucide-react"
 import { type ReactNode, useRef, useState } from "react"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Badge, Empty, Table, TableCell, TableHead, TableRow } from "@/components/ui/surface"
 import { toast } from "@/components/ui/toast"
+import { createBucket } from "@/fns/buckets"
 import { TruncatedTip } from "@/components/ui/tooltip"
 import { formatBytes, number, timeAgo } from "@/lib/format"
 import { APP_BASE } from "@/lib/paths"
@@ -12,6 +13,18 @@ import { Confirm, errorText } from "./form-dialog"
 import { NameDialog } from "./name-dialog"
 
 export const BUCKET_PATTERN = "[a-z0-9][a-z0-9\\-]{1,61}[a-z0-9]"
+
+/** Creates a bucket and opens it. A failure shows under the dialog's field, so only success gets a toast. */
+export function useCreateBucket(onDone?: () => void) {
+  const router = useRouter()
+  return async (name: string) => {
+    await createBucket({ data: { name } })
+    toast.success(`Created ${name}`)
+    await router.invalidate()
+    await router.navigate({ to: "/buckets/$bucket", params: { bucket: name } })
+    onDone?.()
+  }
+}
 
 export function CreateBucketDialog({ onCreate, variant }: { onCreate: (name: string) => Promise<unknown>; variant?: "default" | "secondary" }) {
   return (
