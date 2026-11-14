@@ -28,9 +28,11 @@ import { Route as AppBucketsIndexRouteImport } from './routes/_app/buckets/index
 import { Route as AppDbDbRouteRouteImport } from './routes/_app/db/$db/route'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AppBucketsBucketIndexRouteImport } from './routes/_app/buckets/$bucket/index'
+import { Route as AppBucketsBucketConnectRouteImport } from './routes/_app/buckets/$bucket/connect'
 import { Route as AppBucketsBucketSettingsRouteImport } from './routes/_app/buckets/$bucket/settings'
 import { Route as AppDbDbIndexRouteImport } from './routes/_app/db/$db/index'
 import { Route as AppDbDbBranchesRouteImport } from './routes/_app/db/$db/branches'
+import { Route as AppDbDbConnectRouteImport } from './routes/_app/db/$db/connect'
 import { Route as AppDbDbDataRouteImport } from './routes/_app/db/$db/data'
 import { Route as AppDbDbSchemaRouteImport } from './routes/_app/db/$db/schema'
 import { Route as AppDbDbSettingsRouteImport } from './routes/_app/db/$db/settings'
@@ -131,6 +133,11 @@ const AppBucketsBucketIndexRoute = AppBucketsBucketIndexRouteImport.update({
   path: '/buckets/$bucket/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBucketsBucketConnectRoute = AppBucketsBucketConnectRouteImport.update({
+  id: '/buckets/$bucket/connect',
+  path: '/buckets/$bucket/connect',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppBucketsBucketSettingsRoute =
   AppBucketsBucketSettingsRouteImport.update({
     id: '/buckets/$bucket/settings',
@@ -145,6 +152,11 @@ const AppDbDbIndexRoute = AppDbDbIndexRouteImport.update({
 const AppDbDbBranchesRoute = AppDbDbBranchesRouteImport.update({
   id: '/branches',
   path: '/branches',
+  getParentRoute: () => AppDbDbRouteRoute,
+} as any)
+const AppDbDbConnectRoute = AppDbDbConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
   getParentRoute: () => AppDbDbRouteRoute,
 } as any)
 const AppDbDbDataRoute = AppDbDbDataRouteImport.update({
@@ -191,8 +203,10 @@ export interface FileRoutesByFullPath {
   '/db/$db': typeof AppDbDbRouteRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/buckets/': typeof AppBucketsIndexRoute
+  '/buckets/$bucket/connect': typeof AppBucketsBucketConnectRoute
   '/buckets/$bucket/settings': typeof AppBucketsBucketSettingsRoute
   '/db/$db/branches': typeof AppDbDbBranchesRoute
+  '/db/$db/connect': typeof AppDbDbConnectRoute
   '/db/$db/data': typeof AppDbDbDataRoute
   '/db/$db/schema': typeof AppDbDbSchemaRoute
   '/db/$db/settings': typeof AppDbDbSettingsRoute
@@ -218,8 +232,10 @@ export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/buckets': typeof AppBucketsIndexRoute
+  '/buckets/$bucket/connect': typeof AppBucketsBucketConnectRoute
   '/buckets/$bucket/settings': typeof AppBucketsBucketSettingsRoute
   '/db/$db/branches': typeof AppDbDbBranchesRoute
+  '/db/$db/connect': typeof AppDbDbConnectRoute
   '/db/$db/data': typeof AppDbDbDataRoute
   '/db/$db/schema': typeof AppDbDbSchemaRoute
   '/db/$db/settings': typeof AppDbDbSettingsRoute
@@ -248,8 +264,10 @@ export interface FileRoutesById {
   '/_app/db/$db': typeof AppDbDbRouteRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/_app/buckets/': typeof AppBucketsIndexRoute
+  '/_app/buckets/$bucket/connect': typeof AppBucketsBucketConnectRoute
   '/_app/buckets/$bucket/settings': typeof AppBucketsBucketSettingsRoute
   '/_app/db/$db/branches': typeof AppDbDbBranchesRoute
+  '/_app/db/$db/connect': typeof AppDbDbConnectRoute
   '/_app/db/$db/data': typeof AppDbDbDataRoute
   '/_app/db/$db/schema': typeof AppDbDbSchemaRoute
   '/_app/db/$db/settings': typeof AppDbDbSettingsRoute
@@ -278,8 +296,10 @@ export interface FileRouteTypes {
     | '/db/$db'
     | '/api/auth/$'
     | '/buckets/'
+    | '/buckets/$bucket/connect'
     | '/buckets/$bucket/settings'
     | '/db/$db/branches'
+    | '/db/$db/connect'
     | '/db/$db/data'
     | '/db/$db/schema'
     | '/db/$db/settings'
@@ -305,8 +325,10 @@ export interface FileRouteTypes {
     | '/'
     | '/api/auth/$'
     | '/buckets'
+    | '/buckets/$bucket/connect'
     | '/buckets/$bucket/settings'
     | '/db/$db/branches'
+    | '/db/$db/connect'
     | '/db/$db/data'
     | '/db/$db/schema'
     | '/db/$db/settings'
@@ -334,8 +356,10 @@ export interface FileRouteTypes {
     | '/_app/db/$db'
     | '/api/auth/$'
     | '/_app/buckets/'
+    | '/_app/buckets/$bucket/connect'
     | '/_app/buckets/$bucket/settings'
     | '/_app/db/$db/branches'
+    | '/_app/db/$db/connect'
     | '/_app/db/$db/data'
     | '/_app/db/$db/schema'
     | '/_app/db/$db/settings'
@@ -492,6 +516,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBucketsBucketIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/buckets/$bucket/connect': {
+      id: '/_app/buckets/$bucket/connect'
+      path: '/buckets/$bucket/connect'
+      fullPath: '/buckets/$bucket/connect'
+      preLoaderRoute: typeof AppBucketsBucketConnectRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/buckets/$bucket/settings': {
       id: '/_app/buckets/$bucket/settings'
       path: '/buckets/$bucket/settings'
@@ -511,6 +542,13 @@ declare module '@tanstack/react-router' {
       path: '/branches'
       fullPath: '/db/$db/branches'
       preLoaderRoute: typeof AppDbDbBranchesRouteImport
+      parentRoute: typeof AppDbDbRouteRoute
+    }
+    '/_app/db/$db/connect': {
+      id: '/_app/db/$db/connect'
+      path: '/connect'
+      fullPath: '/db/$db/connect'
+      preLoaderRoute: typeof AppDbDbConnectRouteImport
       parentRoute: typeof AppDbDbRouteRoute
     }
     '/_app/db/$db/data': {
@@ -553,6 +591,7 @@ declare module '@tanstack/react-router' {
 
 interface AppDbDbRouteRouteChildren {
   AppDbDbBranchesRoute: typeof AppDbDbBranchesRoute
+  AppDbDbConnectRoute: typeof AppDbDbConnectRoute
   AppDbDbDataRoute: typeof AppDbDbDataRoute
   AppDbDbSchemaRoute: typeof AppDbDbSchemaRoute
   AppDbDbSettingsRoute: typeof AppDbDbSettingsRoute
@@ -563,6 +602,7 @@ interface AppDbDbRouteRouteChildren {
 
 const AppDbDbRouteRouteChildren: AppDbDbRouteRouteChildren = {
   AppDbDbBranchesRoute: AppDbDbBranchesRoute,
+  AppDbDbConnectRoute: AppDbDbConnectRoute,
   AppDbDbDataRoute: AppDbDbDataRoute,
   AppDbDbSchemaRoute: AppDbDbSchemaRoute,
   AppDbDbSettingsRoute: AppDbDbSettingsRoute,
@@ -585,6 +625,7 @@ interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   AppDbDbRouteRoute: typeof AppDbDbRouteRouteWithChildren
   AppBucketsIndexRoute: typeof AppBucketsIndexRoute
+  AppBucketsBucketConnectRoute: typeof AppBucketsBucketConnectRoute
   AppBucketsBucketSettingsRoute: typeof AppBucketsBucketSettingsRoute
   AppBucketsBucketIndexRoute: typeof AppBucketsBucketIndexRoute
 }
@@ -599,6 +640,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   AppDbDbRouteRoute: AppDbDbRouteRouteWithChildren,
   AppBucketsIndexRoute: AppBucketsIndexRoute,
+  AppBucketsBucketConnectRoute: AppBucketsBucketConnectRoute,
   AppBucketsBucketSettingsRoute: AppBucketsBucketSettingsRoute,
   AppBucketsBucketIndexRoute: AppBucketsBucketIndexRoute,
 }

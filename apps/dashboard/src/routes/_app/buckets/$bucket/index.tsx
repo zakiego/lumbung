@@ -1,16 +1,15 @@
 import type { ObjectOut } from "@lumbung/client"
 import { Link, createFileRoute, useRouter } from "@tanstack/react-router"
-import { ArchiveIcon, SettingsIcon } from "lucide-react"
+import { ArchiveIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { z } from "zod"
-import { ObjectTable, PublicBadge, UploadButton, prefixTrail } from "@/components/app/buckets"
+import { BucketFrame } from "@/components/app/bucket-frame"
+import { ObjectTable, PublicBadge, UploadButton } from "@/components/app/buckets"
 import { errorText } from "@/components/app/form-dialog"
-import { PageBody, PageHeader } from "@/components/app/shell"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Empty } from "@/components/ui/surface"
 import { toast } from "@/components/ui/toast"
-import { TruncatedTip } from "@/components/ui/tooltip"
 import { deleteObject, getBucketPage } from "@/fns/buckets"
 import { formatBytes, number } from "@/lib/format"
 import { pageTitle } from "@/lib/paths"
@@ -57,56 +56,10 @@ export const Route = createFileRoute("/_app/buckets/$bucket/")({
 function Frame({ children, actions }: { children: React.ReactNode; actions?: React.ReactNode }) {
   const { bucket } = Route.useParams()
   const { prefix = "" } = Route.useSearch()
-  const trail = prefixTrail(prefix)
   return (
-    <>
-      <PageHeader actions={actions}>
-        <nav aria-label="Breadcrumb" className="min-w-0">
-          <ol className="flex min-w-0 items-center gap-1.5 text-[13px]">
-            <li className="hidden sm:block">
-              <Link to="/buckets" className="text-muted-foreground transition-colors duration-100 hover:text-foreground">
-                Buckets
-              </Link>
-            </li>
-            <li aria-hidden="true" className="hidden text-faint sm:block">
-              /
-            </li>
-            <li className="min-w-0">
-              <TruncatedTip text={bucket} side="bottom">
-                {trail.length === 0 ? (
-                  <h1 aria-current="page" className="truncate font-mono font-[590]">
-                    {bucket}
-                  </h1>
-                ) : (
-                  <Link to="/buckets/$bucket" params={{ bucket }} className="block truncate font-mono text-muted-foreground hover:text-foreground">
-                    {bucket}
-                  </Link>
-                )}
-              </TruncatedTip>
-            </li>
-            {trail.map((t, i) => (
-              <li key={t.prefix} className="flex min-w-0 items-center gap-1.5">
-                <span aria-hidden="true" className="text-faint">
-                  /
-                </span>
-                <TruncatedTip text={t.label} side="bottom">
-                  {i === trail.length - 1 ? (
-                    <h1 aria-current="page" className="truncate font-mono font-[590]">
-                      {t.label}
-                    </h1>
-                  ) : (
-                    <Link to="/buckets/$bucket" params={{ bucket }} search={{ prefix: t.prefix }} className="block truncate font-mono text-muted-foreground hover:text-foreground">
-                      {t.label}
-                    </Link>
-                  )}
-                </TruncatedTip>
-              </li>
-            ))}
-          </ol>
-        </nav>
-      </PageHeader>
-      <PageBody>{children}</PageBody>
-    </>
+    <BucketFrame bucket={bucket} section="objects" prefix={prefix} actions={actions}>
+      {children}
+    </BucketFrame>
   )
 }
 
@@ -116,7 +69,6 @@ function BucketPage() {
   const { prefix = "" } = Route.useSearch()
   const router = useRouter()
   const canWrite = can(viewer.role, "write")
-  const canAdmin = can(viewer.role, "admin")
   const name = page.bucket.name
 
   // Later pages load in place, under the first one the loader brought.
@@ -150,12 +102,6 @@ function BucketPage() {
 
   const actions = (
     <>
-      {canAdmin && (
-        <Link to="/buckets/$bucket/settings" params={{ bucket: name }} className={buttonVariants({ variant: "ghost" })}>
-          <SettingsIcon aria-hidden="true" />
-          <span className="max-sm:sr-only">Settings</span>
-        </Link>
-      )}
       {canWrite && <UploadButton bucket={name} prefix={prefix} onDone={() => router.invalidate()} />}
     </>
   )
