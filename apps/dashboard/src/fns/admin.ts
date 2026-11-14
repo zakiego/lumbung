@@ -87,21 +87,33 @@ export const listTokens = createServerFn({ method: "GET" }).handler(async (): Pr
   return call(() => allPages((cursor) => e.tokens.list({ limit: 100, cursor }), 2000))
 })
 
+const access = z.enum(["read", "write", "admin"])
+
 export const createToken = createServerFn({ method: "POST" })
   .validator(
     z.object({
       name: z.string().trim().min(1).max(100),
-      access: z.enum(["read", "write", "admin"]),
+      access: access.optional(),
       database: ref.optional(),
       branch: ref.optional(),
       bucket: ref.optional(),
+      grants: z
+        .array(z.object({ access, database: ref.optional(), branch: ref.optional(), bucket: ref.optional() }))
+        .min(1)
+        .max(20)
+        .optional(),
       accessKey: z.boolean().optional(),
       expiresInDays: z.number().int().min(1).max(3650).optional(),
     }),
   )
   .handler(async ({ data }) => {
     const viewer = await requireCan("admin")
-    return call(() => engineFor(viewer).tokens.create(data))
+    const { name, accessKey, expiresInDays } = data
+    // One token for several databases and buckets goes as grants; anything else keeps the plain shape.
+    if (data.grants) return call(() => engineFor(viewer).tokens.create({ name, accessKey, expiresInDays, grants: data.grants ?? [] }))
+    if (!data.access) throw new Error("Pick an access level.")
+    const { access, database, branch, bucket } = data
+    return call(() => engineFor(viewer).tokens.create({ name, accessKey, expiresInDays, access, database, branch, bucket }))
   })
 
 export const revokeToken = createServerFn({ method: "POST" })

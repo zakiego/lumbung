@@ -26,10 +26,12 @@ type FormDialogProps = {
   onSubmit: () => Promise<ReactNode | void>
   /** Runs when the dialog closes after showing what onSubmit returned. */
   onDone?: () => void
+  /** For a form that grows while open: pin it below the top so its fields don't move as it does. */
+  pinned?: boolean
   children: ReactNode
 }
 
-export function FormDialog({ trigger, triggerStyle = {}, title, description, submit, pendingSubmit, onOpen, onSubmit, onDone, children }: FormDialogProps) {
+export function FormDialog({ trigger, triggerStyle = {}, title, description, submit, pendingSubmit, onOpen, onSubmit, onDone, pinned, children }: FormDialogProps) {
   const [open, setOpen] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
@@ -68,7 +70,7 @@ export function FormDialog({ trigger, triggerStyle = {}, title, description, sub
       <DialogTrigger aria-label={triggerStyle.label} className={buttonVariants({ variant: triggerStyle.variant ?? "default", size: triggerStyle.size, className: triggerStyle.className })}>
         {trigger}
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className={pinned ? "mt-[max(16px,12svh)] mb-auto max-h-[calc(100svh-max(16px,12svh)-16px)]" : undefined}>
         {done ? (
           <>
             {done}
@@ -159,9 +161,10 @@ export function ShownOnce({ title, note, value, copyLabel, children }: ShownOnce
   )
 }
 
-export function SecretValue({ value, copyLabel }: { value: string; copyLabel: string }) {
+// `secret={false}` is for a value shown the same way that agents may read, like a URL.
+export function SecretValue({ value, copyLabel, secret = true }: { value: string; copyLabel: string; secret?: boolean }) {
   return (
-    <div data-agent-hidden className="relative rounded-lg border bg-code">
+    <div data-agent-hidden={secret || undefined} className="relative rounded-lg border bg-code">
       <code className="block py-3 pr-12 pl-3 font-mono text-[13px] leading-[1.6] break-all text-foreground/90 select-all">{value}</code>
       <CopyButton text={value} label={copyLabel} className="absolute top-1.5 right-1.5" />
     </div>
