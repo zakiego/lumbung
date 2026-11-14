@@ -195,3 +195,34 @@ docker compose up -d --no-build --wait
 - m4-alerts probes `https://lumbung.zakiego.com/health` and watches both containers.
 - A failed deploy alerts through the webhook (email and WhatsApp).
 - The nightly backup only writes its log. Check `~/selfhost/lumbung-backup.log` for `FAILED`.
+
+## Releasing the SDK
+
+`.github/workflows/release-client.yml` publishes `packages/client` to GitHub Packages when a `client-vX.Y.Z` tag is pushed. It runs the SDK build, typecheck and tests against a fresh `lumbungd` first, and fails if the tag doesn't match the version in `packages/client/package.json`.
+
+GitHub Packages only accepts a scope named after the repository owner, so the package is published as `@zakiego/lumbung-client`. In the workspace it stays `@lumbung/client`, and it stays `"private": true` so nothing publishes it from a laptop. The license is `UNLICENSED`.
+
+1. Bump `version` in `packages/client/package.json` and merge it to `main`.
+2. Tag that commit and push the tag:
+
+   ```bash
+   git tag client-v0.1.0
+   git push origin client-v0.1.0
+   ```
+
+3. Watch the run in the Actions tab. The package shows up under the repository's Packages.
+
+A version can't be published twice. To fix a bad release, bump the version and tag again.
+
+To install it, create a classic personal access token with `read:packages` and add this `.npmrc` to the consuming project:
+
+```ini
+@zakiego:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+Then alias it so imports keep using `@lumbung/client`:
+
+```bash
+pnpm add @lumbung/client@npm:@zakiego/lumbung-client
+```
