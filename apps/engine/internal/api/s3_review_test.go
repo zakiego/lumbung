@@ -171,18 +171,35 @@ func TestS3ServerPresignMaximum(t *testing.T) {
 	w.fails(w.do(k.Token, "POST", "/v1/buckets/{bucket}/presign", "/v1/buckets/bucket-a/presign", map[string]any{"key": "doc.txt", "expires_in": 7200}), 400, "bad_request")
 }
 
-func TestPresignedURLsKeepDotSegments(t *testing.T) {
+// Browsers and fetch resolve . and .. in URL paths, percent-encoded or not,
+// so a presigned URL can't carry such a key: presigning refuses it rather
+// than handing out a URL that names another key. Keys like "a..b" are fine.
+func TestPresignRefusesDotSegments(t *testing.T) {
 	w := newS3World(t, nil)
+	k := w.accessKey(map[string]any{"bucket": "bucket-a", "access": "read"})
 	for _, key := range []string{"a/../b", "./c", "d/./e", ".."} {
-		w.s3OK(w.s3(w.aWrite, "PUT", "/v1/s3/bucket-a/"+s3proto.URIEncode(key, true), []byte("v:"+key)), 200)
-		k := w.accessKey(map[string]any{"bucket": "bucket-a", "access": "read"})
-		ps := w.ok(w.do(k.Token, "POST", "/v1/buckets/{bucket}/presign", "/v1/buckets/bucket-a/presign", map[string]any{"key": key}), 200).json(t)
-		u, _ := url.Parse(ps["url"].(string))
-		// What a browser or curl would do: resolve dot segments.
-		resolved := u.ResolveReference(&url.URL{}).String()
-		r := w.fetch("GET", resolved, nil)
-		if r.status != 200 || string(r.body) != "v:"+key {
-			t.Fatalf("%q: %s -> %d %s", key, resolved, r.status, r.body)
-		}
+		w.fails(w.do(k.Token, "POST", "/v1/buckets/{bucket}/presign", "/v1/buckets/bucket-a/presign", map[string]any{"key": key}), 400, "bad_request")
+	}
+	w.s3OK(w.s3(w.aWrite, "PUT", "/v1/s3/bucket-a/a..b/.hidden", []byte("ok")), 200)
+	ps := w.ok(w.do(k.Token, "POST", "/v1/buckets/{bucket}/presign", "/v1/buckets/bucket-a/presign", map[string]any{"key": "a..b/.hidden"}), 200).json(t)
+	u, _ := url.Parse(ps["url"].(string))
+	if r := w.fetch("GET", u.String(), nil); r.status != 200 || string(r.body) != "ok" {
+		t.Fatalf("presigned GET: %d %s", r.status, r.body)
+	}
+}
+
+// The dashboard's service token names the signed-in person on the S3 API
+// too, so multipart uploads from the dashboard are audited under them.
+func TestS3HonorsTheActorForTheServiceToken(t *testing.T) {
+	e := newEnv(t, nil)
+	req, _ := http.NewRequest("PUT", e.http.URL+"/v1/s3/actor-bucket", nil)
+	req.Header.Set("Authorization", "Bearer "+e.admin)
+	req.Header.Set("X-Lumbung-Actor", "dashboard:ana@example.com")
+	if r := e.send(req); r.status != 200 {
+		t.Fatalf("create: %d %s", r.status, r.body)
+	}
+	entries := e.ok(e.do(e.admin, "GET", "/v1/audit", "/v1/audit", nil), 200).json(t)["data"].([]any)
+	if a := entries[0].(map[string]any); a["action"] != "bucket.create" || a["actor"] != "dashboard:ana@example.com" {
+		t.Fatalf("audit entry %v", a)
 	}
 }

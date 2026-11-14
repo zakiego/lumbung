@@ -485,6 +485,13 @@ func (s *Server) presignURL(ctx context.Context, p auth.Principal, scheme, host,
 	if !engine.ValidKey(key) {
 		return "", time.Time{}, apierr.New(apierr.InvalidKey, "an object key must be 1 to 1024 bytes of UTF-8 without control characters")
 	}
+	for _, seg := range strings.Split(key, "/") {
+		if seg == "." || seg == ".." {
+			// Browsers and fetch resolve . and .. in a URL path, even
+			// percent-encoded, so the URL would name another key.
+			return "", time.Time{}, apierr.New(apierr.BadRequest, "a key with . or .. segments can't be presigned: browsers resolve them in the URL")
+		}
+	}
 	if expires == 0 {
 		expires = time.Hour
 	}

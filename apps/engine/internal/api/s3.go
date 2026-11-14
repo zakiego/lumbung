@@ -125,6 +125,9 @@ func (s *Server) s3Authenticate(req *s3Req) *s3proto.Error {
 				}
 				return s.s3AuthFailed(req, s3proto.Errf("InvalidToken", http.StatusForbidden, "%s", ae.Message))
 			}
+			if a := r.Header.Get("X-Lumbung-Actor"); a != "" && p.Service && actorRe.MatchString(a) {
+				p.Actor = a
+			}
 			req.p, req.bearer = p, true
 			return s.s3RateLimit(req)
 		}

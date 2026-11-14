@@ -112,4 +112,4 @@ Errors are XML with an S3 code, and every response has `x-amz-request-id` (the s
 
 ## Paths and proxies
 
-The engine matches `/v1/s3/` on the raw request path before any other routing, so keys with `//`, `.` or `..` segments arrive as sent, and stay opaque names: they never become file paths. A proxy in front must pass the path and the `Host` header through unchanged, or signatures fail.
+The engine matches `/v1/s3/` on the raw request path before any other routing, so keys with `//`, `.` or `..` segments arrive as sent, and stay opaque names: they never become file paths. Browsers and `fetch` resolve `.` and `..` segments in a URL, even percent-encoded, so presigning refuses a key with such a segment rather than handing out a URL that names another key, and the dashboard uploads such keys in one piece. A proxy in front must pass the path and the `Host` header through unchanged, or signatures fail.
