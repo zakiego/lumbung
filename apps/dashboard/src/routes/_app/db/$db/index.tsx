@@ -1,6 +1,6 @@
-import { Await, createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
+import { Await, Link, createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { BranchMap } from "@/components/app/branch-map"
-import { Connect } from "@/components/app/connect"
+import { SnippetTabs } from "@/components/app/connect"
 import { DbFrame, useDb } from "@/components/app/db-frame"
 import { NewBranchDialog } from "@/components/app/branches"
 import { RequestsChart } from "@/components/app/requests-chart"
@@ -12,6 +12,7 @@ import { createBranch, getSchema, getStats } from "@/fns/databases"
 import { formatBytes, number, timeAgo } from "@/lib/format"
 import { can } from "@/lib/roles"
 import { settle } from "@/lib/settle"
+import { dbSnippets } from "@/lib/snippets"
 import { DEFAULT_WINDOW, WINDOW_LABEL, errorRate, windowSearch } from "@/lib/stats"
 
 export const Route = createFileRoute("/_app/db/$db/")({
@@ -32,6 +33,9 @@ export const Route = createFileRoute("/_app/db/$db/")({
   },
   component: OverviewPage,
 })
+
+// The overview keeps the short list; the Connect tab has every client.
+const OVERVIEW_SNIPPETS = new Set(["sdk", "cli", "curl", "mcp"])
 
 function OverviewPage() {
   const { database, branches, branch, branchParam } = useDb()
@@ -96,9 +100,20 @@ function OverviewPage() {
           <Card className="min-w-0">
             <CardHeader>
               <CardTitle>Connect</CardTitle>
+              <Link
+                to="/db/$db/connect"
+                params={{ db: database.name }}
+                search={{ branch: branchParam }}
+                className="group/link inline-flex items-center gap-1 rounded-sm text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground hover:duration-0"
+              >
+                View all
+                <span aria-hidden="true" className="transition-transform duration-100 ease-out-quad motion-safe:group-hover/link:translate-x-0.5">
+                  →
+                </span>
+              </Link>
             </CardHeader>
             <CardContent className="pt-2">
-              <Connect url={connect.engineUrl} db={database.name} branch={branchParam} />
+              <SnippetTabs label="Connect with" snippets={dbSnippets({ url: connect.engineUrl, db: database.name, branch, pinBranch: !!branchParam }).filter((s) => OVERVIEW_SNIPPETS.has(s.value))} />
             </CardContent>
           </Card>
         </div>

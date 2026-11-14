@@ -2,6 +2,7 @@
 import type { BucketOut, ObjectOut } from "@lumbung/client"
 import { createServerFn } from "@tanstack/react-start"
 import { z } from "zod"
+import { s3Endpoint } from "@/lib/snippets"
 import { config } from "@/server/config"
 import { allPages, call, engineFor } from "@/server/engine"
 import { requireCan } from "@/server/session"
@@ -28,7 +29,7 @@ export const getBucketPage = createServerFn({ method: "GET" })
         e.buckets.get(data.bucket),
         e.bucket(data.bucket).list({ prefix: data.prefix, delimiter: "/", limit: 200, cursor: data.cursor }),
       ])
-      return { bucket, objects: page.objects, prefixes: page.prefixes, nextCursor: page.nextCursor, s3Endpoint: `${config().publicEngineUrl}/v1/s3` }
+      return { bucket, objects: page.objects, prefixes: page.prefixes, nextCursor: page.nextCursor, s3Endpoint: s3Endpoint(config().publicEngineUrl) }
     })
   })
 
@@ -36,7 +37,15 @@ export const getBucket = createServerFn({ method: "GET" })
   .validator(z.object({ bucket: ref }))
   .handler(async ({ data }): Promise<{ bucket: BucketOut; s3Endpoint: string }> => {
     const viewer = await requireCan("admin")
-    return call(async () => ({ bucket: await engineFor(viewer).buckets.get(data.bucket), s3Endpoint: `${config().publicEngineUrl}/v1/s3` }))
+    return call(async () => ({ bucket: await engineFor(viewer).buckets.get(data.bucket), s3Endpoint: s3Endpoint(config().publicEngineUrl) }))
+  })
+
+// What the Connect page shows: the bucket and the public engine URL. Tokens never leave the server.
+export const getBucketConnect = createServerFn({ method: "GET" })
+  .validator(z.object({ bucket: ref }))
+  .handler(async ({ data }): Promise<{ bucket: BucketOut; engineUrl: string }> => {
+    const viewer = await requireCan("read")
+    return call(async () => ({ bucket: await engineFor(viewer).buckets.get(data.bucket), engineUrl: config().publicEngineUrl }))
   })
 
 export const createBucket = createServerFn({ method: "POST" })

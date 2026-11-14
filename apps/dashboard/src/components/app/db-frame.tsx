@@ -7,6 +7,7 @@ import {
   LayoutGridIcon,
   type LucideIcon,
   NetworkIcon,
+  PlugIcon,
   SettingsIcon,
   TableIcon,
   TerminalIcon,
@@ -21,7 +22,7 @@ import { CONTAINER, PageBody, PageHeader } from "./shell"
 
 const dbRoute = getRouteApi("/_app/db/$db")
 
-export type DbSection = "overview" | "data" | "sql" | "schema" | "branches" | "snapshots" | "settings"
+export type DbSection = "overview" | "data" | "sql" | "schema" | "branches" | "snapshots" | "connect" | "settings"
 
 const SECTIONS: { value: DbSection; label: string; icon: LucideIcon; to: string }[] = [
   { value: "overview", label: "Overview", icon: LayoutGridIcon, to: "/db/$db" },
@@ -30,6 +31,7 @@ const SECTIONS: { value: DbSection; label: string; icon: LucideIcon; to: string 
   { value: "schema", label: "Schema", icon: CodeIcon, to: "/db/$db/schema" },
   { value: "branches", label: "Branches", icon: NetworkIcon, to: "/db/$db/branches" },
   { value: "snapshots", label: "Snapshots", icon: CameraIcon, to: "/db/$db/snapshots" },
+  { value: "connect", label: "Connect", icon: PlugIcon, to: "/db/$db/connect" },
   { value: "settings", label: "Settings", icon: SettingsIcon, to: "/db/$db/settings" },
 ]
 
