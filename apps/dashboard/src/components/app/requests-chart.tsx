@@ -6,7 +6,7 @@ const hour = new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digi
 
 type Row = { at: string; label: string; queries: number; errors: number }
 
-export function RequestsChart({ series }: { series: Point[] }) {
+export function RequestsChart({ series, label }: { series: Point[]; label?: string }) {
   const rows: Row[] = series.map((p) => ({ at: p.at, label: hour.format(new Date(p.at)), queries: p.queries, errors: p.errors }))
   const total = rows.reduce((n, r) => n + r.queries, 0)
   return (
@@ -14,13 +14,16 @@ export function RequestsChart({ series }: { series: Point[] }) {
       <figcaption className="flex items-center gap-4 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span aria-hidden="true" className="size-2 rounded-full bg-chart-1" />
-          Queries
+          Requests
         </span>
         <span className="flex items-center gap-1.5">
           <span aria-hidden="true" className="size-2 rounded-full bg-destructive" />
           Errors
         </span>
-        <span className="sr-only">{number.format(total)} queries in this window</span>
+        <span className="sr-only">
+          {label ? `${label}: ` : ""}
+          {number.format(total)} requests
+        </span>
       </figcaption>
       <div aria-hidden="true" className="h-52 w-full text-muted-foreground">
         <ResponsiveContainer width="100%" height="100%">
@@ -51,7 +54,7 @@ function ChartTip({ active, payload }: { active?: boolean; payload?: { payload: 
     <div className="rounded-lg border bg-background px-2.5 py-2 text-xs shadow-lg shadow-black/10 dark:shadow-black/50">
       <div className="mb-1 font-[510] text-foreground">{row.label}</div>
       <div className="flex justify-between gap-6 text-muted-foreground">
-        Queries <span className="text-foreground tabular-nums">{number.format(row.queries)}</span>
+        Requests <span className="text-foreground tabular-nums">{number.format(row.queries)}</span>
       </div>
       <div className="flex justify-between gap-6 text-muted-foreground">
         Errors <span className="text-foreground tabular-nums">{number.format(row.errors)}</span>
