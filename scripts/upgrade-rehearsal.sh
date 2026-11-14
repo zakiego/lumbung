@@ -8,20 +8,26 @@
 # 1. Builds lumbungd from before workspaces (meta.db version 5) and fills
 #    a data folder the way our instance looks: databases testing and palui,
 #    a public bucket photos, a bucket palui-files, an instance admin token,
-#    a grants token for Palui, and the dashboard's service token.
+#    a grants token for Palui, a token for the testing database, a token
+#    for Palui's bucket, and the dashboard's service token.
 # 2. Starts this checkout's lumbungd on the same data folder (migration 6)
 #    and checks that nothing noticed: every token, the public link, MCP.
 # 3. Walks the steps in ops/README.md: a workspace for Palui, its token,
 #    the two moves, and what each token can reach afterwards.
 # 4. Backs the upgraded instance up, restores it into an empty folder, and
-#    runs ops/restore-check.py on the restored engine.
+#    runs ops/restore-check.py on the restored engine. Then takes a
+#    workspace away from the restored copy and checks the drill fails.
+#
+# Not covered: rolling back, the lumbung CLI the written steps use (this
+# goes through curl), a move refused by a workspace limit, and the
+# dashboard's own upgrade.
 #
 # Everything lives in a temp folder and on free local ports, and is removed
 # at the end. Prints PASS or FAIL as the last line.
 set -euo pipefail
 
 root="$(git rev-parse --show-toplevel)"
-# The last commit before migration 6.
+# A commit from before migration 6. Step 1 checks it really is at version 5.
 old_ref="${REHEARSAL_OLD_REF:-370cdd9}"
 work="$(mktemp -d "${TMPDIR:-/tmp}/lumbung-rehearsal.XXXXXX")"
 chmod 700 "$work"
@@ -40,6 +46,8 @@ finish() {
   if [ "$status" -eq 0 ]; then echo "PASS"; else echo "FAIL"; fi
 }
 trap finish EXIT
+# A run that is interrupted has not passed.
+trap 'exit 130' INT TERM HUP
 
 free_port() { python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'; }
 
@@ -125,10 +133,13 @@ put() { curl -sS -f -m 60 -X PUT "$base/v1/buckets/$1/object?key=$2" -H "Authori
 put photos cat.txt "a very good cat"
 put palui-files memory.txt "what Palui remembers"
 grants="$(api "$admin" POST /v1/tokens '{"name":"palui","grants":[{"database":"palui","access":"write"},{"bucket":"palui-files","access":"write"}]}' | field token)"
+# Two tokens a move must tell apart: one for a database that stays, one for the bucket that moves.
+stays="$(api "$admin" POST /v1/tokens '{"name":"testing","database":"testing","access":"write"}' | field token)"
+files="$(api "$admin" POST /v1/tokens '{"name":"files","bucket":"palui-files","access":"read"}' | field token)"
 want "$(api "$grants" GET /v1/databases | names)" "palui" "the grants token's databases before the upgrade"
 want "$(curl -s -m 10 "$base/v1/s3/photos/cat.txt")" "a very good cat" "the public link before the upgrade"
 stop_last
-ok "an instance at meta version 5: testing, palui, photos (public), palui-files, three kinds of token"
+ok "an instance at meta version 5: testing, palui, photos (public), palui-files, five kinds of token"
 
 # --- 2. deploy: the new engine on the same data --------------------------------
 start "$work/lumbungd-new" "$data" "$port"
@@ -146,9 +157,13 @@ want "$(api "$grants" POST /v1/databases/palui/query '{"sql":"SELECT body FROM n
 want "$(curl -sS -f -m 10 "$base/v1/buckets/palui-files/object?key=memory.txt" -H "Authorization: Bearer $grants")" "what Palui remembers" "Palui's file"
 want "$(status "$grants" GET /v1/databases/testing/branches)" "404" "the grants token on another database"
 api "$grants" POST /v1/databases/palui/query '{"sql":"INSERT INTO notes (body) VALUES ('"'"'written after the upgrade'"'"')"}' >/dev/null
-mcp "$grants" /mcp list_databases '{}' | grep -q '"palui' || die "MCP list_databases with the grants token doesn't name palui"
-mcp "$grants" /mcp list_databases '{}' | grep -q 'testing' && die "MCP list_databases with the grants token names testing"
-ok "Palui's grants token still reads, writes and uses MCP, and still reaches nothing else"
+# One answer, checked both ways, so a failed call can't pass for "doesn't name testing".
+listed="$(mcp "$grants" /mcp list_databases '{}')"
+grep -q '"palui' <<<"$listed" || die "MCP list_databases with the grants token doesn't name palui: $listed"
+grep -q 'testing' <<<"$listed" && die "MCP list_databases with the grants token names testing"
+want "$(api "$stays" POST /v1/databases/testing/query '{"sql":"SELECT body FROM notes"}' | rows)" '[["kept across the upgrade"]]' "the database token's rows"
+want "$(curl -sS -f -m 10 "$base/v1/buckets/palui-files/object?key=memory.txt" -H "Authorization: Bearer $files")" "what Palui remembers" "the bucket token's file"
+ok "Palui's grants token still reads, writes and uses MCP, and each narrower token still reaches its own thing and nothing else"
 
 want "$(curl -s -m 10 "$base/v1/s3/photos/cat.txt")" "a very good cat" "the public link after the upgrade"
 want "$(curl -s -o /dev/null -w '%{http_code}' -m 10 "$base/v1/s3/palui-files/memory.txt")" "403" "an anonymous read of a private bucket"
@@ -157,22 +172,32 @@ ok "the public link to photos still opens, and a private bucket is still closed"
 # --- 3. Palui's own workspace (ops/README.md, steps 3 to 6) --------------------
 api "$admin" POST /v1/workspaces '{"name":"palui"}' >/dev/null
 token="$(api "$admin" POST /v1/workspaces/palui/tokens '{"name":"palui","access":"admin"}' | field token)"
-want "$(api "$token" GET /v1/databases | names)" "" "the new token before the move"
+want "$(status "$token" GET /v1/databases)" "200" "the new token before the move"
+want "$(api "$token" GET /v1/databases | names)" "" "the new token's databases before the move"
 ok "a workspace for Palui and its admin token, made before anything moves"
 
 api "$admin" POST /v1/databases/palui/move '{"workspace":"palui"}' >/dev/null
-want "$(status "$grants" GET /v1/databases)" "401" "the grants token after the first move"
+want "$(status "$grants" GET /v1/databases)" "401" "the grants token after the database move"
+# A move revokes what reached the thing that moved, and nothing else.
+want "$(status "$stays" GET /v1/databases)" "200" "the testing database's token after the database move"
+want "$(status "$files" GET "/v1/buckets/palui-files/objects")" "200" "the bucket's token after the database move"
 api "$admin" POST /v1/buckets/palui-files/move '{"workspace":"palui"}' >/dev/null
+want "$(status "$files" GET "/v1/buckets/palui-files/objects")" "401" "the bucket's token after the bucket move"
+want "$(status "$stays" GET /v1/databases)" "200" "the testing database's token after the bucket move"
+want "$(status "$admin" GET /v1/databases)" "200" "the instance token after the moves"
+want "$(status "$service" GET /v1/databases)" "200" "the service token after the moves"
 want "$(api "$admin" GET /v1/databases | names)" "testing" "the default workspace's databases after the moves"
 want "$(api "$admin" GET /v1/buckets | names)" "photos" "the default workspace's buckets after the moves"
-ok "the moves revoke the old grants token and leave testing and photos where they were"
+ok "each move revokes the tokens that reached what moved, and only those"
 
 want "$(api "$token" GET /v1/databases | names)" "palui" "the workspace token's databases"
 want "$(api "$token" GET /v1/buckets | names)" "palui-files" "the workspace token's buckets"
 want "$(api "$token" GET /v1/workspaces | names)" "palui" "the workspaces the token can see"
 want "$(api "$token" POST /v1/databases/palui/query '{"sql":"SELECT body FROM notes ORDER BY id"}' | rows)" '[["kept across the upgrade"], ["written after the upgrade"]]' "Palui's rows after the move"
 want "$(curl -sS -f -m 10 "$base/v1/buckets/palui-files/object?key=memory.txt" -H "Authorization: Bearer $token")" "what Palui remembers" "Palui's file after the move"
-mcp "$token" /mcp list_databases '{}' | grep -q '"palui' || die "MCP list_databases with the new token doesn't name palui"
+listed="$(mcp "$token" /mcp list_databases '{}')"
+grep -q '"palui' <<<"$listed" || die "MCP list_databases with the new token doesn't name palui: $listed"
+grep -q 'testing' <<<"$listed" && die "MCP list_databases with the new token names testing"
 ok "the new token reaches Palui's rows and file on the same URLs, MCP included"
 
 api "$token" POST /v1/databases '{"name":"scratch"}' >/dev/null
@@ -189,7 +214,6 @@ want "$(status "$token" GET /v1/workspaces/no-such-workspace/databases)" "404" "
 want "$(status "$token" GET /v1/instance/tokens)" "403" "the new token on the instance's tokens"
 want "$(status "$token" POST /v1/workspaces '{"name":"more"}')" "403" "the new token making a workspace"
 want "$(status "$token" PATCH /v1/workspaces/palui '{"max_databases":0}')" "403" "the new token changing its own limits"
-mcp "$token" /mcp list_databases '{}' | grep -q 'testing' && die "MCP list_databases with the new token names testing"
 want "$(api "$admin" GET /v1/workspaces/palui/databases | names)" "palui" "the instance token inside Palui's workspace"
 mcp "$admin" /v1/workspaces/palui/mcp list_databases '{}' | grep -q '"palui' || die "MCP at the workspace URL with the instance token doesn't name palui"
 want "$(curl -s -m 10 "$base/v1/s3/photos/cat.txt")" "a very good cat" "the public link after the moves"
@@ -212,5 +236,23 @@ grep -q "database default/testing (main): ok" "$work/check.log" || die "the rest
 want "$(api "$token" GET /v1/databases | names)" "palui" "the workspace token on the restored engine"
 want "$(status "$grants" GET /v1/databases)" "401" "the revoked grants token on the restored engine"
 ok "a backup of the upgraded instance restores with both workspaces, their data and their tokens"
+
+# The drill must notice a workspace that didn't come back.
+stop_last
+python3 - "$restored/meta.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("UPDATE workspaces SET deleted_at = '2026-01-01T00:00:00Z', purge_after = '2999-01-01T00:00:00Z' WHERE name = 'palui'")
+db.commit()
+PY
+start "$work/lumbungd-new" "$restored" "$port2"
+if python3 "$root/ops/restore-check.py" "$base" "$restored/secrets/service-token" "$backup" >"$work/check-missing.log" 2>&1; then
+  cat "$work/check-missing.log" >&2
+  die "the restore check passed with Palui's workspace gone"
+fi
+for lost in "workspace palui" "database palui/palui" "bucket palui/palui-files"; do
+  grep -q "MISSING $lost" "$work/check-missing.log" || { cat "$work/check-missing.log" >&2; die "the restore check didn't name the missing $lost"; }
+done
+ok "the restore check fails, naming each one, when a workspace from the backup isn't there"
 
 log "$steps steps passed"
