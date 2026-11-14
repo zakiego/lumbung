@@ -1,8 +1,10 @@
 import type { BucketOut, ObjectOut } from "@lumbung/client"
 import { Link, useRouter } from "@tanstack/react-router"
-import { ArchiveIcon, ArrowDownIcon, ArrowUpIcon, DownloadIcon, FileIcon, FolderIcon, GlobeIcon, Trash2Icon, UploadIcon } from "lucide-react"
+import { ArchiveIcon, ArrowDownIcon, ArrowUpIcon, DownloadIcon, FileIcon, FolderIcon, GlobeIcon, GroupIcon, SearchIcon, SearchXIcon, Trash2Icon, UploadIcon } from "lucide-react"
 import { type ReactNode, useRef, useState } from "react"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { Field, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import { Menu, MenuContent, MenuGroup, MenuGroupLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu"
 import { Badge, Empty, Table, TableCell, TableHead, TableRow } from "@/components/ui/surface"
 import { toast } from "@/components/ui/toast"
@@ -243,9 +245,63 @@ export function sortFolders(prefixes: string[], sort: ObjectSort): string[] {
   return sort.key === "name" && sort.dir === "desc" ? sorted.reverse() : sorted
 }
 
+// Search and grouping work on what is loaded, like the sort.
+export function matchesQuery(name: string, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  return !q || name.toLowerCase().includes(q)
+}
+
+export const OBJECT_GROUP_KEYS = ["none", "type", "modified"] as const
+export type ObjectGroup = (typeof OBJECT_GROUP_KEYS)[number]
+const GROUP_LABEL: Record<ObjectGroup, string> = { none: "None", type: "Type", modified: "Modified" }
+
+const TYPE_GROUPS = ["Images", "Videos", "Audio", "Documents", "Archives", "Other"] as const
+const DOCUMENT_TYPE = /^(text\/|application\/(pdf|json|xml|yaml|x-yaml|rtf|msword|vnd\.ms-|vnd\.openxmlformats|vnd\.oasis\.opendocument))/
+const ARCHIVE_TYPE = /^application\/(zip|gzip|x-gzip|x-tar|x-7z-compressed|x-rar|vnd\.rar|x-bzip2|x-xz|zstd)/
+
+export function typeGroup(contentType: string): (typeof TYPE_GROUPS)[number] {
+  const t = contentType.toLowerCase()
+  if (t.startsWith("image/")) return "Images"
+  if (t.startsWith("video/")) return "Videos"
+  if (t.startsWith("audio/")) return "Audio"
+  if (DOCUMENT_TYPE.test(t)) return "Documents"
+  if (ARCHIVE_TYPE.test(t)) return "Archives"
+  return "Other"
+}
+
+const DATE_GROUPS = ["Today", "Yesterday", "Previous 7 days", "Previous 30 days", "Older"] as const
+const DAY = 24 * 60 * 60 * 1000
+
+// Days count from local midnight, so "Yesterday" means the calendar day.
+export function dateGroup(lastModified: string, now: Date): (typeof DATE_GROUPS)[number] {
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const t = Date.parse(lastModified)
+  if (t >= midnight) return "Today"
+  if (t >= midnight - DAY) return "Yesterday"
+  if (t >= midnight - 7 * DAY) return "Previous 7 days"
+  if (t >= midnight - 30 * DAY) return "Previous 30 days"
+  return "Older"
+}
+
+export type ObjectSection = { label: string; objects: ObjectOut[] }
+
+// Splits sorted objects into labeled sections, dropping empty ones. Dates run
+// newest first unless the list is sorted oldest first.
+export function groupObjects(objects: ObjectOut[], group: ObjectGroup, sort: ObjectSort, now = new Date()): ObjectSection[] {
+  const sorted = sortObjects(objects, sort)
+  if (group === "none") return [{ label: "", objects: sorted }]
+  const labels: readonly string[] = group === "type" ? TYPE_GROUPS : sort.key === "modified" && sort.dir === "asc" ? [...DATE_GROUPS].reverse() : DATE_GROUPS
+  const of = (o: ObjectOut) => (group === "type" ? typeGroup(o.content_type) : dateGroup(o.last_modified, now))
+  return labels.map((label) => ({ label, objects: sorted.filter((o) => of(o) === label) })).filter((s) => s.objects.length > 0)
+}
+
 // The URL leaves the default out, so a plain bucket link stays plain.
 export function sortSearch(sort: ObjectSort): { sort?: ObjectSortKey; dir?: SortDir } {
   return sort.key === DEFAULT_OBJECT_SORT.key && sort.dir === DEFAULT_OBJECT_SORT.dir ? {} : { sort: sort.key, dir: sort.dir }
+}
+
+export function groupSearch(group: ObjectGroup): { group?: ObjectGroup } {
+  return group === "none" ? {} : { group }
 }
 
 function SortIcon({ dir, className }: { dir: SortDir; className?: string }) {
@@ -324,6 +380,41 @@ export function ObjectSortMenu({ sort, onSortChange, className }: { sort: Object
   )
 }
 
+export function ObjectGroupMenu({ group, onGroupChange, className }: { group: ObjectGroup; onGroupChange: (group: ObjectGroup) => void; className?: string }) {
+  return (
+    <Menu>
+      <MenuTrigger aria-label={group === "none" ? "Group" : `Group by ${GROUP_LABEL[group]}`} className={buttonVariants({ variant: "ghost", size: "sm", className })}>
+        <GroupIcon aria-hidden="true" />
+        {group === "none" ? "Group" : GROUP_LABEL[group]}
+      </MenuTrigger>
+      <MenuContent align="end">
+        <MenuGroup>
+          <MenuGroupLabel>Group by</MenuGroupLabel>
+          <MenuRadioGroup value={group} onValueChange={(v) => onGroupChange(v as ObjectGroup)}>
+            {OBJECT_GROUP_KEYS.map((k) => (
+              <MenuRadioItem key={k} value={k}>
+                {GROUP_LABEL[k]}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </MenuGroup>
+      </MenuContent>
+    </Menu>
+  )
+}
+
+export function ObjectSearch({ value, onValueChange, className }: { value: string; onValueChange: (value: string) => void; className?: string }) {
+  return (
+    <Field className={className}>
+      <FieldLabel className="sr-only">Search this folder</FieldLabel>
+      <div className="relative">
+        <SearchIcon aria-hidden="true" className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-faint" />
+        <Input type="search" value={value} onValueChange={onValueChange} placeholder="Search by name" maxLength={200} className="pl-8" autoComplete="off" spellCheck={false} />
+      </div>
+    </Field>
+  )
+}
+
 export function ObjectTable({
   bucket,
   prefix,
@@ -333,6 +424,8 @@ export function ObjectTable({
   onDelete,
   sort = DEFAULT_OBJECT_SORT,
   onSortChange,
+  query = "",
+  group = "none",
   footer,
 }: {
   bucket: string
@@ -343,18 +436,36 @@ export function ObjectTable({
   onDelete: (key: string) => Promise<unknown>
   sort?: ObjectSort
   onSortChange?: (sort: ObjectSort) => void
+  query?: string
+  group?: ObjectGroup
   footer?: ReactNode
 }) {
   // A key equal to the folder itself is a folder marker some S3 tools make:
   // it has no name of its own here, so it isn't listed.
-  const rows: Row[] = [
-    ...sortFolders(prefixes, sort).map((p): Row => ({ kind: "folder", prefix: p })),
-    ...sortObjects(
-      objects.filter((o) => o.key !== prefix),
-      sort,
-    ).map((o): Row => ({ kind: "object", object: o })),
-  ]
-  if (rows.length === 0) {
+  const listed = objects.filter((o) => o.key !== prefix)
+  const name = (key: string) => key.slice(prefix.length)
+  const folders = sortFolders(prefixes, sort)
+    .filter((p) => matchesQuery(name(p), query))
+    .map((p): Row => ({ kind: "folder", prefix: p }))
+  const files = groupObjects(
+    listed.filter((o) => matchesQuery(name(o.key), query)),
+    group,
+    sort,
+  ).map((g) => ({ label: g.label, rows: g.objects.map((o): Row => ({ kind: "object", object: o })) }))
+  // Ungrouped, folders and files share one body. Grouped, folders get their own.
+  const sections =
+    group === "none"
+      ? [{ label: "", rows: [...folders, ...(files[0]?.rows ?? [])] }]
+      : [...(folders.length ? [{ label: "Folders", rows: folders }] : []), ...files]
+  if (sections.every((g) => g.rows.length === 0)) {
+    if (query.trim() && (listed.length > 0 || prefixes.length > 0)) {
+      return (
+        <>
+          <Empty icon={<SearchXIcon />} title="No matches" description={`Nothing loaded here has "${query.trim()}" in its name.`} />
+          {footer}
+        </>
+      )
+    }
     return <Empty icon={<FolderIcon />} title={prefix ? "This folder is empty" : "No objects yet"} description="Upload files here, or put them with an S3 client, the CLI or the SDK." />
   }
   return (
@@ -371,72 +482,81 @@ export function ObjectTable({
             </TableHead>
           </tr>
         </thead>
-        <tbody>
-          {rows.map((r) =>
-            r.kind === "folder" ? (
-              <TableRow key={`p:${r.prefix}`} className="relative">
-                <TableCell className="max-w-0 w-1/2">
-                  <TruncatedTip text={r.prefix.slice(prefix.length)}>
-                    <Link
-                      to="/buckets/$bucket"
-                      params={{ bucket }}
-                      search={{ prefix: r.prefix, ...sortSearch(sort) }}
-                      className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0"
-                    >
-                      <FolderIcon aria-hidden="true" className="size-4 shrink-0 text-faint" />
-                      <span data-truncate className="truncate">
-                        {r.prefix.slice(prefix.length)}
+        {sections.map((section) => (
+          <tbody key={section.label || "all"}>
+            {section.label && (
+              <tr>
+                <TableHead colSpan={5} scope="rowgroup" className="h-auto pt-5 pb-1.5">
+                  {section.label} <span className="font-normal text-faint tabular-nums">{number.format(section.rows.length)}</span>
+                </TableHead>
+              </tr>
+            )}
+            {section.rows.map((r) =>
+              r.kind === "folder" ? (
+                <TableRow key={`p:${r.prefix}`} className="relative">
+                  <TableCell className="max-w-0 w-1/2">
+                    <TruncatedTip text={r.prefix.slice(prefix.length)}>
+                      <Link
+                        to="/buckets/$bucket"
+                        params={{ bucket }}
+                        search={{ prefix: r.prefix, ...sortSearch(sort), ...groupSearch(group) }}
+                        className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0"
+                      >
+                        <FolderIcon aria-hidden="true" className="size-4 shrink-0 text-faint" />
+                        <span data-truncate className="truncate">
+                          {r.prefix.slice(prefix.length)}
+                        </span>
+                      </Link>
+                    </TruncatedTip>
+                  </TableCell>
+                  <TableCell />
+                  <TableCell className="hidden md:table-cell" />
+                  <TableCell className="hidden sm:table-cell" />
+                  <TableCell />
+                </TableRow>
+              ) : (
+                <TableRow key={`o:${r.object.key}`}>
+                  <TableCell className="max-w-0 w-1/2">
+                    <span className="flex min-w-0 items-center gap-2 font-mono">
+                      <FileIcon aria-hidden="true" className="size-4 shrink-0 text-faint" />
+                      <span className="truncate" title={r.object.key.slice(prefix.length)}>
+                        {r.object.key.slice(prefix.length)}
                       </span>
-                    </Link>
-                  </TruncatedTip>
-                </TableCell>
-                <TableCell />
-                <TableCell className="hidden md:table-cell" />
-                <TableCell className="hidden sm:table-cell" />
-                <TableCell />
-              </TableRow>
-            ) : (
-              <TableRow key={`o:${r.object.key}`}>
-                <TableCell className="max-w-0 w-1/2">
-                  <span className="flex min-w-0 items-center gap-2 font-mono">
-                    <FileIcon aria-hidden="true" className="size-4 shrink-0 text-faint" />
-                    <span className="truncate" title={r.object.key.slice(prefix.length)}>
-                      {r.object.key.slice(prefix.length)}
                     </span>
-                  </span>
-                </TableCell>
-                <TableCell className="text-right whitespace-nowrap text-muted-foreground tabular-nums">{formatBytes(r.object.size)}</TableCell>
-                <TableCell className="hidden max-w-40 truncate text-muted-foreground md:table-cell">{r.object.content_type}</TableCell>
-                <TableCell className="hidden text-right whitespace-nowrap text-muted-foreground sm:table-cell">
-                  <span suppressHydrationWarning>{timeAgo(r.object.last_modified)}</span>
-                </TableCell>
-                <TableCell className="w-0 whitespace-nowrap text-right">
-                  <div className="flex justify-end gap-1">
-                    <a
-                      href={objectURL(bucket, r.object.key)}
-                      download
-                      aria-label={`Download ${r.object.key}`}
-                      className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
-                    >
-                      <DownloadIcon aria-hidden="true" />
-                    </a>
-                    {canWrite && (
-                      <Confirm
-                        trigger={<Trash2Icon aria-hidden="true" />}
-                        triggerStyle={{ size: "icon-sm", label: `Delete ${r.object.key}` }}
-                        title={`Delete ${r.object.key.slice(prefix.length)}?`}
-                        description="There is no versioning or trash for objects, so this can't be undone."
-                        actionLabel="Delete object"
-                        agentConfirm={`Deletes the object ${r.object.key} from ${bucket} for good`}
-                        onConfirm={() => onDelete(r.object.key)}
-                      />
-                    )}
-                  </div>
-                </TableCell>
-              </TableRow>
-            ),
-          )}
-        </tbody>
+                  </TableCell>
+                  <TableCell className="text-right whitespace-nowrap text-muted-foreground tabular-nums">{formatBytes(r.object.size)}</TableCell>
+                  <TableCell className="hidden max-w-40 truncate text-muted-foreground md:table-cell">{r.object.content_type}</TableCell>
+                  <TableCell className="hidden text-right whitespace-nowrap text-muted-foreground sm:table-cell">
+                    <span suppressHydrationWarning>{timeAgo(r.object.last_modified)}</span>
+                  </TableCell>
+                  <TableCell className="w-0 whitespace-nowrap text-right">
+                    <div className="flex justify-end gap-1">
+                      <a
+                        href={objectURL(bucket, r.object.key)}
+                        download
+                        aria-label={`Download ${r.object.key}`}
+                        className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+                      >
+                        <DownloadIcon aria-hidden="true" />
+                      </a>
+                      {canWrite && (
+                        <Confirm
+                          trigger={<Trash2Icon aria-hidden="true" />}
+                          triggerStyle={{ size: "icon-sm", label: `Delete ${r.object.key}` }}
+                          title={`Delete ${r.object.key.slice(prefix.length)}?`}
+                          description="There is no versioning or trash for objects, so this can't be undone."
+                          actionLabel="Delete object"
+                          agentConfirm={`Deletes the object ${r.object.key} from ${bucket} for good`}
+                          onConfirm={() => onDelete(r.object.key)}
+                        />
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ),
+            )}
+          </tbody>
+        ))}
       </Table>
       {footer}
     </>

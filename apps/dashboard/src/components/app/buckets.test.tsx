@@ -7,7 +7,11 @@ import { expect, test } from "vitest"
 import {
   BucketTable,
   DEFAULT_OBJECT_SORT,
+  dateGroup,
   defaultSortDir,
+  groupObjects,
+  groupSearch,
+  matchesQuery,
   type ObjectSort,
   ObjectSortMenu,
   ObjectTable,
@@ -17,6 +21,7 @@ import {
   sortFolders,
   sortObjects,
   sortSearch,
+  typeGroup,
   uploadFile,
 } from "./buckets"
 
@@ -26,7 +31,7 @@ const noop = async () => {}
 async function render(ui: ReactNode) {
   const router = createRouter({ routeTree: createRootRoute({ component: () => <>{ui}</> }), history: createMemoryHistory({ initialEntries: ["/"] }) })
   const out = rtlRender(<RouterProvider router={router} />)
-  await screen.findAllByRole("table").catch(() => screen.findByText(/No objects yet|This folder is empty/))
+  await screen.findAllByRole("table").catch(() => screen.findByText(/No objects yet|This folder is empty|No matches/))
   return out
 }
 const at = "2026-11-14T08:00:00Z"
@@ -203,4 +208,57 @@ test("object table: without onSortChange the headers are plain text", async () =
   await render(<ObjectTable bucket="docs" prefix="" objects={files} prefixes={[]} canWrite onDelete={noop} />)
   expect(screen.queryByRole("button", { name: "Size" })).toBeNull()
   expect(order()).toEqual(["b.txt", "IMG_9.jpeg", "IMG_10.png"])
+})
+
+test("search: a name match ignores case and surrounding spaces", () => {
+  expect(matchesQuery("IMG_10.png", "img")).toBe(true)
+  expect(matchesQuery("IMG_10.png", "  10.P ")).toBe(true)
+  expect(matchesQuery("b.txt", "img")).toBe(false)
+  expect(matchesQuery("b.txt", "   ")).toBe(true)
+})
+
+test("group: types fall into families, dates into calendar days", () => {
+  expect(typeGroup("image/png")).toBe("Images")
+  expect(typeGroup("Video/MP4")).toBe("Videos")
+  expect(typeGroup("application/pdf")).toBe("Documents")
+  expect(typeGroup("text/plain; charset=utf-8")).toBe("Documents")
+  expect(typeGroup("application/zip")).toBe("Archives")
+  expect(typeGroup("application/octet-stream")).toBe("Other")
+  const now = new Date(2026, 10, 14, 9, 0)
+  expect(dateGroup(new Date(2026, 10, 14, 0, 30).toISOString(), now)).toBe("Today")
+  expect(dateGroup(new Date(2026, 10, 13, 23, 0).toISOString(), now)).toBe("Yesterday")
+  expect(dateGroup(new Date(2026, 10, 9).toISOString(), now)).toBe("Previous 7 days")
+  expect(dateGroup(new Date(2026, 9, 20).toISOString(), now)).toBe("Previous 30 days")
+  expect(dateGroup(new Date(2025, 0, 1).toISOString(), now)).toBe("Older")
+  expect(groupSearch("none")).toEqual({})
+  expect(groupSearch("type")).toEqual({ group: "type" })
+})
+
+test("group: sections keep the sort inside, drop empty ones, flip dates for oldest first", () => {
+  const now = new Date("2026-11-14T12:00:00Z")
+  const byType = groupObjects(files, "type", DEFAULT_OBJECT_SORT, now)
+  expect(byType.map((g) => [g.label, g.objects.map((o) => o.key)])).toEqual([
+    ["Images", ["IMG_9.jpeg", "IMG_10.png"]],
+    ["Documents", ["b.txt"]],
+  ])
+  const newest = groupObjects(files, "modified", { key: "modified", dir: "desc" }, now).map((g) => g.objects[0]!.key)
+  const oldest = groupObjects(files, "modified", { key: "modified", dir: "asc" }, now).map((g) => g.objects[0]!.key)
+  expect(oldest).toEqual([...newest].reverse())
+  expect(groupObjects(files, "none", DEFAULT_OBJECT_SORT)).toHaveLength(1)
+})
+
+test("object table: search filters folders and files, a group adds labeled sections", async () => {
+  const { unmount } = await render(<ObjectTable bucket="docs" prefix="" objects={files} prefixes={["img-raw/", "z/"]} canWrite onDelete={noop} query="img" />)
+  expect(order()).toEqual(["img-raw/", "IMG_9.jpeg", "IMG_10.png"])
+  unmount()
+  await render(<ObjectTable bucket="docs" prefix="" objects={files} prefixes={["z/"]} canWrite onDelete={noop} group="type" />)
+  expect(screen.getByRole("rowheader", { name: /Folders/ })).toBeTruthy()
+  expect(screen.getByRole("rowheader", { name: /Images/ })).toBeTruthy()
+  expect(screen.getByRole("rowheader", { name: /Documents/ })).toBeTruthy()
+})
+
+test("object table: a search with no hits says so and keeps the footer", async () => {
+  await render(<ObjectTable bucket="docs" prefix="" objects={files} prefixes={[]} canWrite onDelete={noop} query="nope" footer={<button type="button">Load more</button>} />)
+  expect(screen.getByText("No matches")).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Load more" })).toBeTruthy()
 })
