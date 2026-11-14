@@ -18,6 +18,9 @@ describe("isAppPath", () => {
       "/v1/openapi.json",
       "/mcp",
       "/mcp/",
+      "/libsql/app/main/v2",
+      "/libsql/app/main/v2/pipeline",
+      "/libsql/app/pr-42/v3/cursor",
       "/health",
     ]) {
       expect(isAppPath(p), p).toBe(true)
@@ -46,6 +49,8 @@ describe("isAppPath", () => {
       "/v2/databases",
       "/mcp-tools",
       "/mcpx",
+      "/libsqlx",
+      "/libsql-guide",
       "/healthz",
       "/health-check",
       "/healthy",
@@ -59,6 +64,7 @@ describe("isAppPath", () => {
     expect(isAppPath("/docs/app")).toBe(false)
     expect(isAppPath("/docs/v1/databases")).toBe(false)
     expect(isAppPath("/docs/mcp")).toBe(false)
+    expect(isAppPath("/docs/guides/libsql")).toBe(false)
     expect(isAppPath("/docs/health")).toBe(false)
   })
 })

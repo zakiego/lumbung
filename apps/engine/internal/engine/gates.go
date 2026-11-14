@@ -63,14 +63,20 @@ func (g *gate) unshare() {
 	g.mu.Unlock()
 }
 
-// exclusive takes the gate alone, waiting for requests in flight to finish.
+// exclusiveWith takes the gate alone, waiting for requests in flight to
+// finish, and calls before ahead of every attempt. Callers use it to roll
+// back interactive transactions on the branch, including ones that began
+// during a priority break.
 //
 // While it waits it blocks new requests, but only for priorityWindow at a
 // time: if the requests in flight haven't drained by then (a long download
 // or copy holds the gate for minutes), it lets new requests through for a
 // moment and tries again, so a waiting reset can't take the branch offline.
-func (g *gate) exclusive(ctx context.Context) error {
+func (g *gate) exclusiveWith(ctx context.Context, before func()) error {
 	for {
+		if before != nil {
+			before()
+		}
 		if err := g.tryExclusive(ctx, priorityWindow); err == nil {
 			return nil
 		} else if ctx.Err() != nil {

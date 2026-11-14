@@ -48,3 +48,7 @@ Durations use Go syntax (`500ms`, `30s`, `5m`). Sizes are bytes, or a number wit
 | `LUMBUNG_MAX_OPEN_BRANCHES` | integer | `64` | Most branches with open connections at once. The least recently used idle branch is closed to make room. |
 | `LUMBUNG_IDLE_CONN_TIMEOUT` | duration | `5m` | A branch unused this long has its connections closed. |
 | `LUMBUNG_CONN_MAX_MEMORY` | bytes | `128MiB` | Memory ceiling for each SQLite connection. A statement that needs more fails instead of growing the process. |
+| `LUMBUNG_LIBSQL_STREAM_IDLE_TIMEOUT` | duration | `10s` | A libSQL protocol stream with no request for this long is closed, and its open transaction rolled back. |
+| `LUMBUNG_LIBSQL_TX_TIMEOUT` | duration | `60s` | Longest an interactive transaction over the libSQL protocol may stay open, from its BEGIN. Past it the transaction is rolled back and its stream closed. An open write transaction holds the branch's only writer, so other writes wait for it. |
+| `LUMBUNG_LIBSQL_MAX_STREAMS` | integer | `128` | Most open libSQL protocol streams on the instance. Past it new streams fail with `too_many_streams`. |
+| `LUMBUNG_LIBSQL_MAX_STREAMS_PER_TOKEN` | integer | `16` | Most open libSQL protocol streams per token. |

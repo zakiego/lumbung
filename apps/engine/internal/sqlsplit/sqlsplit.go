@@ -90,6 +90,12 @@ func StripComments(s string) string {
 	}
 }
 
+// IsWordByte reports whether c can be part of a bare SQL word (a keyword or
+// an unquoted identifier, ASCII only).
+func IsWordByte(c byte) bool {
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
 // blockClosed reports whether a CREATE TRIGGER statement's body has ended:
 // every BEGIN and CASE outside quotes and comments is matched by an END.
 func blockClosed(stmt string) bool {

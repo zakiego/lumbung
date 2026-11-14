@@ -50,6 +50,7 @@ func newEnv(t *testing.T, mod func(*config.Config)) *env {
 	hs := httptest.NewServer(srv.API.Handler())
 	t.Cleanup(func() {
 		hs.Close()
+		srv.API.Close()
 		_ = srv.Engine.Close()
 	})
 	tok, err := os.ReadFile(filepath.Join(cfg.DataDir, server.ServiceTokenFile))

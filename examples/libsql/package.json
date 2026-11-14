@@ -1,0 +1,19 @@
+{
+  "name": "@lumbung/example-libsql",
+  "private": true,
+  "type": "module",
+  "description": "The libSQL client and Drizzle's libsql driver, unchanged, against a Lumbung branch.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@libsql/client": "0.18.0",
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}

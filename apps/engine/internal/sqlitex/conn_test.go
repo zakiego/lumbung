@@ -181,3 +181,41 @@ func TestReadOnlyConn(t *testing.T) {
 		t.Fatalf("read-only create: got %v", err)
 	}
 }
+
+// Savepoints are allowed only while the engine says so, BEGIN and COMMIT
+// stay denied even then, and Reset turns the allowance off.
+func TestAllowSavepoints(t *testing.T) {
+	c := openUser(t, filepath.Join(t.TempDir(), "a.db"), false)
+	if err := c.Exec("CREATE TABLE t(x)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ExecTrusted("BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	c.AllowSavepoints(true)
+	for _, sql := range []string{"SAVEPOINT a", "INSERT INTO t VALUES (1)", "ROLLBACK TO a", "RELEASE a", "SAVEPOINT b", "INSERT INTO t VALUES (2)", "RELEASE SAVEPOINT b"} {
+		if err := c.Exec(sql); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	for _, sql := range []string{"COMMIT", "ROLLBACK", "END", "BEGIN"} {
+		if _, err := userText(c, sql); !errors.Is(err, sqlite3.AUTH) {
+			t.Errorf("%s with savepoints allowed: got %v, want AUTH", sql, err)
+		}
+	}
+	if c.GetAutocommit() {
+		t.Fatal("a savepoint ended the engine's transaction")
+	}
+	if err := c.ExecTrusted("COMMIT"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := userText(c, "SELECT group_concat(x) FROM t"); got != "2" {
+		t.Fatalf("rows after savepoints: %q", got)
+	}
+	if err := c.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := userText(c, "SAVEPOINT s"); !errors.Is(err, sqlite3.AUTH) {
+		t.Fatalf("savepoint after reset: got %v, want AUTH", err)
+	}
+}

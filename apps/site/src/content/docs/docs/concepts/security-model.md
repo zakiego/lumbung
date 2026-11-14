@@ -14,7 +14,7 @@ One database can never read or write another database's file, `meta.db`, or anyt
 | `ATTACH DATABASE` or `DETACH` | `statement_denied` |
 | `VACUUM` or `VACUUM INTO` | `statement_denied` |
 | `load_extension()` | not available: it isn't compiled in |
-| `BEGIN`, `COMMIT`, `SAVEPOINT` | `statement_denied`; each request runs in its own transaction |
+| `BEGIN`, `COMMIT`, `SAVEPOINT` | `statement_denied`; each request runs in its own transaction. On the [libSQL protocol](/docs/reference/libsql-protocol/) the engine recognizes BEGIN, COMMIT and ROLLBACK and runs its own, and savepoints work inside that transaction |
 | Any temp object: `CREATE TEMP ...` or `CREATE ... temp.name` | `statement_denied`; temp objects would outlive the request on a shared connection |
 | A pragma not on the allowlist below | `statement_denied` |
 | A write with read-only access | `read_only`, refused by SQLite itself |

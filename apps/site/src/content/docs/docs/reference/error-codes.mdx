@@ -57,6 +57,9 @@ Errors come back as `application/problem+json` with a stable `code`. Match on `c
 | `request_timeout` | 408 Request Timeout | The request body took too long to arrive. |
 | `idempotency_mismatch` | 422 Unprocessable Entity | This `Idempotency-Key` was already used for a different request. |
 | `token_not_found` | 404 Not Found | No live token with that id. |
+| `transaction_aborted` | 409 Conflict | The open transaction was rolled back: SQLite ended it after an error, or it hit a limit or the transaction timeout. Send ROLLBACK, then start again. Interactive transactions only. |
+| `invalid_baton` | 400 Bad Request | The baton names no open stream: it was already used, belongs to another token or branch, or the stream was closed or expired and its transaction rolled back. libSQL protocol only. |
+| `too_many_streams` | 429 Too Many Requests | The token or the instance already has the most open libSQL streams allowed. Close streams, or wait for idle ones to expire. |
 | `busy` | 503 Service Unavailable | The branch stayed locked longer than the busy timeout. Retry. |
 | `unavailable` | 503 Service Unavailable | The engine can't serve: for example meta.db is newer than this binary. |
 | `internal` | 500 Internal Server Error | Something failed inside the engine. The log has details. |

@@ -61,7 +61,7 @@ await db.insert(schema.users).values({ email: "ana@example.com", name: "Ana" }).
 const ana = await db.select().from(schema.users).where(eq(schema.users.email, "ana@example.com")).get()
 ```
 
-`db.batch([...])` runs as one Lumbung batch: one transaction, all or nothing. `db.transaction()` isn't supported: every request is already its own transaction, so it fails with a `LumbungError` of code `unsupported` as the cause. Use `db.batch` for statements that must succeed together.
+`db.batch([...])` runs as one Lumbung batch: one transaction, all or nothing. `db.transaction()` isn't supported: every request is already its own transaction, so it fails with a `LumbungError` of code `unsupported` as the cause. Use `db.batch` for statements that must succeed together, or Drizzle's libsql driver, which supports `db.transaction()` (see [Use the libSQL client](/docs/guides/libsql/)).
 
 ## Errors
 

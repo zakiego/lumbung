@@ -12,6 +12,7 @@ import (
 
 	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlitex"
+	"github.com/zakiego/lumbung/apps/engine/internal/sqlsplit"
 	"github.com/zakiego/lumbung/apps/engine/internal/value"
 )
 
@@ -111,19 +112,7 @@ func (e *Engine) BatchWith(ctx context.Context, t Target, access Access, stmts [
 		return nil, apierr.New(apierr.ReadOnly, "a migration needs write access")
 	}
 	var results []*Result
-	err := e.sessionWith(ctx, t, access, e.cfg.StatementTimeout, sessionHooks{
-		beforeBegin: func(conn *sqlitex.Conn) error { return conn.ExecTrusted("PRAGMA foreign_keys = OFF") },
-		beforeCommit: func(conn *sqlitex.Conn) error {
-			n, err := trustedInt(conn, "SELECT count(*) FROM pragma_foreign_key_check")
-			if err != nil {
-				return err
-			}
-			if n > 0 {
-				return apierr.Newf(apierr.ConstraintViolation, "the migration leaves %d rows that break foreign keys; nothing was applied", n)
-			}
-			return nil
-		},
-	}, func(conn *sqlitex.Conn, _ target) error {
+	err := e.sessionWith(ctx, t, access, e.cfg.StatementTimeout, migrationHooks(), func(conn *sqlitex.Conn, _ target) error {
 		var err error
 		results, err = e.runAll(conn, stmts)
 		return err
@@ -156,86 +145,18 @@ func (e *Engine) session(ctx context.Context, t Target, access Access, timeout t
 }
 
 func (e *Engine) sessionWith(ctx context.Context, t Target, access Access, timeout time.Duration, hooks sessionHooks, f func(*sqlitex.Conn, target) error) error {
-	if access != Read && access != Write {
-		return apierr.New(apierr.BadRequest, "unknown access")
-	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	tg, err := e.resolve(ctx, t.Database, t.Branch)
+	tx, err := e.begin(ctx, t, access, hooks)
 	if err != nil {
 		return err
 	}
-	// Share the branch's gate so a reset, delete or import can't swap the
-	// file mid-request, then look the branch up again: it may have been
-	// deleted, or its database trashed, while this request waited.
-	g := e.gates.get(tg.branch.ID)
-	if err := g.share(ctx); err != nil {
-		return apierr.New(apierr.Busy, "timed out waiting for maintenance on the branch")
+	defer tx.release()
+	if err := f(tx.conn, tx.tg); err != nil {
+		_ = tx.conn.ExecTrusted("ROLLBACK")
+		return e.sqlErr(err, tx.grant.quotaLimited)
 	}
-	defer g.unshare()
-	if tg, err = e.resolve(ctx, tg.db.ID, tg.branch.ID); err != nil {
-		return err
-	}
-
-	p := e.acquirePool(tg.branch.ID, tg.path)
-	defer e.releasePool(p)
-	var conn *sqlitex.Conn
-	if access == Write {
-		conn, err = p.acquireWriter(ctx, false)
-	} else {
-		conn, err = p.acquireReader(ctx)
-	}
-	if err != nil {
-		return mapAcquire(err)
-	}
-	defer func() {
-		if access == Write {
-			p.releaseWriter(conn)
-		} else {
-			p.releaseReader(conn)
-		}
-	}()
-
-	var grant sizeGrant
-	if access == Write {
-		grant, err = e.applySizeLimit(conn)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			e.truncateWAL(conn, tg.path)
-			e.finishWrite(tg.branch.ID, tg.path, grant)
-		}()
-	}
-
-	conn.SetInterrupt(ctx)
-	begin := "BEGIN"
-	if access == Write {
-		begin = "BEGIN IMMEDIATE"
-	}
-	if hooks.beforeBegin != nil {
-		if err := hooks.beforeBegin(conn); err != nil {
-			return e.sqlErr(err, grant.quotaLimited)
-		}
-	}
-	if err := conn.ExecTrusted(begin); err != nil {
-		return e.sqlErr(err, grant.quotaLimited)
-	}
-	if err := f(conn, tg); err != nil {
-		_ = conn.ExecTrusted("ROLLBACK")
-		return e.sqlErr(err, grant.quotaLimited)
-	}
-	if hooks.beforeCommit != nil {
-		if err := hooks.beforeCommit(conn); err != nil {
-			_ = conn.ExecTrusted("ROLLBACK")
-			return e.sqlErr(err, grant.quotaLimited)
-		}
-	}
-	if err := conn.ExecTrusted("COMMIT"); err != nil {
-		_ = conn.ExecTrusted("ROLLBACK")
-		return e.sqlErr(err, grant.quotaLimited)
-	}
-	return nil
+	return tx.commit()
 }
 
 func mapAcquire(err error) error {
@@ -386,10 +307,13 @@ func runOne(conn *sqlitex.Conn, st Statement, budget *resultBudget) (*Result, er
 		return nil, err
 	}
 
-	// Start from a clean last-insert rowid so a statement never reports one
-	// left on the pooled connection by an earlier request.
-	conn.SetLastInsertRowID(0)
+	// The session reset the last-insert rowid when it began, so a statement
+	// never reports one left on the pooled connection by an earlier request.
+	// It isn't reset between statements: last_insert_rowid() in SQL sees the
+	// session's last insert, as in SQLite. The result reports a rowid only
+	// when this statement set one.
 	before := conn.TotalChanges()
+	rowidBefore := conn.LastInsertRowID()
 
 	n := stmt.ColumnCount()
 	res := &Result{Columns: make([]Column, n), Rows: [][]value.Value{}}
@@ -427,11 +351,22 @@ func runOne(conn *sqlitex.Conn, st Statement, budget *resultBudget) (*Result, er
 	// changes() keeps the count of the last INSERT, UPDATE or DELETE, so
 	// only read it when this statement changed rows (total_changes moved).
 	// It excludes rows changed by triggers, which is the documented meaning.
-	if conn.TotalChanges() > before {
+	changed := conn.TotalChanges() > before
+	if changed {
 		res.RowsAffected = conn.Changes()
 	}
-	res.LastInsertRowID = conn.LastInsertRowID()
+	if rowid := conn.LastInsertRowID(); rowid != rowidBefore || changed && rowid != 0 && insertsRows(st.SQL) {
+		res.LastInsertRowID = rowid
+	}
 	return res, nil
+}
+
+// insertsRows reports whether a statement starts with INSERT or REPLACE. It
+// settles the one case the rowid comparison can't: an insert that reuses the
+// rowid the session's previous insert got (after deleting that row).
+func insertsRows(sql string) bool {
+	start := strings.ToUpper(sqlsplit.StripComments(sql))
+	return strings.HasPrefix(start, "INSERT") || strings.HasPrefix(start, "REPLACE")
 }
 
 // checkTail refuses SQL text with a second statement after the first.

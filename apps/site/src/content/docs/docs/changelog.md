@@ -15,5 +15,6 @@ The first version.
 - **REST API** under `/v1` with an OpenAPI document, typed values that never lose precision, problem+json errors with stable codes, cursor pagination, idempotency keys, an audit log and per-branch stats.
 - **Tokens**: instance, database and branch scopes with read, write and admin access, expiry and rate limits.
 - **MCP** at `/mcp` for AI agents, with annotated tools and results capped for a model's context.
+- **libSQL protocol** at `/libsql/{db}/{branch}/`: `@libsql/client` and Drizzle's libsql driver work against a branch by URL, including interactive transactions.
 - **TypeScript SDK** `@lumbung/client` with a Drizzle adapter, and the **`lumbung` CLI** with migrations and a SQL shell.
 - **Backups**: `lumbungd backup` and `lumbungd restore`.

@@ -104,6 +104,42 @@ func (s *Server) runBatch(ctx context.Context, dbRef, branchRef string, stmts []
 
 // record counts a request in the branch's stats and the slow-query log.
 func (s *Server) record(branchID string, stmts []StatementIn, start time.Time, results []*engine.Result, err error) {
+	s.recordWith(branchID, stmts, start, results, err, false)
+}
+
+// recordQueued is record with the slow-query row written by a background
+// worker, for callers that may hold the branch's writer meanwhile. When the
+// queue is full the row is dropped and logged.
+func (s *Server) recordQueued(branchID string, stmts []StatementIn, start time.Time, results []*engine.Result, err error) {
+	s.recordWith(branchID, stmts, start, results, err, true)
+}
+
+type slowEntry struct {
+	branchID string
+	q        meta.SlowQuery
+}
+
+// slowWorker writes queued slow-query rows until the server closes.
+func (s *Server) slowWorker() {
+	for {
+		select {
+		case e := <-s.slowQ:
+			s.addSlow(e.branchID, e.q)
+		case <-s.stop:
+			return
+		}
+	}
+}
+
+func (s *Server) addSlow(branchID string, q meta.SlowQuery) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.store.AddSlowQuery(ctx, branchID, q, 50); err != nil {
+		s.log.Error("slow query log", "err", err)
+	}
+}
+
+func (s *Server) recordWith(branchID string, stmts []StatementIn, start time.Time, results []*engine.Result, err error, queued bool) {
 	d := time.Since(start)
 	var read, written int64
 	for _, r := range results {
@@ -125,10 +161,15 @@ func (s *Server) record(branchID string, stmts []StatementIn, start time.Time, r
 	if err != nil {
 		code = apierr.As(err).Code
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := s.store.AddSlowQuery(ctx, branchID, meta.SlowQuery{At: start, DurationMS: d.Milliseconds(), SQL: sql, ErrorCode: code}, 50); err != nil {
-		s.log.Error("slow query log", "err", err)
+	q := meta.SlowQuery{At: start, DurationMS: d.Milliseconds(), SQL: sql, ErrorCode: code}
+	if !queued {
+		s.addSlow(branchID, q)
+		return
+	}
+	select {
+	case s.slowQ <- slowEntry{branchID, q}:
+	default:
+		s.log.Warn("slow query log queue full, dropping a row", "branch_id", branchID)
 	}
 }
 

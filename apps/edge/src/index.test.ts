@@ -35,8 +35,8 @@ describe("edge worker", () => {
     expect(res.headers.get("set-cookie")).toContain("lumbung.session_token")
   })
 
-  it("sends /app, /v1, /mcp and /health to the origin", async () => {
-    for (const path of ["/app", "/app/databases/shop", "/v1/databases", "/mcp", "/health"]) {
+  it("sends /app, /v1, /mcp, /libsql and /health to the origin", async () => {
+    for (const path of ["/app", "/app/databases/shop", "/v1/databases", "/mcp", "/libsql/shop/main/v2/pipeline", "/health"]) {
       const calls = stubFetch(() => new Response("ok"))
       const req = new Request(`${HOST}${path}`)
       await worker.fetch(req, bindings)

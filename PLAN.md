@@ -52,7 +52,7 @@ scripts/         CI helpers, worktree setup, wording check, docs tests
 SDK / CLI / MCP client / any HTTP client ──────────────┐
                                                         ▼
 browser ─► dashboard (TanStack Start) ──service token─► lumbungd (Go)
-           Better Auth, invites, roles                  REST /v1, /mcp, /health
+           Better Auth, invites, roles                  REST /v1, /mcp, /libsql, /health
            own small SQLite (users, sessions)           meta.db (databases, branches, tokens, audit, stats)
                                                         one SQLite file per branch
 ```
@@ -191,10 +191,14 @@ Added while building milestone 3, because the dashboard and the retention rules 
 
 Rules:
 
-- `query` runs one statement with bound parameters. `batch` runs a list of statements in one transaction, all or nothing. Interactive transactions arrive with the libSQL protocol milestone.
+- `query` runs one statement with bound parameters. `batch` runs a list of statements in one transaction, all or nothing. Interactive transactions are on the libSQL protocol endpoint (7.1).
 - Errors use `application/problem+json` with a stable machine-readable `code`. The list of codes is part of the docs.
 - Create endpoints accept `Idempotency-Key`, except token creation: replaying it would mean storing the secret. Lists are cursor-paginated.
 - The OpenAPI document is generated from the Go handlers and committed as `apps/engine/openapi.json`. CI fails when the committed file differs from a fresh generation. The SDK types and the docs API reference are both generated from it, so the three can't drift.
+
+### 7.1 libSQL protocol
+
+Added in milestone 11 (ADR 0005). The libSQL remote protocol over HTTP (Hrana v2 and v3, JSON) at `/libsql/{db}/{branch}/`, so `@libsql/client` and `drizzle-orm/libsql` work against a branch by URL alone. Same bearer tokens, scopes, limits and isolation as REST. Streams with batons carry interactive transactions: the engine recognizes BEGIN, COMMIT and ROLLBACK itself and runs its own, and savepoints are allowed inside an open transaction. Streams have an idle timeout, transactions a lifetime, and both are capped per token and per instance.
 
 ## 8. MCP
 
@@ -271,7 +275,7 @@ Generic (documented for everyone): one `compose.yaml` with `engine` and `dashboa
 Ours (in `ops/`, done with the `zaki-selfhost` skill):
 
 - Checkout at `~/selfhost/lumbung`, two ports from `free-port.sh`, `mem_limit` on both services.
-- One public hostname, `lumbung.zakiego.com`, through an edge Worker like palui's: `/` and `/docs` to Pages, `/app` to the dashboard, `/v1`, `/mcp` and `/health` to the engine.
+- One public hostname, `lumbung.zakiego.com`, through an edge Worker like palui's: `/` and `/docs` to Pages, `/app` to the dashboard, `/v1`, `/mcp`, `/libsql` and `/health` to the engine.
 - `scripts/deploy-up.sh` backs up `meta.db` right before the swap. A nightly job copies every default branch and the meta database to a backup folder with retention. Test a restore from that backup once before calling it done.
 - Add the health URL to `m4-alerts`, the row to the Apps table in the `zaki-selfhost` skill, and the repo to the auto-deploy allowlist.
 - Docker build memory: the OrbStack VM has 3 GB. Keep the Go build and the Nitro build in separate stages and never run them in parallel.
