@@ -176,8 +176,8 @@ func (a *app) objectLsCmd() *cobra.Command {
 			if !recursive {
 				q.Set("delimiter", "/")
 			}
-			var objects []client.Object
-			var prefixes []string
+			objects := []client.Object{}
+			prefixes := []string{}
 			for {
 				var page client.ObjectPage
 				if err := c.Do(cmd.Context(), http.MethodGet, bucketPath(bucket)+"/objects", q, nil, &page); err != nil {
@@ -321,9 +321,11 @@ func (a *app) objectGetCmd() *cobra.Command {
 				return fmt.Errorf("download cut off: %w", err)
 			}
 			if err := f.Close(); err != nil {
+				os.Remove(tmp)
 				return err
 			}
 			if err := os.Rename(tmp, output); err != nil {
+				os.Remove(tmp)
 				return err
 			}
 			if a.json {

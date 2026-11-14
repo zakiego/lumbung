@@ -228,6 +228,7 @@ type Object struct {
 	ETag         string            `json:"etag"`
 	ContentType  string            `json:"content_type"`
 	LastModified time.Time         `json:"last_modified"`
+	Headers      map[string]string `json:"headers,omitempty"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
