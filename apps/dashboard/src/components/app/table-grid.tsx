@@ -75,7 +75,7 @@ function SortIcon({ dir }: { dir: "asc" | "desc" | undefined }) {
 }
 
 const box =
-  "inline-flex size-4 items-center justify-center rounded-[4px] border border-input text-white transition-[background-color,border-color] duration-100 [&_svg]:size-3"
+  "inline-flex size-4 items-center justify-center rounded-[4px] border border-input-strong text-white transition-[background-color,border-color] duration-100 [&_svg]:size-3"
 
 export function TableGrid({ label, columns, rows, sort = null, onSortChange, selected, onSelectedChange, onOpenCell, empty, busy, className }: TableGridProps) {
   const uid = useId()

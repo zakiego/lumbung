@@ -6,8 +6,9 @@ import { cn } from "@/lib/utils"
 type Line = { text: string; tone?: "add" | "dim" }
 export type Step = { cmd: string; out: Line[] }
 
-// The branch loop from the docs, with the CLI's real output. The profile saved
-// by `lumbung login --db shop` supplies the database, so no command needs --db.
+// The branch loop from the docs, then a file upload, with the CLI's real
+// output. The profile saved by `lumbung login --db shop` supplies the
+// database, so no command needs --db.
 export const session: Step[] = [
   { cmd: "lumbung branch create pr-42", out: [{ text: "Created branch pr-42 (br_k3x9q2m7v4p8w1z6c5n0)" }] },
   { cmd: "lumbung migrate apply --branch pr-42", out: [{ text: "applied 0007_orders_by_email.sql" }] },
@@ -23,6 +24,7 @@ export const session: Step[] = [
     out: [{ text: "count(*)", tone: "dim" }, { text: "18420" }, { text: "1 row (2ms)", tone: "dim" }],
   },
   { cmd: "lumbung branch delete pr-42 --yes", out: [{ text: "Done: delete pr-42" }] },
+  { cmd: "lumbung object put receipt.pdf receipts/", out: [{ text: "Uploaded receipt.pdf to receipts/receipt.pdf (48.2 KiB)" }] },
   { cmd: "clear", out: [] },
 ]
 
@@ -39,6 +41,7 @@ const holdMs = (step: number) => (step === CLEAR ? 600 : 1100 + 500 * session[st
 
 // null is the poster: the session finished up to the query, which is what
 // shows without JS, with reduced motion, and before hydration.
+export const POSTER = QUERY
 export type Frame = { step: number; typed: number; ran: boolean } | null
 
 export function next(frame: NonNullable<Frame>): { frame: NonNullable<Frame>; delay: number } {
@@ -138,8 +141,8 @@ export function Terminal() {
           <div data-screen aria-hidden="true" className="shrink-0">
             {session.map((s, i) => {
               const current = frame !== null && frame.step === i ? frame : null
-              const done = frame === null ? i <= QUERY : i < frame.step
-              const hidden = cleared || (frame === null ? i > QUERY : i > frame.step)
+              const done = frame === null ? i <= POSTER : i < frame.step
+              const hidden = cleared || (frame === null ? i > POSTER : i > frame.step)
               const showOut = done || current?.ran
               return (
                 <div
@@ -219,7 +222,7 @@ export function Terminal() {
 
       <figcaption className="sr-only">
         A terminal session: create the branch pr-42 of the shop database, apply a migration to it, diff it against main,
-        query it, then delete it.
+        query it, delete it, then upload a file to the receipts bucket.
       </figcaption>
     </figure>
   )

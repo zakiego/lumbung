@@ -1,21 +1,34 @@
 import type { BucketOut, ObjectOut } from "@lumbung/client"
-import { Link } from "@tanstack/react-router"
+import { Link, useRouter } from "@tanstack/react-router"
 import { DrawerTrigger, createDrawerController } from "@ui-sdk/react/drawer"
 import { ArchiveIcon, DownloadIcon, FileIcon, FolderIcon, GlobeIcon, Trash2Icon, UploadIcon } from "lucide-react"
 import { type ReactNode, useRef, useState } from "react"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Badge, Empty, Table, TableCell, TableHead, TableRow } from "@/components/ui/surface"
 import { toast } from "@/components/ui/toast"
+import { createBucket } from "@/fns/buckets"
 import { TruncatedTip } from "@/components/ui/tooltip"
 import { formatBytes, number, timeAgo } from "@/lib/format"
 import { objectURL } from "@/lib/objects"
 import { Confirm, errorText } from "./form-dialog"
-import { NameDialog } from "./name-dialog"
+import { NameDialog, type TriggerSlot } from "./name-dialog"
 import { type ObjectAccess, ObjectDetails } from "./object-details"
 
 export const BUCKET_PATTERN = "[a-z0-9][a-z0-9\\-]{1,61}[a-z0-9]"
 
-export function CreateBucketDialog({ onCreate, variant }: { onCreate: (name: string) => Promise<unknown>; variant?: "default" | "secondary" }) {
+/** Creates a bucket and opens it. A failure shows under the dialog's field, so only success gets a toast. */
+export function useCreateBucket(onDone?: () => void) {
+  const router = useRouter()
+  return async (name: string) => {
+    await createBucket({ data: { name } })
+    toast.success(`Created ${name}`)
+    await router.invalidate()
+    await router.navigate({ to: "/buckets/$bucket", params: { bucket: name } })
+    onDone?.()
+  }
+}
+
+export function CreateBucketDialog({ onCreate, variant, ...slot }: { onCreate: (name: string) => Promise<unknown>; variant?: "default" | "secondary" } & TriggerSlot) {
   return (
     <NameDialog
       trigger="New bucket"
@@ -29,6 +42,7 @@ export function CreateBucketDialog({ onCreate, variant }: { onCreate: (name: str
       pattern={BUCKET_PATTERN}
       patternHint="Use 3 to 63 lowercase letters, digits and dashes, starting and ending with a letter or digit."
       onSubmit={onCreate}
+      {...slot}
     />
   )
 }

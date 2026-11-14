@@ -32,6 +32,14 @@ const tools = [
   { tool: "diff_branches", args: "1 change against main" },
 ]
 
+const libsqlClients = ["@libsql/client", "drizzle-orm/libsql"]
+
+const objects = [
+  { key: "photos/2026/cat.jpg", size: "182 KB" },
+  { key: "photos/2026/dog.jpg", size: "204 KB" },
+  { key: "photos/2026/beach.jpg", size: "317 KB" },
+]
+
 const link =
   "group/link inline-flex items-center gap-1.5 text-[13px] text-muted-foreground transition-[color] duration-100 ease-(--ease-out-quad) hover:text-foreground"
 const pill = "press inline-flex items-center rounded-full font-[510]"
@@ -118,6 +126,47 @@ const secondary = `${pill} bg-secondary text-foreground shadow-[inset_0_0_0_1px_
             <p class="mt-1.5 text-[15px] text-muted-foreground">MCP over HTTP, with a token scoped to one branch.</p>
           </div>
           <a href="/docs/guides/ai-agents/" class={link}>Use from an AI agent <span aria-hidden="true" class="transition-transform duration-100 ease-(--ease-out-quart) motion-safe:group-hover/link:translate-x-0.5">→</span></a>
+        </article>
+
+        <article class="flex min-w-0 flex-col gap-6 border-b border-hairline py-12 md:border-r md:py-16 md:pr-12">
+          <div class="flex flex-col gap-3 font-mono text-[13px]">
+            <p class="[overflow-wrap:anywhere] text-muted-foreground">
+              http://127.0.0.1:4870/libsql/<span class="text-foreground">shop</span>/<span class="text-foreground">pr-42</span>/
+            </p>
+            <ul class="flex flex-col gap-3" aria-label="Clients that connect by URL">
+              {
+                libsqlClients.map((c) => (
+                  <li class="flex min-w-0 items-center gap-3">
+                    <svg viewBox="0 0 16 16" aria-hidden="true" class="size-3.5 shrink-0 text-success" fill="none" stroke="currentColor" stroke-width="2"><path d="m3.5 8.5 3 3 6-7" /></svg>
+                    <span class="text-foreground">{c}</span>
+                  </li>
+                ))
+              }
+            </ul>
+          </div>
+          <div>
+            <h2 class="text-[17px] font-[510] tracking-[-0.012em]">Works with libSQL clients</h2>
+            <p class="mt-1.5 text-[15px] text-muted-foreground">Point @libsql/client or Drizzle at a branch URL.</p>
+          </div>
+          <a href="/docs/guides/libsql/" class={link}>libSQL client <span aria-hidden="true" class="transition-transform duration-100 ease-(--ease-out-quart) motion-safe:group-hover/link:translate-x-0.5">→</span></a>
+        </article>
+
+        <article class="flex min-w-0 flex-col gap-6 border-b border-hairline py-12 md:py-16 md:pl-12">
+          <ul class="flex flex-col gap-3 font-mono text-[13px]" aria-label="Objects in the photos bucket">
+            {
+              objects.map((o) => (
+                <li class="flex min-w-0 items-center gap-3">
+                  <span class="shrink-0 text-foreground">{o.key}</span>
+                  <span class="min-w-0 text-xs text-muted-foreground tabular-nums">{o.size}</span>
+                </li>
+              ))
+            }
+          </ul>
+          <div>
+            <h2 class="text-[17px] font-[510] tracking-[-0.012em]">Files next to your data</h2>
+            <p class="mt-1.5 text-[15px] text-muted-foreground">Buckets that any S3 client can read and write.</p>
+          </div>
+          <a href="/docs/concepts/buckets/" class={link}>Buckets <span aria-hidden="true" class="transition-transform duration-100 ease-(--ease-out-quart) motion-safe:group-hover/link:translate-x-0.5">→</span></a>
         </article>
 
         <article class="flex min-w-0 flex-col gap-6 border-b border-hairline py-12 md:border-r md:border-b-0 md:py-16 md:pr-12">

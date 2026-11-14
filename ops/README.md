@@ -195,3 +195,31 @@ docker compose up -d --no-build --wait
 - m4-alerts probes `https://lumbung.zakiego.com/health` and watches both containers.
 - A failed deploy alerts through the webhook (email and WhatsApp).
 - The nightly backup only writes its log. Check `~/selfhost/lumbung-backup.log` for `FAILED`.
+
+## Releasing the SDK
+
+`.github/workflows/release-client.yml` publishes `packages/client` to npm as `@lumbung/client` (public, MIT) when a `client-vX.Y.Z` tag is pushed. It runs the SDK build, typecheck and tests against a fresh `lumbungd` first, and fails if the tag doesn't match the version in `packages/client/package.json`. The workspace keeps `"private": true`, and the workflow drops it only for the publish, so nothing goes out from a laptop.
+
+The repository is private, so npm doesn't attach provenance.
+
+### One-time setup
+
+1. On npmjs.com, create the free `lumbung` organization. It owns the `@lumbung` scope.
+2. Create a granular access token with read and write on packages in the `lumbung` organization, and save it as the `NPM_TOKEN` repository secret. The first publish needs it because trusted publishing can only be set up on a package that already exists.
+3. After the first release, open the package settings on npmjs.com and add a trusted publisher: GitHub Actions, repository `zakiego/lumbung`, workflow `release-client.yml`. Then delete the `NPM_TOKEN` secret and revoke the token. From then on npm signs in with the workflow's OIDC token.
+
+### Each release
+
+1. Bump `version` in `packages/client/package.json` and merge it to `main`.
+2. Tag that commit and push the tag:
+
+   ```bash
+   git tag -a client-v0.1.1 -m "@lumbung/client 0.1.1"
+   git push origin client-v0.1.1
+   ```
+
+3. Watch the run in the Actions tab, then check https://www.npmjs.com/package/@lumbung/client.
+
+A version can't be published twice. To fix a bad release, bump the version and tag again.
+
+`client-v0.1.0` went to GitHub Packages as `@zakiego/lumbung-client` before the switch to npm. That package can be deleted from the repository's Packages page.

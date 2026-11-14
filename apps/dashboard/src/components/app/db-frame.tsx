@@ -81,7 +81,9 @@ export function DbFrame({ section, actions, children }: { section: DbSection; ac
       <Tabs value={section}>
         <div ref={tabRow} className="shadow-[inset_0_-1px_0_var(--border)]">
           <div className={CONTAINER}>
-            <ScrollArea axis="x" fade>
+            {/* No drawn scrollbar: on touch it stays up after a tap and reads
+                as a second tab indicator on the hairline. */}
+            <ScrollArea axis="x" fade bare>
               <TabsList aria-label="Database pages" className="w-full min-w-max shadow-none">
                 {SECTIONS.map((s) => (
                   <TabsTab

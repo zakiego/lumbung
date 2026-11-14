@@ -1,10 +1,19 @@
 import { useRouter } from "@tanstack/react-router"
-import { CircleAlertIcon, SparklesIcon } from "lucide-react"
+import { CircleAlertIcon, RefreshCwIcon, SparklesIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Empty, Skeleton } from "@/components/ui/surface"
+import { isStaleBuildError } from "@/lib/stale-build"
 
 export function ErrorState({ error, title = "Couldn't load this page" }: { error: unknown; title?: string }) {
   const router = useRouter()
+  // Shown only when the automatic reload in the router didn't run.
+  if (isStaleBuildError(error)) {
+    return (
+      <Empty icon={<RefreshCwIcon />} title="Lumbung was updated">
+        <Button onClick={() => window.location.reload()}>Reload</Button>
+      </Empty>
+    )
+  }
   return (
     <Empty icon={<CircleAlertIcon />} title={title} description={error instanceof Error ? error.message : String(error)}>
       <Button variant="secondary" onClick={() => router.invalidate()}>

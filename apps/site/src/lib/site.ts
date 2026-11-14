@@ -2,11 +2,11 @@
 // origin comes from Astro's `site` (SITE_URL), never from a hard-coded host.
 export const site = {
   name: "Lumbung",
-  title: "Lumbung: SQLite databases with branches on your own server",
-  headline: "Run SQLite databases with branches on your own server",
-  description: "Change a copy of your database and keep main safe.",
+  title: "Lumbung: SQLite and file storage on your own server",
+  headline: "Run SQLite databases and file storage on your own server",
+  description: "Branch a database before you change it, and keep files next to it.",
   github: "https://github.com/zakiego/lumbung",
-  ogAlt: "Lumbung: run SQLite databases with branches on your own server",
+  ogAlt: "Lumbung: run SQLite databases and file storage on your own server",
 }
 
 // The landing page's dark tokens (src/styles/landing.css), for the places

@@ -50,7 +50,7 @@ Creating and deleting buckets needs an instance admin token. Copying from anothe
 
 ## Access keys
 
-S3 clients don't send a token; they sign each request with an access key id and a secret. Ask for an access key when you create a token, and both come back once, next to the token:
+S3 clients don't send a token; they sign each request with an access key id and a secret. Ask for an access key when you create a token (or tick S3 access key in the dashboard), and both come back once, next to the token:
 
 ```sh
 lumbung bucket create photos
