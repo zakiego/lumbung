@@ -1,25 +1,57 @@
-import type { DatabaseOut } from "@lumbung/client"
-import { Link, createFileRoute, useRouter } from "@tanstack/react-router"
-import { DatabaseIcon, Trash2Icon } from "lucide-react"
+import type { AuditOut } from "@lumbung/client"
+import { Await, Link, createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
+import { CircleAlertIcon, DatabaseIcon, Trash2Icon } from "lucide-react"
+import { RecentActivity } from "@/components/app/activity"
+import { DatabaseTable } from "@/components/app/database-table"
 import { CreateDatabaseDialog } from "@/components/app/name-dialog"
+import { RequestsChart } from "@/components/app/requests-chart"
 import { PageBody, PageHeader, PageTitle } from "@/components/app/shell"
+import { ChartFailed, Deferred, Stat, StatGrid, WindowSelect } from "@/components/app/stats"
 import { ErrorState, RowsSkeleton } from "@/components/app/states"
 import { buttonVariants } from "@/components/ui/button"
-import { Empty, Table, TableCell, TableHead, TableRow } from "@/components/ui/surface"
+import { Card, CardContent, CardHeader, CardTitle, Empty, Skeleton, StatusText } from "@/components/ui/surface"
 import { toast } from "@/components/ui/toast"
-import { TruncatedTip } from "@/components/ui/tooltip"
-import { createDatabase, listDatabases } from "@/fns/databases"
-import { formatBytes, number, timeAgo } from "@/lib/format"
+import { listAudit } from "@/fns/admin"
+import { createDatabase, getWorkspaceStats, listDatabases } from "@/fns/databases"
+import { formatBytes, number } from "@/lib/format"
 import { pageTitle } from "@/lib/paths"
 import { can } from "@/lib/roles"
+import { type Settled, settle } from "@/lib/settle"
+import { DEFAULT_WINDOW, WINDOW_LABEL, type WorkspaceStats, errorRate, windowSearch } from "@/lib/stats"
+
+const ACTIVITY_ROWS = 6
 
 export const Route = createFileRoute("/_app/")({
-  loader: () => listDatabases(),
-  head: () => ({ meta: [{ title: pageTitle("Databases") }] }),
-  component: DatabasesPage,
+  validateSearch: windowSearch,
+  loaderDeps: ({ search }) => ({ range: search.window ?? DEFAULT_WINDOW }),
+  loader: async ({ deps, context }) => {
+    const databases = await listDatabases()
+    const activity: Promise<Settled<AuditOut[]>> | null = can(context.viewer.role, "write")
+      ? settle(listAudit({ data: {} }).then((r) => r.data.slice(0, ACTIVITY_ROWS)))
+      : null
+    return {
+      databases,
+      stats: settle<WorkspaceStats | null>(
+        databases.length
+          ? getWorkspaceStats({ data: { window: deps.range, databases: databases.map((d) => ({ name: d.name, branch: d.default_branch })) } })
+          : Promise.resolve(null),
+      ),
+      activity,
+    }
+  },
+  head: () => ({ meta: [{ title: pageTitle("Overview") }] }),
+  component: OverviewPage,
   pendingComponent: () => (
     <Frame>
-      <RowsSkeleton />
+      <div className="flex flex-col gap-8">
+        <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+          {["a", "b", "c", "d"].map((k) => (
+            <Skeleton key={k} className="h-[74px] rounded-lg" />
+          ))}
+        </div>
+        <RowsSkeleton />
+        <Skeleton className="h-72 rounded-lg" />
+      </div>
     </Frame>
   ),
   errorComponent: ({ error }) => (
@@ -33,17 +65,19 @@ function Frame({ children, actions }: { children: React.ReactNode; actions?: Rea
   return (
     <>
       <PageHeader actions={actions}>
-        <PageTitle>Databases</PageTitle>
+        <PageTitle>Overview</PageTitle>
       </PageHeader>
       <PageBody>{children}</PageBody>
     </>
   )
 }
 
-function DatabasesPage() {
-  const databases = Route.useLoaderData()
+function OverviewPage() {
+  const { databases, stats, activity } = Route.useLoaderData()
+  const { range } = Route.useLoaderDeps()
   const { viewer } = Route.useRouteContext()
   const router = useRouter()
+  const navigate = useNavigate({ from: Route.fullPath })
   const canWrite = can(viewer.role, "write")
 
   async function create(name: string) {
@@ -58,57 +92,97 @@ function DatabasesPage() {
     <>
       <Link to="/trash" className={buttonVariants({ variant: "ghost" })}>
         <Trash2Icon aria-hidden="true" />
-        Trash
+        <span className="max-sm:sr-only">Trash</span>
       </Link>
       {canWrite && <CreateDatabaseDialog onCreate={create} />}
     </>
   )
 
-  return (
-    <Frame actions={actions}>
-      {databases.length === 0 ? (
+  if (databases.length === 0) {
+    return (
+      <Frame actions={actions}>
         <Empty icon={<DatabaseIcon />} title="No databases yet">
           {canWrite && <CreateDatabaseDialog onCreate={create} />}
         </Empty>
-      ) : (
-        <DatabaseTable databases={databases} />
-      )}
-    </Frame>
-  )
-}
+      </Frame>
+    )
+  }
 
-function DatabaseTable({ databases }: { databases: DatabaseOut[] }) {
+  const storage = databases.reduce((n, d) => n + d.size_bytes, 0)
+  const workspace = stats
+
   return (
-    <Table>
-      <thead>
-        <tr>
-          <TableHead>Name</TableHead>
-          <TableHead className="text-right">Size</TableHead>
-          <TableHead className="text-right">Branches</TableHead>
-          <TableHead className="text-right">Last activity</TableHead>
-        </tr>
-      </thead>
-      <tbody>
-        {databases.map((d) => (
-          <TableRow key={d.id} className="relative">
-            <TableCell className="max-w-0 w-1/2">
-              <TruncatedTip text={d.name}>
-                <Link to="/db/$db" params={{ db: d.name }} className="flex min-w-0 items-center gap-2 font-mono font-[510] after:absolute after:inset-0">
-                  <DatabaseIcon aria-hidden="true" className="size-4 shrink-0 text-faint" />
-                  <span data-truncate className="truncate">
-                    {d.name}
+    <Frame actions={actions}>
+      <div className="flex flex-col gap-8">
+        <StatGrid>
+          <Stat label="Databases">
+            {number.format(databases.length)}
+          </Stat>
+          <Stat label="Storage">{formatBytes(storage)}</Stat>
+          <Stat label="Requests" hint={range}>
+            <Deferred promise={workspace}>{(s) => number.format(s?.queries ?? 0)}</Deferred>
+          </Stat>
+          <Stat label="Error rate" hint={range}>
+            <Deferred promise={workspace}>
+              {(s) => <span className={s && s.errors > 0 ? "text-destructive" : undefined}>{errorRate(s?.queries ?? 0, s?.errors ?? 0)}</span>}
+            </Deferred>
+          </Stat>
+        </StatGrid>
+
+        <section aria-labelledby="databases-heading" className="flex flex-col gap-3">
+          <h2 id="databases-heading" className="text-[13px] font-[590]">
+            Databases
+          </h2>
+          <Await promise={workspace} fallback={<DatabaseTable databases={databases} usage={undefined} />}>
+            {(r) => <DatabaseTable databases={databases} usage={r.ok ? (r.value?.byDb ?? {}) : null} />}
+          </Await>
+        </section>
+
+        <div className={activity ? "grid gap-4 lg:grid-cols-3" : "grid gap-4"}>
+          <Card className="min-w-0 lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Requests</CardTitle>
+              <WindowSelect value={range} onChange={(w) => navigate({ search: { window: w === DEFAULT_WINDOW ? undefined : w }, replace: true })} />
+            </CardHeader>
+            <CardContent>
+              <Await promise={workspace} fallback={<Skeleton className="h-60" />}>
+                {(r) =>
+                  r.ok ? (
+                    <div className="flex flex-col gap-3">
+                      <RequestsChart series={r.value?.series ?? []} label={`Requests across all databases, ${WINDOW_LABEL[range].toLowerCase()}`} />
+                      {!!r.value?.failed.length && (
+                        <StatusText tone="warning" icon={<CircleAlertIcon aria-hidden="true" />}>
+                          {r.value.failed.length === 1 ? "1 database didn't report" : `${number.format(r.value.failed.length)} databases didn't report`}
+                        </StatusText>
+                      )}
+                    </div>
+                  ) : (
+                    <ChartFailed message={r.error} />
+                  )
+                }
+              </Await>
+            </CardContent>
+          </Card>
+          {activity && (
+            <Card className="flex min-w-0 flex-col">
+              <CardHeader>
+                <CardTitle>Recent activity</CardTitle>
+                <Link to="/audit" className="group/link inline-flex items-center gap-1 rounded-sm text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground hover:duration-0">
+                  View all
+                  <span aria-hidden="true" className="transition-transform duration-100 ease-out-quad motion-safe:group-hover/link:translate-x-0.5">
+                    →
                   </span>
                 </Link>
-              </TruncatedTip>
-            </TableCell>
-            <TableCell className="text-right text-muted-foreground tabular-nums">{formatBytes(d.size_bytes)}</TableCell>
-            <TableCell className="text-right text-muted-foreground tabular-nums">{number.format(d.branch_count)}</TableCell>
-            <TableCell className="text-right whitespace-nowrap text-muted-foreground">
-              <span suppressHydrationWarning>{d.last_activity_at ? timeAgo(d.last_activity_at) : "Never"}</span>
-            </TableCell>
-          </TableRow>
-        ))}
-      </tbody>
-    </Table>
+              </CardHeader>
+              <CardContent className="flex-1 pt-2">
+                <Await promise={activity} fallback={<RowsSkeleton rows={4} />}>
+                  {(r) => (r.ok ? <RecentActivity entries={r.value} names={new Map(databases.map((d) => [d.id, d.name]))} /> : <ChartFailed message={r.error} />)}
+                </Await>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+    </Frame>
   )
 }
