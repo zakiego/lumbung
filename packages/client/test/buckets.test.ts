@@ -80,6 +80,38 @@ describe("objects", () => {
     expect(await (await admin.bucket(other).get("copy.txt")).text()).toBe("hello, granary")
   })
 
+  test("one token with a grant for a database and a bucket", async () => {
+    const name = await freshBucket()
+    const other = await freshBucket()
+    await admin.bucket(name).put("doc.txt", "yours")
+    const db = `${name}-db`
+    await admin.databases.create(db)
+    const hidden = `${name}-hidden`
+    await admin.databases.create(hidden)
+
+    const t = await admin.tokens.create({
+      name: "agent",
+      grants: [
+        { database: db, access: "write" },
+        { bucket: name, access: "read" },
+      ],
+    })
+    expect(t.scope).toBe("grants")
+    expect(t.grants.map((g) => g.access)).toEqual(["write", "read"])
+    const agent = createClient({ url, token: t.token, database: db })
+
+    await agent.query("CREATE TABLE t(x)")
+    await agent.query("INSERT INTO t VALUES (1)")
+    expect((await agent.query("SELECT x FROM t")).rows).toHaveLength(1)
+    expect(await (await agent.bucket(name).get("doc.txt")).text()).toBe("yours")
+    // Each grant keeps its own level, and nothing else exists for this token.
+    await expect(agent.bucket(name).put("new.txt", "x")).rejects.toMatchObject({ code: "forbidden" })
+    await expect(agent.bucket(other).list()).rejects.toMatchObject({ code: "bucket_not_found" })
+    await expect(agent.databases.get(hidden)).rejects.toMatchObject({ code: "database_not_found" })
+    expect((await agent.databases.list()).data.map((d) => d.name)).toEqual([db])
+    expect((await agent.buckets.list()).data.map((b) => b.name)).toEqual([name])
+  })
+
   test("presign with an access key, and the scope a bucket token has", async () => {
     const name = await freshBucket()
     const other = await freshBucket()
