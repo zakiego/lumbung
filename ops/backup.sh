@@ -15,7 +15,7 @@
 # ~/selfhost/lumbung-backups somewhere else too. It holds the service token,
 # so it is private to this user (mode 700).
 #
-# scripts/restore-drill.sh proves the newest host copy restores.
+# ops/restore-drill.sh proves the newest host copy restores.
 set -euo pipefail
 
 LUMBUNG_DIR="${LUMBUNG_DIR:-$HOME/selfhost/lumbung}"
@@ -111,7 +111,7 @@ esac
 dash_remote=""
 dashboard_backup() {
   local rc=0
-  dash_json=$(docker compose exec -T dashboard node - /data/backups nightly-dashboard "$KEEP" <scripts/dashboard-backup.mjs) || rc=$?
+  dash_json=$(docker compose exec -T dashboard node - /data/backups nightly-dashboard "$KEEP" <ops/dashboard-backup.mjs) || rc=$?
   # 2 means there's no dashboard.db yet: nothing to keep, not worth a retry.
   [ "$rc" -eq 2 ] && { dash_json=""; return 0; }
   return "$rc"

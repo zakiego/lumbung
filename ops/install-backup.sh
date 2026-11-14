@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install (or reinstall) the nightly Lumbung backup on the Docker host.
-#   - copies scripts/backup.sh to ~/selfhost/bin/lumbung-backup.sh, so the job
+#   - copies ops/backup.sh to ~/selfhost/bin/lumbung-backup.sh, so the job
 #     doesn't run a file a `git pull` is rewriting
 #   - renders ops/com.zakiego.lumbung-backup.plist into ~/Library/LaunchAgents
 #   - (re)loads it with launchctl
@@ -15,7 +15,7 @@ plist="$HOME/Library/LaunchAgents/$label.plist"
 domain="gui/$(id -u)"
 
 mkdir -p "$HOME/selfhost/bin" "$HOME/Library/LaunchAgents"
-install -m 755 "$repo/scripts/backup.sh" "$HOME/selfhost/bin/lumbung-backup.sh"
+install -m 755 "$repo/ops/backup.sh" "$HOME/selfhost/bin/lumbung-backup.sh"
 sed "s|__HOME__|$HOME|g" "$repo/ops/$label.plist" >"$plist"
 plutil -lint "$plist" >/dev/null
 

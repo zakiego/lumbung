@@ -68,7 +68,7 @@ export COMPOSE_FILE=compose.yaml:ops/compose.selfhost.yaml
    ```bash
    launchctl kickstart gui/$(id -u)/com.zakiego.lumbung-backup
    tail -n 20 ~/selfhost/lumbung-backup.log
-   ./scripts/restore-drill.sh
+   ./ops/restore-drill.sh
    ```
 
 6. Add `https://lumbung.zakiego.com/health` to the `http` list in `~/.agents/skills/m4-alerts/config.default.json`, the row to the Apps table in the `zaki-selfhost` skill, and `"zakiego/lumbung": "lumbung"` to its `webhook/apps.json`.
@@ -113,7 +113,7 @@ The host copies hold the service token (folder mode 700). They survive a lost vo
 Restore drill: restores the newest host copy into scratch volumes, starts a throwaway engine on a free port in 4890-4899, runs `integrity_check` on every database through the API, tears it all down and prints PASS or FAIL.
 
 ```bash
-cd ~/selfhost/lumbung && ./scripts/restore-drill.sh
+cd ~/selfhost/lumbung && ./ops/restore-drill.sh
 ```
 
 Full restore after losing `lumbung_data`: into a fresh, empty volume, then start as usual.

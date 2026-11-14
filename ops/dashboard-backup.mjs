@@ -3,7 +3,7 @@
 // (node:sqlite, no other dependencies), fed on stdin, so the image doesn't
 // need to ship it:
 //
-//   docker compose exec -T dashboard node - <dir> <prefix> <keep> < scripts/dashboard-backup.mjs
+//   docker compose exec -T dashboard node - <dir> <prefix> <keep> < ops/dashboard-backup.mjs
 //
 // Writes <dir>/<prefix>-<UTC time>.db and prints {"backup": path, "bytes": n}.
 // Exits 2 when there's no dashboard.db yet, 1 on any other failure.

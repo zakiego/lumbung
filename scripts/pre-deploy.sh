@@ -10,7 +10,7 @@
 #      rollback works: `lumbungd restore --meta-only --from /data/backups/pre-deploy`.
 #   2. If the dashboard volume holds a dashboard.db, copy it with VACUUM INTO
 #      to /data/backups/pre-deploy-<UTC time>.db (in that volume), keeping 5.
-#   3. If scripts/backup.sh changed, reinstall the nightly backup agent so the
+#   3. If ops/backup.sh changed, reinstall the nightly backup agent so the
 #      installed copy in ~/selfhost/bin doesn't drift from the repo.
 #
 # A running service does its backup with `exec`. A stopped or crash-looping
@@ -102,7 +102,7 @@ backup_dashboard() {
     log "dashboard isn't running, using a one-off dashboard container on the current image"
     runner=(run --rm --no-deps -T)
   fi
-  docker compose "${runner[@]}" dashboard node - /data/backups pre-deploy "$KEEP" <scripts/dashboard-backup.mjs
+  docker compose "${runner[@]}" dashboard node - /data/backups pre-deploy "$KEEP" <ops/dashboard-backup.mjs
 }
 
 # --- engine -------------------------------------------------------------------
@@ -132,8 +132,8 @@ else
 fi
 
 # --- nightly backup agent -----------------------------------------------------
-if command -v launchctl >/dev/null && ! cmp -s scripts/backup.sh "$INSTALLED_BACKUP"; then
-  log "scripts/backup.sh differs from $INSTALLED_BACKUP, reinstalling the nightly backup"
+if command -v launchctl >/dev/null && ! cmp -s ops/backup.sh "$INSTALLED_BACKUP"; then
+  log "ops/backup.sh differs from $INSTALLED_BACKUP, reinstalling the nightly backup"
   # A launchd hiccup shouldn't block the deploy, but it must be loud.
   "$INSTALL_BACKUP" || log "WARNING: install-backup.sh failed; the nightly backup still runs the old script"
 fi
