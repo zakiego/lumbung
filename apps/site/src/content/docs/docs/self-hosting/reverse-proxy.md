@@ -58,7 +58,7 @@ The header is only trusted on connections from `LUMBUNG_TRUSTED_PROXIES`, and an
 
 Under Docker Compose the proxy's connection arrives from the Docker network, not `127.0.0.1`, so list that network in `LUMBUNG_TRUSTED_PROXIES` (for the default bridge networks, `172.16.0.0/12`).
 
-Set `LUMBUNG_DASHBOARD_URL` to the public address, like `https://db.example.com`. The dashboard rejects sign-ins and changes sent from any other origin.
+Set `LUMBUNG_DASHBOARD_URL` to the public address, like `https://db.example.com`. The dashboard rejects sign-ins and changes sent from any other origin, except the ones in `LUMBUNG_DASHBOARD_EXTRA_ORIGINS` (see [Dashboard](/docs/guides/dashboard/#settings)), and each of those only on its own host.
 
 ## Paths
 
