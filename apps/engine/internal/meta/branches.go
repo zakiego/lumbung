@@ -324,6 +324,9 @@ type Present struct {
 	// Uploads are multipart uploads whose folder is there. Nil leaves them
 	// alone; an empty map drops every upload.
 	Uploads map[string]bool
+	// Parts are part files that are there, as "<upload id>/<file>". An
+	// upload with a recorded part that isn't is dropped too.
+	Parts map[string]bool
 }
 
 // DropMissing makes a restored meta.db match the files next to it. It
@@ -448,7 +451,17 @@ func (s *Store) DropMissing(ctx context.Context, p Present) error {
 			return err
 		}
 		for _, id := range uploads {
-			if !p.Uploads[id] {
+			missing := !p.Uploads[id]
+			if !missing && p.Parts != nil {
+				files, err := queryStrings(ctx, tx, `SELECT upload_id || '/' || file FROM upload_parts WHERE upload_id = ?`, id)
+				if err != nil {
+					return err
+				}
+				for _, f := range files {
+					missing = missing || !p.Parts[f]
+				}
+			}
+			if missing {
 				if err := exec(`DELETE FROM upload_parts WHERE upload_id = ?`, id); err != nil {
 					return err
 				}

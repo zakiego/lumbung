@@ -220,7 +220,7 @@ func TestMetaOnlyBackupsStayApart(t *testing.T) {
 	if latest, _ := Latest(out, true); latest != metaDir {
 		t.Fatalf("latest meta-only backup %q, want %q", latest, metaDir)
 	}
-	if all, _ := list(out, true); len(all) != 1 {
+	if all, _ := list(out, metaSuffix); len(all) != 1 {
 		t.Fatalf("kept %d meta-only backups", len(all))
 	}
 	// A meta-only backup can't be restored as a whole data folder.

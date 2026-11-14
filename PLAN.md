@@ -406,7 +406,7 @@ Limits (section 6.3 style, all settings): object size, bucket size, total object
 
 ### 16.7 Backup and restore
 
-`lumbungd backup` copies every live object's file and the encryption key with meta.db, listed in the manifest with SHA-256 sums. Files are immutable, so a file already in the previous backup is hard-linked instead of copied, with its sum reused. `--skip-objects` leaves them out. Restore copies them back, and reconcile drops object rows whose file isn't in the backup (fixing bucket totals) and every unfinished upload. `ops/restore-drill.sh` also lists every bucket and checks objects (size and ETag) through the S3 API.
+`lumbungd backup` copies every live object's file and the encryption key with meta.db, listed in the manifest with SHA-256 sums. Files are immutable, so a file already in the previous backup is hard-linked instead of copied, with its sum reused. `--skip-objects` leaves them out. Restore copies them back, and reconcile drops object rows whose file isn't in the backup (fixing bucket totals) and every unfinished upload. `ops/restore-drill.sh` also lists every bucket and downloads objects to check their size and ETag. A `--skip-objects` backup is a kind of its own (`<time>-no-objects`), so it is never restored by default and never pushes full backups out of retention. Object files are copied right after meta.db, before branches, so the GC delay covers them; a file linked from the previous backup is checked against its sum first.
 
 ### 16.8 Dashboard and docs
 

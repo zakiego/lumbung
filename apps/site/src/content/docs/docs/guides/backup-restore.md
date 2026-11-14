@@ -40,7 +40,7 @@ ls backups
 
 Run it on the machine that holds the data folder (it reads `LUMBUNG_DATA_DIR`), from cron or a systemd timer, then copy the folder off the machine. `--all-branches` includes every branch, not only defaults. `--keep 7` deletes all but the newest seven backups of that kind.
 
-Object files never change once written, so an object the previous backup in the same folder already holds is hard-linked from it instead of copied: a nightly backup only adds the objects that are new. `--skip-objects` leaves object files out entirely, for a quick copy of the databases. The backup also carries `secrets/access-key-encryption-key`, without which a restored instance can't check S3 access keys, so keep backups as private as the data folder. A `--meta-only` backup is named `<time>-meta` and counted on its own, so it never pushes a full backup out.
+Object files never change once written, so an object the previous backup in the same folder already holds is hard-linked from it instead of copied: a nightly backup only adds the objects that are new. `--skip-objects` leaves object files out entirely, for a quick copy of the databases; such a backup is named `<time>-no-objects`, counted on its own by `--keep`, and only restored when you name its folder, since restoring it drops every object. The backup also carries `secrets/access-key-encryption-key`, without which a restored instance can't check S3 access keys, so keep backups as private as the data folder. A `--meta-only` backup is named `<time>-meta` and counted on its own, so it never pushes a full backup out.
 
 ## Restore a backup
 

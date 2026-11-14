@@ -139,7 +139,7 @@ func runBackup(args []string) error {
 	if dir == "" && err != nil {
 		return err
 	}
-	out := map[string]any{"backup": dir, "files": len(m.Files), "bytes": m.Bytes(), "object_files": m.ObjectFiles(), "linked": m.Linked}
+	out := map[string]any{"backup": dir, "files": len(m.Files), "bytes": m.Bytes(), "object_files": m.ObjectFiles(), "linked": m.Linked, "skipped": len(m.Skipped)}
 	if len(m.Skipped) > 0 {
 		out["skipped"] = m.Skipped
 	}

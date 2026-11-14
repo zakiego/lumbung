@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zakiego/lumbung/apps/engine/internal/config"
 	"github.com/zakiego/lumbung/apps/engine/internal/engine"
 	"github.com/zakiego/lumbung/apps/engine/internal/meta"
 )
@@ -183,5 +184,104 @@ func TestVerifyObjectPaths(t *testing.T) {
 		if validPath(p) != want {
 			t.Errorf("validPath(%q) = %v", p, !want)
 		}
+	}
+}
+
+// A file that went bad in one backup is copied again from the live data,
+// not linked into the next one.
+func TestCorruptPreviousFileIsNotLinked(t *testing.T) {
+	src := t.TempDir()
+	e := open(t, src)
+	b, _ := e.CreateBucket(bg, "photos")
+	o := putObj(t, e, b.ID, "a.txt", "alpha")
+	to := t.TempDir()
+	now := time.Date(2026, 11, 14, 2, 0, 0, 0, time.UTC)
+	dir1, _, err := Run(bg, Options{DataDir: src, To: to, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := filepath.Join("objects", b.ID, o.BlobID[3:5], o.BlobID)
+	if err := os.WriteFile(filepath.Join(dir1, rel), []byte("ALPHA"), 0o600); err != nil { // same size, wrong bytes
+		t.Fatal(err)
+	}
+	dir2, m2, err := Run(bg, Options{DataDir: src, To: to, Now: func() time.Time { return now.Add(time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m2.Linked != 0 {
+		t.Fatalf("linked %d files from a corrupted backup", m2.Linked)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir2, rel)); string(got) != "alpha" {
+		t.Fatalf("the new backup holds %q", got)
+	}
+	if _, err := Verify(dir2); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A --skip-objects backup is a kind of its own: never the newest full
+// backup, never counted against full ones in retention.
+func TestSkipObjectsBackupsStayApart(t *testing.T) {
+	src := t.TempDir()
+	e := open(t, src)
+	b, _ := e.CreateBucket(bg, "photos")
+	putObj(t, e, b.ID, "a.txt", "alpha")
+	to := t.TempDir()
+	at := time.Date(2026, 11, 14, 2, 0, 0, 0, time.UTC)
+	full, _, err := Run(bg, Options{DataDir: src, To: to, Keep: 1, Now: func() time.Time { return at }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 3; i++ {
+		dir, _, err := Run(bg, Options{DataDir: src, To: to, Keep: 1, SkipObjects: true, Now: func() time.Time { return at.Add(time.Duration(i) * time.Hour) }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasSuffix(dir, noObjectsSuffix) {
+			t.Fatalf("skip-objects backup named %s", dir)
+		}
+	}
+	if latest, _ := Latest(to, false); latest != full {
+		t.Fatalf("latest full backup %q, want %q", latest, full)
+	}
+	if _, err := os.Stat(full); err != nil {
+		t.Fatal("skip-objects backups pushed the full one out of retention")
+	}
+	if all, _ := list(to, noObjectsSuffix); len(all) != 1 {
+		t.Fatalf("kept %d skip-objects backups", len(all))
+	}
+}
+
+// Rolling meta.db back drops an upload whose part file is gone.
+func TestRestoreMetaDropsUploadsWithMissingParts(t *testing.T) {
+	src := t.TempDir()
+	cfg := config.Defaults()
+	cfg.DataDir = src
+	cfg.MinFreeDiskBytes = 1
+	e, err := engine.Open(bg, cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := e.CreateBucket(bg, "photos")
+	u, _ := e.CreateUpload(bg, b.ID, "big", engine.ObjectAttrs{}, "")
+	if _, err := e.UploadPart(bg, engine.UploadPartInput{UploadID: u.ID, BucketID: b.ID, Key: "big", Number: 1, Size: 1, Body: strings.NewReader("x")}); err != nil {
+		t.Fatal(err)
+	}
+	dir, _, err := Run(bg, Options{DataDir: src, To: t.TempDir(), MetaOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = e.Close()
+	// The part file goes away (sent again and the old one collected).
+	parts, _ := os.ReadDir(filepath.Join(src, "uploads", u.ID))
+	for _, p := range parts {
+		_ = os.Remove(filepath.Join(src, "uploads", u.ID, p.Name()))
+	}
+	if _, _, err := RestoreMeta(bg, dir, src, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	r := open(t, src)
+	if _, err := r.GetUpload(bg, u.ID, b.ID, "big"); err == nil {
+		t.Fatal("an upload whose part is gone survived the meta rollback")
 	}
 }
