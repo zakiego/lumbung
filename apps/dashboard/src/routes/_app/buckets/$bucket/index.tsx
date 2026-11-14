@@ -187,6 +187,7 @@ function BucketPage() {
         objects={[...page.objects, ...more.objects].filter((o) => !removed.has(o.key))}
         prefixes={[...page.prefixes, ...more.prefixes]}
         canWrite={canWrite}
+        access={{ publicRead: page.bucket.public_read, s3Endpoint: page.s3Endpoint, canAdmin }}
         onDelete={remove}
         sort={sort}
         onSortChange={setSort}
