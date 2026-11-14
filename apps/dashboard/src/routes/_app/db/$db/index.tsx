@@ -8,7 +8,7 @@ import { ChartFailed, Deferred, Stat, StatGrid, WindowSelect } from "@/component
 import { Card, CardContent, CardHeader, CardTitle, Skeleton } from "@/components/ui/surface"
 import { toast } from "@/components/ui/toast"
 import { listSnapshots } from "@/fns/admin"
-import { createBranch, getConnectInfo, getSchema, getStats } from "@/fns/databases"
+import { createBranch, getSchema, getStats } from "@/fns/databases"
 import { formatBytes, number, timeAgo } from "@/lib/format"
 import { can } from "@/lib/roles"
 import { settle } from "@/lib/settle"
@@ -17,14 +17,14 @@ import { DEFAULT_WINDOW, WINDOW_LABEL, errorRate, windowSearch } from "@/lib/sta
 export const Route = createFileRoute("/_app/db/$db/")({
   validateSearch: windowSearch,
   loaderDeps: ({ search }) => ({ branch: search.branch, range: search.window ?? DEFAULT_WINDOW }),
-  loader: async ({ params, deps, parentMatchPromise }) => {
+  loader: async ({ params, deps, parentMatchPromise, context }) => {
     const parent = await parentMatchPromise
     const database = parent.loaderData?.database
     const branches = parent.loaderData?.branches ?? []
     const branch = deps.branch && branches.some((b) => b.name === deps.branch) ? deps.branch : (database?.default_branch ?? "main")
     const ref = { db: params.db, branch }
     return {
-      connect: await getConnectInfo(),
+      connect: { engineUrl: context.engineUrl },
       schema: settle(getSchema({ data: ref })),
       stats: settle(getStats({ data: { ...ref, window: deps.range } })),
       snapshots: settle(listSnapshots({ data: ref })),

@@ -218,7 +218,7 @@ Added in milestone 11 (ADR 0005). The libSQL remote protocol over HTTP (Hrana v2
 - Typed errors that carry the API's `code`. Retries only on safe reads.
 - `@lumbung/client/drizzle`: adapter on Drizzle's `sqlite-proxy` driver, with a tested example.
 - Tests run against a real engine binary, not mocks.
-- Published to GitHub Packages (the repository owner's scope, `UNLICENSED`) by `.github/workflows/release-client.yml` on a `client-vX.Y.Z` tag. Release steps are in `ops/README.md`.
+- Published to npm as `@lumbung/client` under MIT by `.github/workflows/release-client.yml` on a `client-vX.Y.Z` tag. Release steps are in `ops/README.md`.
 
 ### `lumbung` (CLI)
 
@@ -314,11 +314,11 @@ Work top to bottom. Each one ends green in CI, with its docs pages written.
 
 Object storage continues with milestones 12 to 17 in section 16.9.
 
-Later, not scheduled: MCP OAuth for Claude on the web, publishing the CLI, publishing the SDK to public npm, the open-source checklist (license, security policy, contribution guide), read replicas.
+Later, not scheduled: MCP OAuth for Claude on the web, publishing the CLI, the open-source checklist (license, security policy, contribution guide), read replicas.
 
 ## 15. Open questions for Zaki
 
-- License for when the repo goes public.
+- License for when the repo goes public. The SDK is already MIT.
 - Whether the public hostname stays `lumbung.zakiego.com` or moves to its own domain.
 
 ## 16. Object storage
@@ -409,7 +409,7 @@ Limits (section 6.3 style, all settings): object size, bucket size, total object
 
 ### 16.8 Dashboard and docs
 
-- Dashboard: Buckets in the sidebar. List with size and object count, create. Bucket browser with folders from `/`, breadcrumbs, upload (streamed through the dashboard, not buffered), download, delete, empty and loading and error states. Settings: public read, CORS origins, delete with a typed confirmation. Read-only members browse and download; members upload and delete; owners change settings and create or delete buckets.
+- Dashboard: Buckets in the sidebar. List with size and object count, create. Bucket browser with folders from `/`, breadcrumbs, upload (streamed through the dashboard, not buffered), download, delete, empty and loading and error states. Clicking a file opens its details in a drawer (a bottom sheet on phones): an image preview, the public link with copy when the bucket is public, size, type, modified time, ETag, headers and metadata, with download and delete. Settings: public read, CORS origins, delete with a typed confirmation. Read-only members browse and download; members upload and delete; owners change settings and create or delete buckets.
 - Docs: Concepts: Buckets and objects; Tokens and scopes and Limits updated. Guides: Use an S3 client, Store files from Node, Browser uploads with presigned URLs. Reference: S3 API (operations, auth, error codes). Self-hosting: Backups updated. Samples run in `scripts/docs-test`; S3 samples run inside `examples/s3`.
 - `examples/s3`: the AWS SDK for JavaScript, unchanged, against a real engine in CI: put, get with a range, head, list with prefix and delimiter, copy, delete, multipart (by hand and with its upload helper), presigned GET and PUT.
 

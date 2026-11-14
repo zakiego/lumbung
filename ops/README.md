@@ -198,31 +198,28 @@ docker compose up -d --no-build --wait
 
 ## Releasing the SDK
 
-`.github/workflows/release-client.yml` publishes `packages/client` to GitHub Packages when a `client-vX.Y.Z` tag is pushed. It runs the SDK build, typecheck and tests against a fresh `lumbungd` first, and fails if the tag doesn't match the version in `packages/client/package.json`.
+`.github/workflows/release-client.yml` publishes `packages/client` to npm as `@lumbung/client` (public, MIT) when a `client-vX.Y.Z` tag is pushed. It runs the SDK build, typecheck and tests against a fresh `lumbungd` first, and fails if the tag doesn't match the version in `packages/client/package.json`. The workspace keeps `"private": true`, and the workflow drops it only for the publish, so nothing goes out from a laptop.
 
-GitHub Packages only accepts a scope named after the repository owner, so the package is published as `@zakiego/lumbung-client`. In the workspace it stays `@lumbung/client`, and it stays `"private": true` so nothing publishes it from a laptop. The license is `UNLICENSED`.
+The repository is private, so npm doesn't attach provenance.
+
+### One-time setup
+
+1. On npmjs.com, create the free `lumbung` organization. It owns the `@lumbung` scope.
+2. Create a granular access token with read and write on packages in the `lumbung` organization, and save it as the `NPM_TOKEN` repository secret. The first publish needs it because trusted publishing can only be set up on a package that already exists.
+3. After the first release, open the package settings on npmjs.com and add a trusted publisher: GitHub Actions, repository `zakiego/lumbung`, workflow `release-client.yml`. Then delete the `NPM_TOKEN` secret and revoke the token. From then on npm signs in with the workflow's OIDC token.
+
+### Each release
 
 1. Bump `version` in `packages/client/package.json` and merge it to `main`.
 2. Tag that commit and push the tag:
 
    ```bash
-   git tag client-v0.1.0
-   git push origin client-v0.1.0
+   git tag -a client-v0.1.1 -m "@lumbung/client 0.1.1"
+   git push origin client-v0.1.1
    ```
 
-3. Watch the run in the Actions tab. The package shows up under the repository's Packages.
+3. Watch the run in the Actions tab, then check https://www.npmjs.com/package/@lumbung/client.
 
 A version can't be published twice. To fix a bad release, bump the version and tag again.
 
-To install it, create a classic personal access token with `read:packages` and add this `.npmrc` to the consuming project:
-
-```ini
-@zakiego:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
-```
-
-Then alias it so imports keep using `@lumbung/client`:
-
-```bash
-pnpm add @lumbung/client@npm:@zakiego/lumbung-client
-```
+`client-v0.1.0` went to GitHub Packages as `@zakiego/lumbung-client` before the switch to npm. That package can be deleted from the repository's Packages page.

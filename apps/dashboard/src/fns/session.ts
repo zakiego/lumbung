@@ -14,9 +14,16 @@ const token = z.string().min(10).max(200)
 
 export const getSession = createServerFn({ method: "GET" }).handler(async () => {
   const [viewer, users] = await Promise.all([getViewer(), userCount()])
+  // The engine URL for connect snippets rides along, so the database overview
+  // doesn't need a round trip of its own. Tokens never leave the server.
   // Passkeys only work on the dashboard URL, not on an extra origin.
-  const passkeys = passkeysAvailable(getRequest())
-  return { viewer, needsSetup: users === 0, passkeys, dashboardUrl: config().publicUrl }
+  return {
+    viewer,
+    needsSetup: users === 0,
+    engineUrl: viewer ? config().publicEngineUrl : null,
+    passkeys: passkeysAvailable(getRequest()),
+    dashboardUrl: config().publicUrl,
+  }
 })
 
 async function signIn(emailValue: string, passwordValue: string) {
