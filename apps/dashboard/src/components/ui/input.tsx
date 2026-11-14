@@ -11,7 +11,7 @@ import { type Styled, cn } from "@/lib/utils"
 
 // 16px text on phones so focusing a field doesn't zoom the page.
 const field =
-  "w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 text-base text-foreground caret-brand transition-[border-color] duration-100 placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none data-disabled:cursor-not-allowed data-disabled:opacity-50 data-invalid:border-destructive md:text-[13px]"
+  "w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 text-base text-foreground caret-brand transition-[border-color] duration-100 hover:border-input-strong placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none data-disabled:cursor-not-allowed data-disabled:opacity-50 data-invalid:border-destructive md:text-[13px]"
 
 export function Input({ className, ...props }: Styled<typeof InputPart>) {
   return <InputPart className={cn(field, "h-8", className)} {...props} />
@@ -31,7 +31,7 @@ export function PasswordInput({ className, placeholder, id, ...props }: Password
   return (
     <PasswordInputPart
       className={cn(
-        "flex h-8 w-full items-center rounded-md border border-input transition-[border-color] duration-100 has-focus-visible:border-ring data-disabled:opacity-50 has-data-invalid:border-destructive",
+        "flex h-8 w-full items-center rounded-md border border-input transition-[border-color] duration-100 hover:border-input-strong has-focus-visible:border-ring data-disabled:opacity-50 has-data-invalid:border-destructive",
         className,
       )}
       {...props}
