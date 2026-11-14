@@ -5,7 +5,7 @@ import { ScrollArea } from "@/components/ui/layout"
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs"
 import { TruncatedTip } from "@/components/ui/tooltip"
 import { can } from "@/lib/roles"
-import { prefixTrail } from "./buckets"
+import { type ObjectSortKey, type SortDir, prefixTrail } from "./buckets"
 import { CONTAINER, PageBody, PageHeader } from "./shell"
 
 export type BucketSection = "objects" | "connect" | "settings"
@@ -21,12 +21,15 @@ export function BucketFrame({
   bucket,
   section,
   prefix = "",
+  keep = {},
   actions,
   children,
 }: {
   bucket: string
   section: BucketSection
   prefix?: string
+  /** The object list's sort, carried through the folder links. */
+  keep?: { sort?: ObjectSortKey; dir?: SortDir }
   actions?: ReactNode
   children: ReactNode
 }) {
@@ -53,7 +56,7 @@ export function BucketFrame({
                     {bucket}
                   </h1>
                 ) : (
-                  <Link to="/buckets/$bucket" params={{ bucket }} className="block truncate font-mono text-muted-foreground hover:text-foreground">
+                  <Link to="/buckets/$bucket" params={{ bucket }} search={keep} className="block truncate font-mono text-muted-foreground hover:text-foreground">
                     {bucket}
                   </Link>
                 )}
@@ -70,7 +73,7 @@ export function BucketFrame({
                       {t.label}
                     </h1>
                   ) : (
-                    <Link to="/buckets/$bucket" params={{ bucket }} search={{ prefix: t.prefix }} className="block truncate font-mono text-muted-foreground hover:text-foreground">
+                    <Link to="/buckets/$bucket" params={{ bucket }} search={{ prefix: t.prefix, ...keep }} className="block truncate font-mono text-muted-foreground hover:text-foreground">
                       {t.label}
                     </Link>
                   )}
