@@ -141,6 +141,12 @@ docker run --rm --network none --user 65532 -v lumbung_data:/data --entrypoint r
 
 The host copies hold the service token (folder mode 700). They survive a lost volume, not a lost disk.
 
+Every deploy checks the nightly agent (`ops/install-backup.sh --check`) and reinstalls it when the installed script or plist differs from the repo or launchd doesn't have the job loaded. A failed install warns in the deploy log and the next deploy tries again. By hand:
+
+```bash
+./ops/install-backup.sh --check || ./ops/install-backup.sh
+```
+
 Restore drill: restores the newest host copy into scratch volumes, starts a throwaway engine on a free port in 4890-4899, runs `integrity_check` on every database through the API, tears it all down and prints PASS or FAIL.
 
 ```bash

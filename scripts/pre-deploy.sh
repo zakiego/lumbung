@@ -13,16 +13,19 @@
 #      that image means there's no rollback point, so the deploy stops
 #      (LUMBUNG_ALLOW_NO_ROLLBACK=1 deploys anyway, for when the new engine is
 #      the fix)
-#   3. If ops/backup.sh changed, reinstall the nightly backup agent so the
-#      installed copy in ~/selfhost/bin doesn't drift from the repo.
+#   3. the nightly backup agent: when the installed copy of ops/backup.sh or
+#      the plist differs from the repo, or launchd doesn't have the job
+#      loaded, reinstall it (ops/install-backup.sh). A failure there warns
+#      loudly but doesn't stop the deploy, and the next deploy tries again.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 export COMPOSE_FILE="${LUMBUNG_COMPOSE_FILE:-compose.yaml:ops/compose.selfhost.yaml}"
 ALLOW_NO_ROLLBACK="${LUMBUNG_ALLOW_NO_ROLLBACK:-0}"
-# Overridable so a test never touches the real launchd agent.
-INSTALLED_BACKUP="${LUMBUNG_INSTALLED_BACKUP:-$HOME/selfhost/bin/lumbung-backup.sh}"
+# Overridable so a test never touches the real launchd agent (see also the
+# env ops/install-backup.sh reads).
 INSTALL_BACKUP="${LUMBUNG_INSTALL_BACKUP:-./ops/install-backup.sh}"
+LAUNCHCTL="${LUMBUNG_LAUNCHCTL:-launchctl}"
 
 log() { echo "[pre-deploy] $*"; }
 # shellcheck source=ops/lib.sh
@@ -67,8 +70,19 @@ if volume_exists "$DASHBOARD_VOLUME" && ! image_exists "$DASHBOARD_IMAGE"; then
 fi
 
 # --- nightly backup agent -----------------------------------------------------
-if command -v launchctl >/dev/null && ! cmp -s ops/backup.sh "$INSTALLED_BACKUP"; then
-  log "ops/backup.sh differs from $INSTALLED_BACKUP, reinstalling the nightly backup"
-  # A launchd hiccup shouldn't block the deploy, but it must be loud.
-  "$INSTALL_BACKUP" || log "WARNING: install-backup.sh failed; the nightly backup still runs the old script"
+if command -v "$LAUNCHCTL" >/dev/null; then
+  if ! "$INSTALL_BACKUP" --check; then
+    log "reinstalling the nightly backup"
+    # A launchd hiccup shouldn't block the deploy, but it must be loud.
+    if ! "$INSTALL_BACKUP"; then
+      if "$INSTALL_BACKUP" --check >/dev/null 2>&1; then
+        log "WARNING: install-backup.sh failed, but the nightly backup is loaded and up to date"
+      else
+        log "WARNING: install-backup.sh failed and the nightly backup is not installed as the repo has it (see above)."
+        log "WARNING: run ./ops/install-backup.sh by hand; the next deploy tries again"
+      fi
+    fi
+  fi
+else
+  log "no launchctl here, not checking the nightly backup"
 fi

@@ -1,18 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Nightly Lumbung backup. Template: ops/install-backup.sh replaces __HOME__
-  and installs it as ~/Library/LaunchAgents/com.zakiego.lumbung-backup.plist.
+  Nightly Lumbung backup. A template: ops/install-backup.sh fills in the
+  label, the installed script (~/selfhost/bin/lumbung-backup.sh) and the
+  selfhost folder (~/selfhost), and installs it in ~/Library/LaunchAgents.
   If the Mac is asleep at 03:30, launchd runs the job when it wakes.
 -->
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.zakiego.lumbung-backup</string>
+  <string>__LABEL__</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>__HOME__/selfhost/bin/lumbung-backup.sh</string>
+    <string>__SCRIPT__</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict>
@@ -24,15 +25,15 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>LUMBUNG_DIR</key>
-    <string>__HOME__/selfhost/lumbung</string>
+    <string>__SELFHOST__/lumbung</string>
     <key>BACKUP_DIR</key>
-    <string>__HOME__/selfhost/lumbung-backups</string>
+    <string>__SELFHOST__/lumbung-backups</string>
   </dict>
   <!-- The script logs to this file itself; these catch anything before that. -->
   <key>StandardOutPath</key>
-  <string>__HOME__/selfhost/lumbung-backup.log</string>
+  <string>__SELFHOST__/lumbung-backup.log</string>
   <key>StandardErrorPath</key>
-  <string>__HOME__/selfhost/lumbung-backup.log</string>
+  <string>__SELFHOST__/lumbung-backup.log</string>
   <key>RunAtLoad</key>
   <false/>
   <key>LowPriorityIO</key>
