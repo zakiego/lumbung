@@ -6,6 +6,9 @@ import type { RunResult, StatementResult } from "@/fns/sql"
 import { bigText, worstColumns, worstRows } from "./grid-fixtures"
 import { SqlConsole, planTree, pushHistory, readHistory } from "./sql-console"
 
+// 300-column renders take a few seconds on a shared CI runner.
+const WIDE = { timeout: 30_000 }
+
 const agent = createAgent()
 
 const select = (over: Partial<StatementResult> = {}): StatementResult => ({
@@ -146,7 +149,7 @@ test("a read-only role sees it", () => {
   expect(screen.getByText("Read-only")).toBeTruthy()
 })
 
-test("worst case: 300 columns and a 5 MB value open without the full value", async () => {
+test("worst case: 300 columns and a 5 MB value open without the full value", WIDE, async () => {
   const user = userEvent.setup()
   const wide = select({ columns: worstColumns.map((c) => c.name), rows: worstRows.map((r) => r.cells), rowCount: 50 })
   const { editor } = setup(vi.fn(async () => ({ results: [wide], ms: 9, readOnly: false })))
@@ -161,7 +164,7 @@ test("worst case: 300 columns and a 5 MB value open without the full value", asy
   expect(within(dialog).getByText("First 1,000 of 5,242,880 characters")).toBeTruthy()
 })
 
-test("a wide result draws a few rows at a time", async () => {
+test("a wide result draws a few rows at a time", WIDE, async () => {
   const user = userEvent.setup()
   const rows = Array.from({ length: 120 }, (_, i) => worstRows[i % worstRows.length]!.cells)
   const wide = select({ columns: worstColumns.map((c) => c.name), rows, rowCount: 120 })

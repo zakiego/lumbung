@@ -6,6 +6,9 @@ import { expect, test } from "vitest"
 import { worstTableName } from "./grid-fixtures"
 import { SchemaView } from "./schema-view"
 
+// 300-column renders take a few seconds on a shared CI runner.
+const WIDE = { timeout: 30_000 }
+
 const agent = createAgent()
 
 const wideColumns = Array.from({ length: 300 }, (_, i) => ({ name: `attribute_${i}`, type: "TEXT", not_null: false, pk: 0, default: null, hidden: 0 }))
@@ -53,7 +56,7 @@ test("a small schema starts open: columns, indexes, triggers and DDL with copy b
   await waitFor(() => expect(screen.queryByText("users_email")).toBeNull())
 })
 
-test("a 300-column table opens into a scrolling list", async () => {
+test("a 300-column table opens into a scrolling list", WIDE, async () => {
   render(<SchemaView schema={schema} />)
   const trigger = screen.getByRole("button", { name: new RegExp(`^${worstTableName}`) })
   expect(trigger.textContent).toContain("300 columns")

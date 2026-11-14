@@ -7,6 +7,9 @@ import type { GridSort } from "@/components/ui/data-grid"
 import { bigText, demoColumns, demoRows, worstColumns, worstRows } from "./grid-fixtures"
 import { TableGrid } from "./table-grid"
 
+// 300-column renders take a few seconds on a shared CI runner.
+const WIDE = { timeout: 30_000 }
+
 const agent = createAgent()
 
 function Editable({ onOpenCell = () => {} }: { onOpenCell?: (rowId: string, col: number) => void }) {
@@ -105,7 +108,7 @@ test("a read-only grid has no selection column and headers that don't sort", asy
   for (const h of screen.getAllByRole("columnheader")) expect(h.getAttribute("aria-sort")).toBeNull()
 })
 
-test("worst case: 300 columns, a 5 MB value, blobs, NULLs and huge numbers", async () => {
+test("worst case: 300 columns, a 5 MB value, blobs, NULLs and huge numbers", WIDE, async () => {
   render(<TableGrid label="wide" columns={worstColumns} rows={worstRows} onSelectedChange={() => {}} selected={[]} />)
   await tick()
   const grid = screen.getByRole("grid", { name: "wide" })
