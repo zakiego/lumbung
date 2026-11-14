@@ -36,7 +36,16 @@ Read-only SQL from the dashboard runs on a read-only connection, the same as a t
 
 Buckets are in the sidebar under Buckets. A bucket page lists its objects with folders rolled up at `/`; click a folder to go in, and the breadcrumb to go back. Upload sends files into the folder you're in, streamed through the dashboard to the engine without being held in memory. Files over 16 MiB go up as a multipart upload, one 16 MiB part per request, so a large file never meets a request timeout and a failed upload is aborted with its parts. The [object limits](/docs/concepts/limits/#object-storage) apply. Downloads always save as files: the dashboard never shows an object's content in the page.
 
-An owner's bucket settings turn public read on or off, set the CORS origins for browser uploads, show the S3 endpoint, and delete the bucket once it is empty.
+An owner's bucket settings turn public read on or off, set the CORS origins for browser uploads, and delete the bucket once it is empty.
+
+## Connect
+
+Each database and each bucket has a **Connect** tab. It lists the values a client needs, each with a copy button, and has ready-to-paste code for that database or bucket.
+
+- A database's tab shows the engine URL, the libSQL URL of the branch picked in the header, the MCP URL, and code for the SDK, `@libsql/client`, Drizzle, the CLI, curl and MCP.
+- A bucket's tab shows the engine URL, the S3 endpoint, the region and the bucket, a link to create an access key (for owners), and code for the SDK, the AWS SDK, boto3, rclone, the CLI and curl.
+
+The code reads the token from `LUMBUNG_TOKEN` (and S3 keys from `LUMBUNG_ACCESS_KEY_ID` and `LUMBUNG_SECRET_ACCESS_KEY`), so no secret ever appears on the page. The URLs come from `LUMBUNG_PUBLIC_ENGINE_URL`, described in [Dashboard configuration](/docs/reference/dashboard-configuration/).
 
 ## Passkeys
 
