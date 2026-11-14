@@ -145,7 +145,7 @@ A branch is a full copy of its parent at the moment it was made, taken with the 
 ### 6.8 Tokens
 
 - Format `lmb_<id>_<secret>`. Only a SHA-256 hash is stored. The full token is shown once.
-- Scopes: instance admin, or per database with read, write or admin, optionally limited to one branch. Optional expiry. Last-used time recorded.
+- Scopes: instance admin, per database with read, write or admin (optionally limited to one branch), or per bucket (section 16.4). Optional expiry and S3 access key. Last-used time recorded.
 - Constant-time comparison. Rate limit per token. Failed auth is rate limited by address.
 
 ### 6.9 Audit and stats
@@ -242,7 +242,7 @@ Built with `/zaki-design-ui` on ui-sdk components (ADR 0004; this said shadcn un
   - Branches: list, create, diff against parent, reset, promote, delete.
   - Snapshots: list, create, schedule, restore to a new branch.
   - Settings: rename, limits, import, export, delete.
-- Tokens, Members and invites, Audit log, Instance settings.
+- Tokens (for a database, a branch, a bucket or everything, with an optional S3 access key), Members and invites, Audit log, Instance settings.
 
 Destructive actions need a typed confirmation. Every list has empty, loading and error states. Run `break-ui` on anything that renders user data: long table names, a 300-column table, a 5 MB text cell, blobs, NULLs, zero rows.
 
