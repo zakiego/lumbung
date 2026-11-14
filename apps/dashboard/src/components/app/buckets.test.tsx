@@ -1,9 +1,24 @@
 import type { BucketOut, ObjectOut } from "@lumbung/client"
 import { RouterProvider, createMemoryHistory, createRootRoute, createRouter } from "@tanstack/react-router"
 import { render as rtlRender, screen } from "@testing-library/react"
-import type { ReactNode } from "react"
+import userEvent from "@testing-library/user-event"
+import { type ReactNode, useState } from "react"
 import { expect, test } from "vitest"
-import { BucketTable, ObjectTable, PART_BYTES, prefixTrail, uploadFile } from "./buckets"
+import {
+  BucketTable,
+  DEFAULT_OBJECT_SORT,
+  defaultSortDir,
+  type ObjectSort,
+  ObjectSortMenu,
+  ObjectTable,
+  PART_BYTES,
+  nextObjectSort,
+  prefixTrail,
+  sortFolders,
+  sortObjects,
+  sortSearch,
+  uploadFile,
+} from "./buckets"
 
 const noop = async () => {}
 
@@ -49,8 +64,8 @@ test("object table: folders first, names relative to the prefix, long and odd ke
   const keys = ["reports/a.pdf", LONG_KEY, "reports/🍚 rice\tharvest.txt", "reports/../escape", "reports/ünï"]
   await render(<ObjectTable bucket="docs" prefix="reports/" objects={keys.map((k) => obj(k))} prefixes={["reports/2026/", "reports/ /"]} canWrite onDelete={noop} />)
   const rows = [...document.querySelectorAll("tbody tr")].map((r) => r.textContent)
-  expect(rows[0]).toContain("2026/")
-  expect(rows[1]).toContain(" /")
+  expect(rows[0]).toContain(" /")
+  expect(rows[1]).toContain("2026/")
   readable(LONG_KEY.slice("reports/".length))
   expect(screen.getByText("../escape")).toBeTruthy()
   expect(screen.getAllByRole("button", { name: /^Delete reports\// })).toHaveLength(5)
@@ -117,4 +132,75 @@ test("uploadFile: small files in one request, large ones in parts, aborted on fa
   calls.length = 0
   await expect(uploadFile("b", "", big, fake(2))).rejects.toThrow("disk full")
   expect(calls.at(-1)!.method).toBe("DELETE")
+})
+
+const sized = (key: string, size: number, type: string, modified: string): ObjectOut => ({ ...obj(key, size), content_type: type, last_modified: modified })
+const files = [
+  sized("IMG_10.png", 300, "image/png", "2026-11-12T00:00:00Z"),
+  sized("IMG_9.jpeg", 6, "image/jpeg", "2026-11-14T00:00:00Z"),
+  sized("b.txt", 300, "text/plain", "2026-11-13T00:00:00Z"),
+]
+const keys = (sort: ObjectSort) => sortObjects(files, sort).map((o) => o.key)
+
+test("sort: natural names, numbers and dates, ties by name", () => {
+  expect(keys(DEFAULT_OBJECT_SORT)).toEqual(["b.txt", "IMG_9.jpeg", "IMG_10.png"])
+  expect(keys({ key: "name", dir: "desc" })).toEqual(["IMG_10.png", "IMG_9.jpeg", "b.txt"])
+  expect(keys({ key: "size", dir: "desc" })).toEqual(["b.txt", "IMG_10.png", "IMG_9.jpeg"])
+  expect(keys({ key: "size", dir: "asc" })).toEqual(["IMG_9.jpeg", "b.txt", "IMG_10.png"])
+  expect(keys({ key: "modified", dir: "desc" })).toEqual(["IMG_9.jpeg", "b.txt", "IMG_10.png"])
+  expect(keys({ key: "type", dir: "asc" })).toEqual(["IMG_9.jpeg", "IMG_10.png", "b.txt"])
+  expect(sortFolders(["b/", "a10/", "a9/"], { key: "size", dir: "desc" })).toEqual(["a9/", "a10/", "b/"])
+  expect(sortFolders(["b/", "a10/", "a9/"], { key: "name", dir: "desc" })).toEqual(["b/", "a10/", "a9/"])
+})
+
+test("sort: a new column starts where people look first, the same one flips", () => {
+  expect(nextObjectSort(DEFAULT_OBJECT_SORT, "name")).toEqual({ key: "name", dir: "desc" })
+  expect(nextObjectSort(DEFAULT_OBJECT_SORT, "size")).toEqual({ key: "size", dir: "desc" })
+  expect(nextObjectSort(DEFAULT_OBJECT_SORT, "modified")).toEqual({ key: "modified", dir: "desc" })
+  expect(nextObjectSort({ key: "size", dir: "desc" }, "type")).toEqual({ key: "type", dir: "asc" })
+  expect(defaultSortDir("name")).toBe("asc")
+  expect(defaultSortDir("size")).toBe("desc")
+  expect(sortSearch(DEFAULT_OBJECT_SORT)).toEqual({})
+  expect(sortSearch({ key: "size", dir: "desc" })).toEqual({ sort: "size", dir: "desc" })
+})
+
+// The route hands in a navigate call, which returns a Promise.
+function Sortable() {
+  const [sort, set] = useState<ObjectSort>(DEFAULT_OBJECT_SORT)
+  const setSort = (s: ObjectSort) => {
+    set(s)
+    return new Promise<void>(() => {})
+  }
+  return (
+    <>
+      <ObjectSortMenu sort={sort} onSortChange={setSort} />
+      <ObjectTable bucket="docs" prefix="" objects={files} prefixes={["z/"]} canWrite onDelete={noop} sort={sort} onSortChange={setSort} />
+    </>
+  )
+}
+const order = () => [...document.querySelectorAll("tbody tr")].map((r) => r.querySelector("td .truncate")!.textContent)
+
+test("object table: headers sort, folders stay on top, the menu agrees", async () => {
+  const user = userEvent.setup()
+  await render(<Sortable />)
+  expect(screen.getByRole("columnheader", { name: "Name" }).getAttribute("aria-sort")).toBe("ascending")
+  await user.click(screen.getByRole("button", { name: "Size" }))
+  expect(order()).toEqual(["z/", "b.txt", "IMG_10.png", "IMG_9.jpeg"])
+  const size = screen.getByRole("columnheader", { name: "Size" })
+  expect(size.getAttribute("aria-sort")).toBe("descending")
+  expect(screen.getByRole("columnheader", { name: "Name" }).getAttribute("aria-sort")).toBeNull()
+  // A slow navigation never leaves the header busy, so a second press lands.
+  expect(screen.getByRole("button", { name: "Size" }).getAttribute("aria-busy")).toBeNull()
+  await user.click(screen.getByRole("button", { name: "Size" }))
+  expect(size.getAttribute("aria-sort")).toBe("ascending")
+  await user.click(screen.getByRole("button", { name: "Sort by Size, ascending" }))
+  await user.click(await screen.findByRole("menuitemradio", { name: "Modified" }))
+  expect(order()).toEqual(["z/", "IMG_9.jpeg", "b.txt", "IMG_10.png"])
+  expect(screen.getByRole("button", { name: "Sort by Modified, descending" })).toBeTruthy()
+})
+
+test("object table: without onSortChange the headers are plain text", async () => {
+  await render(<ObjectTable bucket="docs" prefix="" objects={files} prefixes={[]} canWrite onDelete={noop} />)
+  expect(screen.queryByRole("button", { name: "Size" })).toBeNull()
+  expect(order()).toEqual(["b.txt", "IMG_9.jpeg", "IMG_10.png"])
 })
