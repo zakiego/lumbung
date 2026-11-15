@@ -15,11 +15,9 @@ function loadFonts() {
   fonts ??= Promise.all([
     font("@fontsource/inter/files/inter-latin-400-normal.woff"),
     font("@fontsource/inter/files/inter-latin-500-normal.woff"),
-    font("@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff"),
-  ]).then(([regular, medium, mono]) => [
+  ]).then(([regular, medium]) => [
     { name: "Inter", data: regular, weight: 400 as const, style: "normal" as const },
     { name: "Inter", data: medium, weight: 500 as const, style: "normal" as const },
-    { name: "Mono", data: mono, weight: 400 as const, style: "normal" as const },
   ])
   return fonts
 }
@@ -94,23 +92,13 @@ function card({ title, line, section, host }: Card) {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 26, position: "relative" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            fontFamily: "Mono",
-            fontSize: 24,
-            color: c.muted,
-            padding: "12px 20px",
-            border: `1px solid ${c.border}`,
-            borderRadius: 12,
-            background: c.surface,
-          }}
-        >
-          <span style={{ color: c.faint }}>$</span>
-          <span style={{ color: c.foreground }}>lumbung branch create pr-42</span>
-        </div>
+        {/* The hero graph in small: main, with a branch and a bucket on its orbit. */}
+        <svg width="232" height="96" viewBox="0 0 232 96">
+          <ellipse cx="116" cy="48" rx="102" ry="36" fill="none" stroke={c.muted} strokeWidth="3" strokeDasharray="1 10" strokeLinecap="round" />
+          <circle cx="116" cy="48" r="24" fill={c.mark} />
+          <circle cx="28" cy="30" r="12" fill={c.background} stroke={c.foreground} strokeWidth="3" />
+          <circle cx="198" cy="69" r="12" fill={c.background} stroke={c.foreground} strokeWidth="3" />
+        </svg>
         <span style={{ color: c.muted }}>{host}</span>
       </div>
     </div>

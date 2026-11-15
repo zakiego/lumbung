@@ -1,7 +1,8 @@
 ---
 import { Code } from "astro:components"
+import { Orbit } from "@/components/landing/orbit"
 import { CodeFrame } from "@/components/landing/code-frame"
-import { Terminal } from "@/components/landing/terminal"
+import { AgentBranch, BranchTree, Clients, Files } from "@/components/landing/feature-graphs"
 import Landing from "@/layouts/Landing.astro"
 import { markPath, site } from "@/lib/site"
 
@@ -20,28 +21,8 @@ const compose = `git clone https://github.com/zakiego/lumbung.git
 cd lumbung
 docker compose up -d --build`
 
-const tree = [
-  { name: "main", meta: "default", root: true },
-  { name: "pr-42", meta: "+ index orders_by_email", add: true },
-  { name: "agent-sandbox", meta: "expires in 7 days" },
-]
-
-const tools = [
-  { tool: "create_branch", args: "agent-sandbox" },
-  { tool: "execute", args: "ALTER TABLE users ADD plan TEXT" },
-  { tool: "diff_branches", args: "1 change against main" },
-]
-
-const libsqlClients = ["@libsql/client", "drizzle-orm/libsql"]
-
-const objects = [
-  { key: "photos/2026/cat.jpg", size: "182 KB" },
-  { key: "photos/2026/dog.jpg", size: "204 KB" },
-  { key: "photos/2026/beach.jpg", size: "317 KB" },
-]
-
 const link =
-  "group/link inline-flex items-center gap-1.5 text-[13px] text-muted-foreground transition-[color] duration-100 ease-(--ease-out-quad) hover:text-foreground"
+  "group/link -my-1.5 inline-flex items-center gap-1.5 self-start py-1.5 text-[13px] text-muted-foreground transition-[color] duration-100 ease-(--ease-out-quad) hover:text-foreground active:text-foreground"
 const pill = "press inline-flex items-center rounded-full font-[510]"
 const primary = `${pill} bg-primary text-primary-foreground hover:bg-primary-hover`
 const secondary = `${pill} bg-secondary text-foreground shadow-[inset_0_0_0_1px_var(--hairline)] hover:bg-secondary-hover`
@@ -76,95 +57,51 @@ const secondary = `${pill} bg-secondary text-foreground shadow-[inset_0_0_0_1px_
   </header>
 
   <main id="main">
-    <section class="mx-auto grid max-w-7xl items-center gap-10 px-6 pt-10 pb-24 md:pt-24 md:pb-32 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:gap-16">
+    <section class="mx-auto grid max-w-7xl items-center gap-10 px-6 pt-10 pb-20 md:pt-20 md:pb-28 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-16">
       <div>
         <h1 class="-ml-0.5 text-[32px] leading-[1.12] font-[510] tracking-[-0.022em] text-balance md:text-[44px] md:leading-[1.08]">
           {site.headline}
         </h1>
-        <p class="mt-4 max-w-md text-[15px] md:mt-5 leading-relaxed text-muted-foreground md:text-[17px]">{site.description}</p>
+        <p class="mt-4 max-w-md text-[15px] leading-relaxed text-muted-foreground md:mt-5 md:text-[17px]">{site.tagline}</p>
         <a href="/docs/quickstart/" class={`${primary} mt-6 h-8 px-3 text-[13px] md:mt-8`}>Get started</a>
       </div>
-      <Terminal client:load />
+      <Orbit client:load />
     </section>
 
     <section aria-label="Features" class="border-t border-hairline">
       <div class="mx-auto grid max-w-7xl px-6 md:grid-cols-2">
         <article class="flex flex-col gap-6 border-b border-hairline py-12 md:border-r md:py-16 md:pr-12">
-          <ul class="flex flex-col gap-3 font-mono text-[13px]" aria-label="Branches of the shop database">
-            {
-              tree.map((b) => (
-                <li class:list={["relative flex min-w-0 items-center gap-3", !b.root && "pl-6"]}>
-                  {!b.root && <span aria-hidden="true" class="absolute bottom-1/2 left-[4.5px] h-8 w-[19px] rounded-bl-[6px] border-b border-l border-border" />}
-                  <span aria-hidden="true" class:list={["relative z-10 size-2.5 shrink-0 rounded-full", b.root ? "bg-foreground" : "border border-muted-foreground bg-background"]} />
-                  <span class="shrink-0 text-foreground">{b.name}</span>
-                  <span class:list={["min-w-0 text-xs [overflow-wrap:anywhere]", b.add ? "text-success" : "text-muted-foreground"]}>{b.meta}</span>
-                </li>
-              ))
-            }
-          </ul>
+          <BranchTree />
           <div>
             <h2 class="text-[17px] font-[510] tracking-[-0.012em]">Branches are full copies</h2>
-            <p class="mt-1.5 text-[15px] text-muted-foreground">Change one, diff it against main, then throw it away.</p>
+            <p class="mt-1.5 text-[15px] text-pretty text-muted-foreground">Change one, diff it against main, then throw it away.</p>
           </div>
           <a href="/docs/concepts/branches/" class={link}>Branches <span aria-hidden="true" class="transition-transform duration-100 ease-(--ease-out-quart) motion-safe:group-hover/link:translate-x-0.5">→</span></a>
         </article>
 
         <article class="flex flex-col gap-6 border-b border-hairline py-12 md:py-16 md:pl-12">
-          <ol class="flex flex-col gap-3 font-mono text-[13px]" aria-label="An agent's tool calls">
-            {
-              tools.map((t) => (
-                <li class="flex min-w-0 items-center gap-3">
-                  <svg viewBox="0 0 16 16" aria-hidden="true" class="size-3.5 shrink-0 text-success" fill="none" stroke="currentColor" stroke-width="2"><path d="m3.5 8.5 3 3 6-7" /></svg>
-                  <span class="shrink-0 text-foreground">{t.tool}</span>
-                  <span class="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">{t.args}</span>
-                </li>
-              ))
-            }
-          </ol>
+          <AgentBranch />
           <div>
             <h2 class="text-[17px] font-[510] tracking-[-0.012em]">Agents get their own branch</h2>
-            <p class="mt-1.5 text-[15px] text-muted-foreground">MCP over HTTP, with a token scoped to one branch.</p>
+            <p class="mt-1.5 text-[15px] text-pretty text-muted-foreground">MCP over HTTP, with a token scoped to one branch.</p>
           </div>
           <a href="/docs/guides/ai-agents/" class={link}>Use from an AI agent <span aria-hidden="true" class="transition-transform duration-100 ease-(--ease-out-quart) motion-safe:group-hover/link:translate-x-0.5">→</span></a>
         </article>
 
         <article class="flex min-w-0 flex-col gap-6 border-b border-hairline py-12 md:border-r md:py-16 md:pr-12">
-          <div class="flex flex-col gap-3 font-mono text-[13px]">
-            <p class="[overflow-wrap:anywhere] text-muted-foreground">
-              http://127.0.0.1:4870/libsql/<span class="text-foreground">shop</span>/<span class="text-foreground">pr-42</span>/
-            </p>
-            <ul class="flex flex-col gap-3" aria-label="Clients that connect by URL">
-              {
-                libsqlClients.map((c) => (
-                  <li class="flex min-w-0 items-center gap-3">
-                    <svg viewBox="0 0 16 16" aria-hidden="true" class="size-3.5 shrink-0 text-success" fill="none" stroke="currentColor" stroke-width="2"><path d="m3.5 8.5 3 3 6-7" /></svg>
-                    <span class="text-foreground">{c}</span>
-                  </li>
-                ))
-              }
-            </ul>
-          </div>
+          <Clients />
           <div>
             <h2 class="text-[17px] font-[510] tracking-[-0.012em]">Works with libSQL clients</h2>
-            <p class="mt-1.5 text-[15px] text-muted-foreground">Point @libsql/client or Drizzle at a branch URL.</p>
+            <p class="mt-1.5 text-[15px] text-pretty text-muted-foreground">Point @libsql/client or Drizzle at a branch URL.</p>
           </div>
           <a href="/docs/guides/libsql/" class={link}>libSQL client <span aria-hidden="true" class="transition-transform duration-100 ease-(--ease-out-quart) motion-safe:group-hover/link:translate-x-0.5">→</span></a>
         </article>
 
         <article class="flex min-w-0 flex-col gap-6 border-b border-hairline py-12 md:py-16 md:pl-12">
-          <ul class="flex flex-col gap-3 font-mono text-[13px]" aria-label="Objects in the photos bucket">
-            {
-              objects.map((o) => (
-                <li class="flex min-w-0 items-center gap-3">
-                  <span class="shrink-0 text-foreground">{o.key}</span>
-                  <span class="min-w-0 text-xs text-muted-foreground tabular-nums">{o.size}</span>
-                </li>
-              ))
-            }
-          </ul>
+          <Files />
           <div>
             <h2 class="text-[17px] font-[510] tracking-[-0.012em]">Files next to your data</h2>
-            <p class="mt-1.5 text-[15px] text-muted-foreground">Buckets that any S3 client can read and write.</p>
+            <p class="mt-1.5 text-[15px] text-pretty text-muted-foreground">Buckets that any S3 client can read and write.</p>
           </div>
           <a href="/docs/concepts/buckets/" class={link}>Buckets <span aria-hidden="true" class="transition-transform duration-100 ease-(--ease-out-quart) motion-safe:group-hover/link:translate-x-0.5">→</span></a>
         </article>
@@ -175,7 +112,7 @@ const secondary = `${pill} bg-secondary text-foreground shadow-[inset_0_0_0_1px_
           </CodeFrame>
           <div>
             <h2 class="text-[17px] font-[510] tracking-[-0.012em]">Query from TypeScript</h2>
-            <p class="mt-1.5 text-[15px] text-muted-foreground">A small client with no dependencies.</p>
+            <p class="mt-1.5 text-[15px] text-pretty text-muted-foreground">A small client with no dependencies.</p>
           </div>
           <a href="/docs/reference/sdk/" class={link}>TypeScript SDK <span aria-hidden="true" class="transition-transform duration-100 ease-(--ease-out-quart) motion-safe:group-hover/link:translate-x-0.5">→</span></a>
         </article>
@@ -186,12 +123,33 @@ const secondary = `${pill} bg-secondary text-foreground shadow-[inset_0_0_0_1px_
           </CodeFrame>
           <div>
             <h2 class="text-[17px] font-[510] tracking-[-0.012em]">Runs on your machine</h2>
-            <p class="mt-1.5 text-[15px] text-muted-foreground">One Compose file: the engine, the dashboard and your data.</p>
+            <p class="mt-1.5 text-[15px] text-pretty text-muted-foreground">One Compose file: the engine, the dashboard and your data.</p>
           </div>
           <a href="/docs/self-hosting/docker-compose/" class={link}>Docker Compose <span aria-hidden="true" class="transition-transform duration-100 ease-(--ease-out-quart) motion-safe:group-hover/link:translate-x-0.5">→</span></a>
         </article>
       </div>
     </section>
+
+    {/* Plays each feature graph once, the first time all of it is clear of the fold.
+        Rocket Loader would defer this without data-cfasync. */}
+    <script is:inline data-cfasync="false">
+      ;(() => {
+        const graphs = document.querySelectorAll(".fg")
+        const seen = (graph) => graph.setAttribute("data-seen", "")
+        if (!("IntersectionObserver" in window)) return graphs.forEach(seen)
+        const observer = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue
+              seen(entry.target)
+              observer.unobserve(entry.target)
+            }
+          },
+          { threshold: 1, rootMargin: "0px 0px -10% 0px" },
+        )
+        graphs.forEach((graph) => observer.observe(graph))
+      })()
+    </script>
 
     <section class="border-t border-hairline px-6 py-28 text-center md:py-40">
       <h2 class="mx-auto max-w-2xl text-[32px] leading-[1.1] font-[510] tracking-[-0.022em] text-balance md:text-[56px]">
@@ -211,10 +169,10 @@ const secondary = `${pill} bg-secondary text-foreground shadow-[inset_0_0_0_1px_
         Lumbung
       </span>
       <nav aria-label="Footer" class="ml-auto flex flex-wrap gap-x-6 gap-y-2">
-        <a href="/docs/" class="transition-[color] duration-100 hover:text-foreground">Docs</a>
-        <a href="/docs/changelog/" class="transition-[color] duration-100 hover:text-foreground">Changelog</a>
-        <a href="/llms.txt" class="transition-[color] duration-100 hover:text-foreground">llms.txt</a>
-        <a href={site.github} class="transition-[color] duration-100 hover:text-foreground">GitHub <span aria-hidden="true">↗</span></a>
+        <a href="/docs/" class="transition-[color] duration-100 hover:text-foreground active:text-foreground">Docs</a>
+        <a href="/docs/changelog/" class="transition-[color] duration-100 hover:text-foreground active:text-foreground">Changelog</a>
+        <a href="/llms.txt" class="transition-[color] duration-100 hover:text-foreground active:text-foreground">llms.txt</a>
+        <a href={site.github} class="transition-[color] duration-100 hover:text-foreground active:text-foreground">GitHub <span aria-hidden="true">↗</span></a>
       </nav>
     </div>
   </footer>

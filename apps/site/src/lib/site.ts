@@ -3,10 +3,11 @@
 export const site = {
   name: "Lumbung",
   title: "Lumbung: SQLite and file storage on your own server",
-  headline: "Run SQLite databases and file storage on your own server",
+  headline: "SQLite and file storage on your own server",
+  tagline: "Branch a database before you change it.",
   description: "Branch a database before you change it, and keep files next to it.",
   github: "https://github.com/zakiego/lumbung",
-  ogAlt: "Lumbung: run SQLite databases and file storage on your own server",
+  ogAlt: "Lumbung: SQLite and file storage on your own server",
 }
 
 // The landing page's dark tokens (src/styles/landing.css), for the places
@@ -16,11 +17,12 @@ export const dark = {
   foreground: "#f7f8f8",
   muted: "#8a8f98",
   faint: "#62666d",
-  surface: "#0f1011",
-  border: "#23252a",
-  success: "#27a644",
   mark: "#e8e2cf",
 }
+
+// Bump this when the Open Graph cards change, so a link shared before fetches
+// the new one.
+export const ogVersion = 2
 
 // Dark first, matching the landing page; light follows the docs' theme.
 export const themeColor = { dark: dark.background, light: "#ffffff" }

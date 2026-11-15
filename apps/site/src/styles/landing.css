@@ -28,17 +28,14 @@
   --color-secondary-hover: var(--secondary-hover);
   --color-ring: var(--ring);
   --color-success: var(--success);
-  --color-terminal: var(--terminal);
 
   --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
   --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
   --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
 }
 
-/* Dark is the default look. Indigo is only the focus ring and selection.
-   .scheme-dark keeps a piece dark in the light theme (the terminal). */
-:root,
-.scheme-dark {
+/* Dark is the default look. Indigo is only the focus ring and selection. */
+:root {
   color-scheme: dark;
   --background: #08090a;
   --foreground: #f7f8f8;
@@ -58,7 +55,6 @@
   --ring: #5e6ad2;
   --success: #27a644;
   --mark: #e8e2cf;
-  --terminal: #0b0c0d;
 }
 
 :root[data-theme="light"] {
@@ -117,8 +113,7 @@
 
 /* Code from Astro's <Code theme="css-variables">: a calm, vesper-like set on
    dark and its readable counterpart on light. */
-:root,
-.scheme-dark {
+:root {
   --astro-code-background: transparent;
   --astro-code-foreground: #d0d6e0;
   --astro-code-token-keyword: #a0a0a0;
@@ -159,18 +154,92 @@
   }
 }
 
-/* Until the demo mounts and starts at its first step, keep the finished
-   session (the server's poster) from flashing. The hold ends on its own after
-   2.5s, so if the island never hydrates the poster still shows. Without JS or
-   with reduced motion, the poster shows at once. */
+/* The hero graph. The base styles are the finished picture, which is what
+   reduced motion and no JS show; the keyframes set the moons circling. The
+   loop is CSS only, so it runs before the island hydrates. */
+.orbit-spin,
+.orbit-unspin {
+  transform-origin: 0 0;
+}
+
 @media (prefers-reduced-motion: no-preference) {
-  html[data-js] [data-terminal]:not([data-mounted]) [data-screen] {
-    animation: poster-hold 0s 2.5s both;
+  /* Only with JS, since the pause control needs it. */
+  html[data-js] .orbit-spin,
+  html[data-js] .orbit-unspin {
+    animation: orbit-spin var(--turn) linear infinite;
+  }
+  /* The same turn backwards keeps the moon upright. */
+  html[data-js] .orbit-unspin {
+    animation-direction: reverse;
+  }
+  html[data-js] .ring-pulse {
+    animation: ring-pulse 2.4s var(--ease-out-cubic) var(--at, 0s) infinite;
+  }
+  /* Has to out-rank the rules above: their shorthand resets the play state. */
+  html[data-js] [data-stage][data-paused="true"] * {
+    animation-play-state: paused;
+  }
+
+  /* The feature graphs play once, when the script in index.astro marks one
+     seen, and hold their first frame until then. Without JS they show the
+     finished picture, like reduced motion. */
+  html[data-js] .fg-draw {
+    animation: fg-draw 700ms cubic-bezier(0.455, 0.03, 0.515, 0.955) var(--at, 0s) both paused;
+  }
+  html[data-js] .fg-pop {
+    animation: fg-pop 300ms var(--ease-out-cubic) var(--at, 0s) both paused;
+  }
+  html[data-js] .fg-fade {
+    animation: fg-fade 300ms var(--ease-out-cubic) var(--at, 0s) both paused;
+  }
+  html[data-js] .fg-comet {
+    animation: fg-comet 700ms linear var(--at, 0s) both paused;
+  }
+  html[data-js] .fg[data-seen] * {
+    animation-play-state: running;
   }
 }
-@keyframes poster-hold {
+
+@keyframes orbit-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+@keyframes ring-pulse {
   from {
-    visibility: hidden;
+    opacity: 0.6;
+    scale: 1;
+  }
+  to {
+    opacity: 0;
+    scale: 1.6;
+  }
+}
+
+@keyframes fg-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+@keyframes fg-pop {
+  from {
+    opacity: 0;
+    scale: 0.9;
+  }
+}
+@keyframes fg-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes fg-comet {
+  from {
+    stroke-dashoffset: 0.16;
+    opacity: 1;
+  }
+  to {
+    stroke-dashoffset: -1.02;
+    opacity: 1;
   }
 }
 
@@ -178,10 +247,5 @@
   from {
     opacity: 0;
     scale: 0.8;
-  }
-}
-@keyframes pulse-dot {
-  50% {
-    opacity: 0.35;
   }
 }
