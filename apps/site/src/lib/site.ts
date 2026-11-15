@@ -17,11 +17,12 @@ export const dark = {
   foreground: "#f7f8f8",
   muted: "#8a8f98",
   faint: "#62666d",
-  surface: "#0f1011",
-  border: "#23252a",
-  success: "#27a644",
   mark: "#e8e2cf",
 }
+
+// Bump this when the Open Graph cards change, so a link shared before fetches
+// the new one.
+export const ogVersion = 2
 
 // Dark first, matching the landing page; light follows the docs' theme.
 export const themeColor = { dark: dark.background, light: "#ffffff" }
