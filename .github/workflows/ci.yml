@@ -1,10 +1,15 @@
 name: CI
 
+# Paused on 2026-11-15: the account used all 3,000 included Actions minutes
+# for November, and this workflow took about 2,380 of them. Only a manual run
+# starts it until usage resets on 2026-12-01. To turn it back on, restore:
+#
+#   push:
+#   pull_request:
+#     # edited: a changed PR title or body is rechecked for the wording rule.
+#     types: [opened, synchronize, reopened, edited]
 on:
-  push:
-  pull_request:
-    # edited: a changed PR title or body is rechecked for the wording rule.
-    types: [opened, synchronize, reopened, edited]
+  workflow_dispatch:
 
 permissions:
   contents: read
