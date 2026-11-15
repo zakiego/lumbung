@@ -3,10 +3,11 @@
 export const site = {
   name: "Lumbung",
   title: "Lumbung: SQLite and file storage on your own server",
-  headline: "Run SQLite databases and file storage on your own server",
+  headline: "SQLite and file storage on your own server",
+  tagline: "Branch a database before you change it.",
   description: "Branch a database before you change it, and keep files next to it.",
   github: "https://github.com/zakiego/lumbung",
-  ogAlt: "Lumbung: run SQLite databases and file storage on your own server",
+  ogAlt: "Lumbung: SQLite and file storage on your own server",
 }
 
 // The landing page's dark tokens (src/styles/landing.css), for the places
