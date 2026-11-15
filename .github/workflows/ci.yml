@@ -1,14 +1,13 @@
 name: CI
 
-# Paused on 2026-11-15: the account used all 3,000 included Actions minutes
-# for November, and this workflow took about 2,380 of them. Only a manual run
-# starts it until usage resets on 2026-12-01. To turn it back on, restore:
-#
-#   push:
-#   pull_request:
-#     # edited: a changed PR title or body is rechecked for the wording rule.
-#     types: [opened, synchronize, reopened, edited]
+# Jobs run on the self-hosted runner on the Mac mini when the repo variable
+# RUNS_ON is set (["self-hosted","mac-mini"]), so they don't use the account's
+# included Actions minutes. Delete the variable to go back to GitHub-hosted.
 on:
+  push:
+  pull_request:
+    # edited: a changed PR title or body is rechecked for the wording rule.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 permissions:
@@ -21,7 +20,7 @@ concurrency:
 
 jobs:
   wording:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.RUNS_ON || '"ubuntu-latest"') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -48,7 +47,7 @@ jobs:
           WORDING_COMMITS="$range" bash scripts/check-wording.sh
 
   engine:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.RUNS_ON || '"ubuntu-latest"') }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -74,7 +73,7 @@ jobs:
           git diff --exit-code -- apps/site/src/content/docs/docs/reference packages/client/src/generated.ts
 
   fuzz:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.RUNS_ON || '"ubuntu-latest"') }}
     defaults:
       run:
         working-directory: apps/engine
@@ -95,7 +94,7 @@ jobs:
       - run: go test -run '^$' -fuzz '^FuzzWorkspaceRequests$' -fuzztime 60s ./internal/api
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.RUNS_ON || '"ubuntu-latest"') }}
     steps:
       - uses: actions/checkout@v7
       # SDK and CLI tests run against a real lumbungd built from this commit.
@@ -127,7 +126,7 @@ jobs:
   # once (setup, database, branch, diff, promote, snapshot, restore, token,
   # SDK, MCP).
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.RUNS_ON || '"ubuntu-latest"') }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
