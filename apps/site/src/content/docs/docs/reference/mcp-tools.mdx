@@ -24,6 +24,7 @@ The engine serves MCP over streamable HTTP at `/mcp`, with the same bearer token
 | `execute` | no | yes | Run one SQL statement that changes data or schema (INSERT, UPDATE, DELETE, CREATE, ALTER, DROP) in its own transaction. Needs a write token. Prefer testing schema changes on a branch first. Rows from RETURNING are shown up to 1000 rows and about 64 KB. |
 | `get_database` | yes | no | Get one database: its id, default branch, branch count and size. |
 | `get_object` | yes | no | Read an object. Text comes back as text, up to about 64 KB from offset; for binary content only the metadata comes back (use presign_object for a download URL). |
+| `get_playbook` | yes | no | The Lumbung operating rules: what each token can do, query versus execute, how branches work and the safe way to change a schema, the trash, the result caps and the error codes. Call this before your first other tool call in a conversation; once per conversation is enough. Returns a version string that matches the one in the server instructions. |
 | `get_schema` | yes | no | Get a branch's schema: tables with their columns, indexes, views and triggers, with the CREATE statements. Pass table to get one table with its indexes and triggers. A schema over about 64 KB comes back as names only. |
 | `get_workspace` | yes | no | Show the workspace this token works in: its name, its limits (most databases, buckets and bytes; 0 means no limit of its own) and what it holds now. Use it before creating databases or buckets to see how much room is left. |
 | `list_branches` | yes | no | List a database's branches, marking the default and protected ones. |
@@ -156,6 +157,12 @@ Read an object. Text comes back as text, up to about 64 KB from offset; for bina
 | `bucket` (required) | string | bucket name |
 | `key` (required) | string | object key |
 | `offset` | integer | byte to start reading at, for long text |
+
+## get_playbook
+
+The Lumbung operating rules: what each token can do, query versus execute, how branches work and the safe way to change a schema, the trash, the result caps and the error codes. Call this before your first other tool call in a conversation; once per conversation is enough. Returns a version string that matches the one in the server instructions.
+
+No inputs.
 
 ## get_schema
 

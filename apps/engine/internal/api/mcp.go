@@ -485,6 +485,14 @@ func listNote(truncated bool, shown int, hint string) string {
 }
 
 func (s *Server) addMCPTools(server *mcp.Server) {
+	// The result is plain text, so the markdown reaches the client as
+	// markdown rather than a JSON string with every newline escaped. Any
+	// token may read it: it describes the tools, not what is in them.
+	mcp.AddTool(server, &mcp.Tool{Name: "get_playbook", Description: "The Lumbung operating rules: what each token can do, query versus execute, how branches work and the safe way to change a schema, the trash, the result caps and the error codes. Call this before your first other tool call in a conversation; once per conversation is enough. Returns a version string that matches the one in the server instructions.", Annotations: readOnly},
+		func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: playbookDocument()}}}, nil, nil
+		})
+
 	mcp.AddTool(server, &mcp.Tool{Name: "list_databases", Description: "List the databases this token can see, with their default branch and size.", Annotations: readOnly},
 		func(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, struct {
 			Databases []mcpDatabase `json:"databases"`
