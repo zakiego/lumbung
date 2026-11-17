@@ -5,6 +5,10 @@ description: What changed in each version of Lumbung.
 
 ## Unreleased
 
+### MCP playbook
+
+- **`get_playbook`**: a read-only MCP tool that returns the operating rules for agents (token levels, query versus execute, branches, the trash, result caps and error codes), stamped with a version hash. The server instructions are now short and point at it with the same version.
+
 ### Workspaces
 
 - **Workspaces** own databases, buckets and tokens. A workspace token manages what is inside its workspace and can't tell that anything outside exists. Database and bucket names are unique per workspace. Every instance has a `default` workspace, and an upgrade puts everything that exists into it.

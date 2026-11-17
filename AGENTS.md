@@ -52,6 +52,8 @@ pnpm --filter @lumbung/engine docs:gen    # regenerate the configuration, error 
 pnpm --filter @lumbung/engine sdk:gen     # regenerate packages/client/src/generated.ts from openapi.json
 ```
 
+After adding or changing an MCP tool, update `apps/engine/internal/api/playbook.md`, the rules `get_playbook` serves: `TestMCPPlaybook` fails when a tool isn't in it, and its version moves on its own.
+
 After changing an API handler, a setting or an error code, run `openapi:gen`, then `docs:gen` and `sdk:gen`, and commit the results: CI fails when either differs from a fresh generation. API tests compare error bodies with `apps/engine/internal/api/testdata/golden`; rewrite them with `go test ./internal/api/ -update` only when a change to an error is intended.
 
 Inside `apps/engine` the plain Go commands work too: `go test -race ./...`, `go tool staticcheck ./...`, `go tool govulncheck ./...`. `go.mod` pins Go 1.27.4 (ADR 0002); an older local Go downloads it on first use.

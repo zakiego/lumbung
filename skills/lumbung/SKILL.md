@@ -157,7 +157,8 @@ claude mcp add --transport http lumbung "$LUMBUNG_URL/mcp" --header "Authorizati
 }
 ```
 
-- Tools: `list_databases`, `get_database`, `create_database`, `list_branches`, `create_branch`, `delete_branch`, `reset_branch`, `diff_branches`, `get_schema`, `query`, `execute`, `list_snapshots`, `create_snapshot`, and bucket tools `list_buckets`, `create_bucket`, `list_objects`, `get_object`, `put_object`, `delete_object`, `presign_object`.
+- The server instructions say to call `get_playbook` first. It returns the operating rules (token levels, query versus execute, branches, the trash, result caps, error codes) with a version that matches the instructions. Once per conversation is enough.
+- Tools: `get_playbook`, `list_databases`, `get_database`, `create_database`, `list_branches`, `create_branch`, `delete_branch`, `reset_branch`, `diff_branches`, `get_schema`, `query`, `execute`, `list_snapshots`, `create_snapshot`, and bucket tools `list_buckets`, `create_bucket`, `list_objects`, `get_object`, `put_object`, `delete_object`, `presign_object`.
 - `query` is always read-only. `execute` needs a write token.
 - Results are capped (100 rows by default, `max_rows` up to 1,000, about 64 KB). Narrow the query when a result says it was cut.
 - Pass integers past 2^53 as strings.

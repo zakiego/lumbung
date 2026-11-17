@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -83,13 +84,13 @@ func TestMCPTools(t *testing.T) {
 	}
 	sort.Strings(names)
 	want := []string{"create_branch", "create_bucket", "create_database", "create_snapshot", "delete_branch", "delete_bucket", "delete_database",
-		"delete_object", "delete_snapshot", "diff_branches", "execute", "get_database", "get_object", "get_schema", "get_workspace",
+		"delete_object", "delete_snapshot", "diff_branches", "execute", "get_database", "get_object", "get_playbook", "get_schema", "get_workspace",
 		"list_branches", "list_buckets", "list_databases", "list_objects", "list_snapshots", "presign_object", "put_object", "query",
 		"reset_branch", "restore_database", "restore_snapshot"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools: %v", names)
 	}
-	for _, n := range []string{"list_databases", "get_database", "list_branches", "diff_branches", "get_schema", "query", "list_snapshots",
+	for _, n := range []string{"get_playbook", "list_databases", "get_database", "list_branches", "diff_branches", "get_schema", "query", "list_snapshots",
 		"list_buckets", "list_objects", "get_object", "get_workspace"} {
 		if a := annotations[n]; a == nil || !a.ReadOnlyHint {
 			t.Errorf("%s should be read-only", n)
@@ -194,6 +195,75 @@ func TestMCPTools(t *testing.T) {
 		if !actions[a] {
 			t.Errorf("audit is missing %s", a)
 		}
+	}
+}
+
+// playbookText calls get_playbook and returns its text.
+func playbookText(t *testing.T, s *mcp.ClientSession) string {
+	t.Helper()
+	res, err := s.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_playbook"})
+	if err != nil {
+		t.Fatalf("get_playbook: %v", err)
+	}
+	if res.IsError || res.StructuredContent != nil || len(res.Content) != 1 {
+		t.Fatalf("get_playbook should return one text block: %+v", res)
+	}
+	tc, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("get_playbook content is %T", res.Content[0])
+	}
+	return tc.Text
+}
+
+var playbookVersionLine = regexp.MustCompile(`^Playbook version: ([0-9a-f]{8})\n\n# Lumbung\n`)
+
+func TestMCPPlaybook(t *testing.T) {
+	e := newEnv(t, nil)
+	s := e.mcp(e.admin)
+
+	doc := playbookText(t, s)
+	m := playbookVersionLine.FindStringSubmatch(doc)
+	if m == nil {
+		t.Fatalf("playbook starts with %q", doc[:min(len(doc), 80)])
+	}
+	version := m[1]
+
+	// The instructions point at the playbook and carry the same version, so
+	// a client can tell its cached copy is stale without calling the tool.
+	instructions := s.InitializeResult().Instructions
+	if !strings.Contains(instructions, "Call get_playbook before your first tool call") ||
+		!strings.Contains(instructions, "(playbook version "+version+")") {
+		t.Fatalf("instructions don't point at playbook %s: %q", version, instructions)
+	}
+	// They stay short: they are read in every conversation, and the rules
+	// belong in the playbook.
+	if len(instructions) > 1200 {
+		t.Errorf("instructions are %d characters; move rules into playbook.md", len(instructions))
+	}
+	// Claude Code saves an MCP result over 50,000 characters to a file and
+	// hands the model only a path, which a client without file tools can't
+	// open. Trim or split the playbook rather than raising this.
+	if len(doc) > 50000 {
+		t.Errorf("playbook is %d characters, over 50,000", len(doc))
+	}
+
+	// Every tool is covered, so a new tool comes with its rules.
+	tools, err := s.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tl := range tools.Tools {
+		if !strings.Contains(doc, "`"+tl.Name+"`") {
+			t.Errorf("playbook.md doesn't mention %s", tl.Name)
+		}
+	}
+
+	// It describes the tools, not the data, so the narrowest token reads it
+	// too, and gets the same text.
+	e.createDB("a")
+	read, _ := e.token(map[string]any{"name": "r", "database": "a", "access": "read"})
+	if got := playbookText(t, e.mcp(read)); got != doc {
+		t.Fatal("a read token got a different playbook")
 	}
 }
 
