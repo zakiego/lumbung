@@ -39,11 +39,8 @@ const (
 // mountMCP adds /mcp to the router.
 func (s *Server) mountMCP() {
 	server := mcp.NewServer(&mcp.Implementation{Name: "lumbung", Title: "Lumbung", Version: version.Version}, &mcp.ServerOptions{
-		Instructions: "Lumbung holds SQLite databases, each with branches (full copies). A token works inside one workspace and sees only that workspace's databases and buckets. Use list_databases first. " +
-			"query runs read-only SQL; execute runs writes and needs a write token. Branches never merge back: " +
-			"to test a schema change, create_branch, execute the migration there, diff_branches against main, then run the same SQL on main. " +
-			"Buckets hold files: list_buckets, list_objects, get_object and put_object work with them, and presign_object makes a URL to share one. " +
-			"With an admin token for the workspace you can make your own: create_database and create_bucket, and delete_database (to the trash, restore_database brings it back) and delete_bucket when done. get_workspace shows the limits and what is used.",
+		// Kept short: the rules live in the playbook (playbook.go).
+		Instructions: mcpInstructions,
 	})
 	s.addMCPTools(server)
 	s.mcpServer = server

@@ -222,10 +222,24 @@ func TestMCPPlaybook(t *testing.T) {
 	s := e.mcp(e.admin)
 
 	doc := playbookText(t, s)
-	if !playbookVersionLine.MatchString(doc) {
+	m := playbookVersionLine.FindStringSubmatch(doc)
+	if m == nil {
 		t.Fatalf("playbook starts with %q", doc[:min(len(doc), 80)])
 	}
+	version := m[1]
 
+	// The instructions point at the playbook and carry the same version, so
+	// a client can tell its cached copy is stale without calling the tool.
+	instructions := s.InitializeResult().Instructions
+	if !strings.Contains(instructions, "Call get_playbook before your first tool call") ||
+		!strings.Contains(instructions, "(playbook version "+version+")") {
+		t.Fatalf("instructions don't point at playbook %s: %q", version, instructions)
+	}
+	// They stay short: they are read in every conversation, and the rules
+	// belong in the playbook.
+	if len(instructions) > 1200 {
+		t.Errorf("instructions are %d characters; move rules into playbook.md", len(instructions))
+	}
 	// Claude Code saves an MCP result over 50,000 characters to a file and
 	// hands the model only a path, which a client without file tools can't
 	// open. Trim or split the playbook rather than raising this.

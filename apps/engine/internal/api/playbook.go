@@ -35,6 +35,22 @@ func contentVersion(s string) string {
 	return fmt.Sprintf("%08x", h.Sum32())
 }
 
+// mcpInstructions is what initialize returns. It is read in every
+// conversation whether or not a tool is called, so it holds what an agent
+// needs before its first call (what the server is, that writes are live, and
+// where the rules are) and points at get_playbook for the rest.
+var mcpInstructions = strings.Join([]string{
+	"Lumbung holds SQLite databases, each with branches (full copies), and buckets of files. A token works inside one workspace and sees only what it was given there.",
+	"Apps use the same data, so execute, put_object, reset_branch and the delete tools change it for them at once.",
+	"",
+	"Call get_playbook before your first tool call. It returns the operating rules (playbook version " + playbookVersion + "):",
+	"what each token can do, query versus execute, how branches work and the safe way to change a schema, the trash, the result caps, and the error codes.",
+	"None of that is inferable from the tool schemas, so do not guess it.",
+	"",
+	"Once per conversation is enough. If you are carrying rules from an earlier conversation and the version",
+	"above does not match the one they came with, they are stale: call get_playbook again and use the new text.",
+}, "\n")
+
 // playbookDocument is what get_playbook returns: the version, then the rules.
 func playbookDocument() string {
 	return "Playbook version: " + playbookVersion + "\n\n" + playbookMarkdown
