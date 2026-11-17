@@ -207,6 +207,7 @@ Added in milestone 11 (ADR 0005). The libSQL remote protocol over HTTP (Hrana v2
 - Streamable HTTP endpoint at `/mcp` on the engine, same bearer tokens and scopes as REST.
 - A token works inside its workspace (section 17.7): creating a database or a bucket takes an admin of the whole workspace.
 - Tools: `list_databases`, `get_database`, `create_database`, `list_branches`, `create_branch`, `delete_branch`, `reset_branch`, `diff_branches`, `get_schema`, `query` (always on a read-only connection), `execute` (needs a write scope), `list_snapshots`, `create_snapshot`.
+- `get_playbook` returns the operating rules the tool schemas can't express (token levels, query versus execute, branches, the trash, result caps, error codes), from `apps/engine/internal/api/playbook.md`. Its version is an FNV-1a hash of the text. The server instructions stay short: what Lumbung is, that writes are live, and "call get_playbook first" with the same version, so a client can tell a cached copy is stale.
 - Every tool has correct read-only and destructive annotations, a tight input schema, and capped output sized for a model's context (row and byte caps, with a note when truncated).
 - Check the current MCP spec and the Go SDK docs before writing it. Test with a real client: `mcporter` against a local engine.
 - Later milestone: OAuth so it can be added as a connector in Claude on the web.

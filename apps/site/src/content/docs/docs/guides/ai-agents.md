@@ -72,6 +72,12 @@ Any client that reads an `mcpServers` config:
 }
 ```
 
+## 3. The agent reads the playbook
+
+The server's instructions tell the agent to call `get_playbook` before its first tool call. It returns the rules the tool schemas can't carry: what each token level can do, that `query` never writes, that branches never merge back and the safe order for a schema change, what goes to the trash, the result caps, and what each error code means.
+
+The result starts with `Playbook version:` and 8 hex characters, a hash of the rules. The instructions carry the same version, so an agent holding rules from an earlier conversation can tell they're stale without calling the tool. The version changes only when the rules do.
+
 ## What the agent can and can't do
 
 - `query` always runs on a read-only connection, whatever the token allows. Writes go through `execute`, which needs a write token.
