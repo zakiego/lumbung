@@ -19,6 +19,7 @@ import (
 	"github.com/zakiego/lumbung/apps/engine/internal/config"
 	"github.com/zakiego/lumbung/apps/engine/internal/ids"
 	"github.com/zakiego/lumbung/apps/engine/internal/meta"
+	"github.com/zakiego/lumbung/apps/engine/internal/recovery"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlitex"
 	"github.com/zakiego/lumbung/apps/engine/internal/storage"
 )
@@ -276,11 +277,14 @@ func (e *Engine) closeLocked(branchID string) {
 	done := make(chan struct{})
 	e.closing[branchID] = done
 	go func() {
+		defer func() {
+			e.poolsMu.Lock()
+			delete(e.closing, branchID)
+			e.poolsMu.Unlock()
+			close(done)
+		}()
+		defer recovery.Log(e.log, "close branch pool")
 		_ = p.close(context.Background())
-		e.poolsMu.Lock()
-		delete(e.closing, branchID)
-		e.poolsMu.Unlock()
-		close(done)
 	}()
 }
 
@@ -293,9 +297,16 @@ func (e *Engine) janitor() {
 		case <-e.stop:
 			return
 		case <-tick.C:
-			e.tick(time.Now())
+			e.safeTick(time.Now())
 		}
 	}
+}
+
+// safeTick runs tick, logging a panic instead of ending the process. The
+// next tick runs as usual.
+func (e *Engine) safeTick(now time.Time) {
+	defer recovery.Log(e.log, "janitor")
+	e.tick(now)
 }
 
 // tick runs the periodic work: idle connections, expired branches,

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
+	"github.com/zakiego/lumbung/apps/engine/internal/recovery"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlitex"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlsplit"
 )
@@ -248,6 +249,7 @@ func (e *Engine) BeginTx(ctx context.Context, t Target, access Access, opts TxOp
 	} else {
 		tx.ctx, tx.cancel = context.WithDeadline(context.Background(), opts.Deadline)
 		context.AfterFunc(tx.ctx, func() {
+			defer recovery.Log(e.log, "transaction deadline")
 			if errors.Is(tx.ctx.Err(), context.DeadlineExceeded) {
 				tx.Rollback()
 			}
