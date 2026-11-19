@@ -155,11 +155,14 @@ func (e *Engine) sessionWith(ctx context.Context, t Target, access Access, timeo
 		return err
 	}
 	defer tx.release()
-	if err := f(tx.conn, tx.tg); err != nil {
-		_ = tx.conn.ExecTrusted("ROLLBACK")
+	if err := tx.guard(func() error { return f(tx.conn, tx.tg) }); err != nil {
+		tx.rollback()
 		return e.sqlErr(err, tx.grant)
 	}
-	return tx.commit()
+	if err := tx.guard(tx.commit); err != nil {
+		return e.sqlErr(err, tx.grant)
+	}
+	return nil
 }
 
 func mapAcquire(err error) error {
@@ -178,6 +181,11 @@ func mapAcquire(err error) error {
 // branch limit unless the instance quota or the workspace's own limit set
 // the tighter cap.
 func (e *Engine) sqlErr(err error, g sizeGrant) error {
+	var pe *sqlitex.PanicError
+	if errors.As(err, &pe) {
+		// Logged with its stack by Tx.guard; the caller only learns it failed.
+		return apierr.New(apierr.Internal, "internal error")
+	}
 	ae := apierr.FromSQLite(err)
 	if ae.Code == apierr.BranchSizeLimit {
 		switch g.capBy {
@@ -247,7 +255,12 @@ func (e *Engine) applySizeLimit(conn *sqlitex.Conn, ws string, wsLimit int64) (s
 	e.wsReserved[ws] += g.bytes
 	e.usageMu.Unlock()
 
-	if _, err := trustedInt(conn, "PRAGMA max_page_count = "+strconv.FormatInt(max(limit, 1), 10)); err != nil {
+	// Guarded here, not only by the caller, so a panic can't skip giving
+	// back the reservation just taken.
+	if err := conn.Guard(func() error {
+		_, err := trustedInt(conn, "PRAGMA max_page_count = "+strconv.FormatInt(max(limit, 1), 10))
+		return err
+	}); err != nil {
 		e.finishWrite("", "", "", g)
 		return sizeGrant{}, apierr.FromSQLite(err)
 	}

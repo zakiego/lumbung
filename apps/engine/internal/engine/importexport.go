@@ -91,6 +91,9 @@ func (e *Engine) Import(ctx context.Context, t Target, format ImportFormat, mode
 	default:
 		err = apierr.New(apierr.BadRequest, "unknown import format")
 	}
+	if errors.Is(err, sqlite3.NOMEM) {
+		return apierr.FromSQLite(err)
+	}
 	if err != nil {
 		return err
 	}
@@ -146,7 +149,8 @@ const userObjectsSQL = `SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE '
 
 // fileIsEmpty checks a branch file directly, for the recheck inside the
 // exclusive section, when no request holds the file.
-func fileIsEmpty(path string) (bool, error) {
+func fileIsEmpty(path string) (_ bool, err error) {
+	defer sqlitex.Recover(&err)
 	c, err := sqlite3.Open(trustedURI(path, "rw"))
 	if err != nil {
 		return false, err
@@ -182,7 +186,8 @@ func copyLimited(r io.Reader, path string, limit int64) (int64, error) {
 
 // stageDB checks an uploaded database file and opens it as a user
 // connection: confined to its own file, defensive, trusted schema off.
-func (e *Engine) stageDB(ctx context.Context, r io.Reader, staged string, limit int64) error {
+func (e *Engine) stageDB(ctx context.Context, r io.Reader, staged string, limit int64) (err error) {
+	defer sqlitex.Recover(&err)
 	n, err := copyLimited(r, staged, limit)
 	if err != nil {
 		return err
@@ -221,7 +226,8 @@ func (e *Engine) stageDB(ctx context.Context, r io.Reader, staged string, limit 
 // COMMIT in the dump turned into no-ops, and with foreign keys checked once
 // at the end rather than per statement, since dumps write tables in name
 // order, not dependency order.
-func (e *Engine) stageSQL(ctx context.Context, r io.Reader, staged string, limit int64) error {
+func (e *Engine) stageSQL(ctx context.Context, r io.Reader, staged string, limit int64) (err error) {
+	defer sqlitex.Recover(&err)
 	conn, err := sqlitex.Open(ctx, sqlitex.Options{Path: staged, Create: true, Limits: e.limits()})
 	if err != nil {
 		return err
