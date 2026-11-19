@@ -27,12 +27,17 @@ the drill stays bounded on a large instance; every object is still listed.
 
 A backup with no databases and no buckets fails (it proves nothing) unless
 DRILL_ALLOW_EMPTY=1. Exits non-zero on any failure.
+
+The engine limits each token to LUMBUNG_RATE_LIMIT requests a second, and
+downloading many small objects goes past that. A 429 is waited out for as
+long as its Retry-After says, up to RATE_LIMIT_RETRIES times per request.
 """
 import hashlib
 import json
 import os
 import sqlite3
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -41,6 +46,14 @@ base, token_file, manifest_file = sys.argv[1:4]
 token = open(token_file).read().strip()
 max_checks = int(os.environ.get("DRILL_MAX_OBJECT_CHECKS", "500"))
 max_bytes = int(os.environ.get("DRILL_MAX_OBJECT_BYTES", str(512 * 1024 * 1024)))
+RATE_LIMIT_RETRIES = 20
+
+
+def retry_after(err):
+    try:
+        return max(1, min(int(err.headers.get("Retry-After", "1")), 30))
+    except ValueError:
+        return 1
 
 
 def request(method, path, body=None):
@@ -49,7 +62,15 @@ def request(method, path, body=None):
     req.add_header("Authorization", f"Bearer {token}")
     if data is not None:
         req.add_header("Content-Type", "application/json")
-    return urllib.request.urlopen(req, timeout=120)
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        try:
+            return urllib.request.urlopen(req, timeout=120)
+        except urllib.error.HTTPError as err:
+            if err.code != 429 or attempt == RATE_LIMIT_RETRIES:
+                raise
+            wait = retry_after(err)
+            err.close()
+            time.sleep(wait)
 
 
 def call(method, path, body=None):
