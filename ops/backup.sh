@@ -64,6 +64,9 @@ free_mb=$(df -m /System/Volumes/Data | awk 'NR==2 {print $4}')
 [ "$free_mb" -ge "$MIN_FREE_MB" ] || { log "only ${free_mb} MB free, need ${MIN_FREE_MB}"; exit 1; }
 
 cd "$LUMBUNG_DIR"
+# shellcheck source=ops/lib.sh
+. ops/lib.sh
+load_compose
 mkdir -p "$OUT/engine" "$OUT/dashboard"
 chmod 700 "$OUT"
 
@@ -128,9 +131,22 @@ esac
 # --- 2. dashboard -------------------------------------------------------------
 dash_remote=""
 dash_secret=""
+# The dashboard can be stopped on purpose: the edge in front of it stops it
+# when nobody has used it for a while (ops/README.md, Scale to zero). Then the
+# same script runs in a one-off container on its volume, as deploy-up.sh does.
+dashboard_running() {
+  [ -n "$(docker compose ps --status running --quiet dashboard)" ]
+}
+
 dashboard_backup() {
   local rc=0
-  dash_json=$(docker compose exec -T dashboard node - /data/backups nightly-dashboard "$KEEP" <ops/dashboard-backup.mjs) || rc=$?
+  if dashboard_running; then
+    dash_json=$(docker compose exec -T dashboard node - /data/backups nightly-dashboard "$KEEP" <ops/dashboard-backup.mjs) || rc=$?
+  else
+    log "dashboard: not running, backing up its volume with a one-off container"
+    dash_json=$(docker run --rm -i --network none -v "$DASHBOARD_VOLUME:/data" --entrypoint node "$DASHBOARD_IMAGE" \
+      - /data/backups nightly-dashboard "$KEEP" <ops/dashboard-backup.mjs) || rc=$?
+  fi
   # 2 means there's no dashboard.db yet: nothing to keep, not worth a retry.
   [ "$rc" -eq 2 ] && { dash_json=""; return 0; }
   # 3 means the copy is complete but retention failed.
