@@ -21,7 +21,7 @@ Stating a compatibility fact is fine ("works with the libSQL client").
 
 | Topic | Decision |
 |---|---|
-| Name | Lumbung. Repo `zakiego/lumbung`, private for now |
+| Name | Lumbung. Repo `zakiego/lumbung` |
 | Engine | Go server `lumbungd`. Owns databases, branches, tokens, REST API, MCP |
 | Dashboard | TanStack Start (Nitro) + ui-sdk (ADR 0004), a client of the engine's API |
 | Dashboard login | Better Auth, invite-only: email and password plus passkeys, roles owner, member, read-only |
@@ -31,7 +31,7 @@ Stating a compatibility fact is fine ("works with the libSQL client").
 | Hosting | Engine and dashboard as Docker containers on the Mac mini. Site on Cloudflare Pages |
 | Package manager | pnpm workspace for the TS apps, Go module for the engine |
 
-Use palui (`~/Code/JS/Node/2026/palui`) as the reference for repo conventions: pnpm workspace file, TanStack Start app layout, Better Auth setup, Dockerfile, compose, the edge Worker, `ops/`. Copy patterns, not product code.
+Use palui (a sibling project) as the reference for repo conventions: pnpm workspace file, TanStack Start app layout, Better Auth setup, Dockerfile, compose, the edge Worker, `ops/`. Copy patterns, not product code.
 
 ## 4. Layout
 
