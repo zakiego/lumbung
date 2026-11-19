@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zakiego/lumbung/apps/engine/internal/apierr"
+	"github.com/zakiego/lumbung/apps/engine/internal/recovery"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlitex"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlsplit"
 )
@@ -98,35 +99,65 @@ func (e *Engine) begin(ctx context.Context, t Target, access Access, hooks sessi
 		return nil, mapAcquire(err)
 	}
 	tx.conn = conn
+	if err := tx.guard(func() error { return tx.start(ctx) }); err != nil {
+		return nil, e.sqlErr(err, tx.grant)
+	}
+	ok = true
+	return tx, nil
+}
+
+// start applies the size cap for writes and runs BEGIN on the connection
+// begin took.
+func (tx *Tx) start(ctx context.Context) error {
+	e, conn := tx.e, tx.conn
 	// Start each session from a clean last-insert rowid, so nothing left on
 	// the pooled connection by an earlier request shows through.
 	conn.SetLastInsertRowID(0)
-	if access == Write {
-		limits, lerr := e.meta.LimitsOf(ctx, tg.db.WorkspaceID)
-		if lerr != nil {
-			return nil, lerr
+	if tx.access == Write {
+		limits, err := e.meta.LimitsOf(ctx, tx.tg.db.WorkspaceID)
+		if err != nil {
+			return err
 		}
-		if tx.grant, err = e.applySizeLimit(conn, tg.db.WorkspaceID, limits.MaxDatabaseBytes); err != nil {
-			return nil, err
+		if tx.grant, err = e.applySizeLimit(conn, tx.tg.db.WorkspaceID, limits.MaxDatabaseBytes); err != nil {
+			return err
 		}
 		tx.granted = true
 	}
 
 	conn.SetInterrupt(ctx)
 	begin := "BEGIN"
-	if access == Write {
+	if tx.access == Write {
 		begin = "BEGIN IMMEDIATE"
 	}
-	if hooks.beforeBegin != nil {
-		if err := hooks.beforeBegin(conn); err != nil {
-			return nil, e.sqlErr(err, tx.grant)
+	if tx.hooks.beforeBegin != nil {
+		if err := tx.hooks.beforeBegin(conn); err != nil {
+			return err
 		}
 	}
-	if err := conn.ExecTrusted(begin); err != nil {
-		return nil, e.sqlErr(err, tx.grant)
+	return conn.ExecTrusted(begin)
+}
+
+// guard runs f on the transaction's connection, turning a panic into an
+// error (sqlitex.Conn.Guard). A connection a panic went through is broken:
+// nothing more runs on it, and release closes it instead of pooling it.
+func (tx *Tx) guard(f func() error) error {
+	if tx.conn.Broken() {
+		return sqlitex.ErrBroken
 	}
-	ok = true
-	return tx, nil
+	err := tx.conn.Guard(f)
+	if err != nil && tx.conn.Broken() {
+		tx.e.logPanic(err, tx.tg.branch.ID)
+	}
+	return err
+}
+
+// rollback rolls back a transaction still open, unless the connection is
+// broken: closing it rolls back.
+func (tx *Tx) rollback() {
+	if tx.conn.Broken() || tx.conn.GetAutocommit() {
+		return
+	}
+	_ = tx.guard(func() error { return tx.conn.ExecTrusted("ROLLBACK") })
 }
 
 // commit runs the commit hook and COMMIT, rolling back if either fails. It
@@ -149,11 +180,13 @@ func (tx *Tx) commit() error {
 // Reset rolls back a transaction still open.
 func (tx *Tx) release() {
 	e := tx.e
-	if tx.conn != nil && !tx.conn.GetAutocommit() {
-		_ = tx.conn.ExecTrusted("ROLLBACK")
+	if tx.conn != nil {
+		tx.rollback()
 	}
 	if tx.granted {
-		e.truncateWAL(tx.conn, tx.tg.path)
+		if !tx.conn.Broken() {
+			_ = tx.guard(func() error { e.truncateWAL(tx.conn, tx.tg.path); return nil })
+		}
 		e.finishWrite(tx.tg.db.WorkspaceID, tx.tg.branch.ID, tx.tg.path, tx.grant)
 	}
 	if tx.conn != nil {
@@ -216,6 +249,7 @@ func (e *Engine) BeginTx(ctx context.Context, t Target, access Access, opts TxOp
 	} else {
 		tx.ctx, tx.cancel = context.WithDeadline(context.Background(), opts.Deadline)
 		context.AfterFunc(tx.ctx, func() {
+			defer recovery.Log(e.log, "transaction deadline")
 			if errors.Is(tx.ctx.Err(), context.DeadlineExceeded) {
 				tx.Rollback()
 			}
@@ -277,12 +311,21 @@ func (tx *Tx) Exec(ctx context.Context, stmt Statement, b *Budget) (*Result, err
 	defer stop()
 	changesBefore := tx.conn.TotalChanges()
 	tx.conn.SetInterrupt(ctx)
-	res, err := runOne(tx.conn, stmt, &b.b)
+	var res *Result
+	err := tx.guard(func() error {
+		var err error
+		res, err = runOne(tx.conn, stmt, &b.b)
+		return err
+	})
 	tx.conn.SetInterrupt(context.Background())
 	if err == nil {
 		return res, nil
 	}
 	mapped := tx.e.sqlErr(err, tx.grant)
+	if tx.conn.Broken() {
+		tx.finishLocked()
+		return nil, mapped
+	}
 	tooLarge := apierr.As(mapped).Code == apierr.ResultTooLarge && tx.conn.TotalChanges() > changesBefore
 	if tooLarge || tx.conn.GetAutocommit() || tx.ctx.Err() != nil {
 		tx.finishLocked()
@@ -300,8 +343,16 @@ func (tx *Tx) Describe(sql string) (*Description, error) {
 	if tx.finished {
 		return nil, errTxDone()
 	}
-	d, err := describe(tx.conn, sql)
+	var d *Description
+	err := tx.guard(func() error {
+		var err error
+		d, err = describe(tx.conn, sql)
+		return err
+	})
 	if err != nil {
+		if tx.conn.Broken() {
+			tx.finishLocked()
+		}
 		return nil, tx.e.sqlErr(err, sizeGrant{})
 	}
 	return d, nil
@@ -319,9 +370,12 @@ func (tx *Tx) Commit(ctx context.Context) error {
 	stop := context.AfterFunc(tx.ctx, cancel)
 	defer stop()
 	tx.conn.SetInterrupt(ctx)
-	err := tx.commit()
+	err := tx.guard(tx.commit)
 	tx.finishLocked()
-	return err
+	if err != nil {
+		return tx.e.sqlErr(err, tx.grant)
+	}
+	return nil
 }
 
 // Rollback rolls back and releases the transaction. It does nothing once

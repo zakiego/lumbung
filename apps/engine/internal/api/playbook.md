@@ -143,6 +143,9 @@ token that reaches only part of the workspace, the limits aren't shown.
   it, so don't look for one.
 - A statement that runs past the statement timeout is cancelled and keeps nothing it wrote
   (`statement_timeout`). Make it smaller, or add the index it needs on a branch first.
+- `GROUP BY`, `ORDER BY` and `DISTINCT` keep every row they sort in memory, large columns
+  included. Over big text or blobs that hits `memory_limit`. Shrink the values first in a
+  `WITH t AS MATERIALIZED (SELECT ..., length(payload) AS n FROM ...)` and sort `t` instead.
 
 ## Error codes
 
@@ -163,5 +166,6 @@ token that reaches only part of the workspace, the limits aren't shown.
 | `invalid_name` | Lowercase letters, digits and hyphens only (see the rules above). |
 | `limit_reached`, `workspace_quota_exceeded`, `branch_size_limit` | Out of room. Report the limit from `get_workspace`; don't delete things to make room unless asked. |
 | `value_too_large`, `object_too_large` | Too big for one call. Split the data, or use the S3 API for files. |
+| `memory_limit` | The statement needed more memory than a connection may use. Sort or group small values (see SQL above), or read fewer rows at a time. |
 | `busy`, `rate_limited` | Wait a moment and retry the same call once or twice. |
 | `internal` | Something failed inside the engine. Report it with the request id it gives. |

@@ -43,6 +43,7 @@ func (s *Server) mountMCP() {
 		Instructions: mcpInstructions,
 	})
 	s.addMCPTools(server)
+	server.AddReceivingMiddleware(s.recoverMCP)
 	s.mcpServer = server
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
 		Stateless:           true,

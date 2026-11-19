@@ -34,7 +34,10 @@ func trustedURI(path, mode string) string {
 // The copy is written to a temp file, checked with integrity_check, synced,
 // then renamed into place, so dst either doesn't exist or is complete.
 // It returns the size of the copy.
-func (e *Engine) copyDB(ctx context.Context, src, dst string) (int64, error) {
+func (e *Engine) copyDB(ctx context.Context, src, dst string) (_ int64, err error) {
+	// The driver panics when SQLite runs out of memory; the connections here
+	// are closed on the way out, so the panic only needs to become an error.
+	defer sqlitex.Recover(&err)
 	if _, err := os.Stat(dst); err == nil {
 		return 0, fmt.Errorf("engine: copy target %s exists", dst)
 	}
@@ -54,9 +57,12 @@ func (e *Engine) copyDB(ctx context.Context, src, dst string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("engine: open copy source: %w", err)
 	}
-	conn.SetInterrupt(ctx)
-	err = conn.Backup("main", tmp)
-	conn.Close()
+	err = func() (err error) {
+		defer conn.Close()
+		defer sqlitex.Recover(&err)
+		conn.SetInterrupt(ctx)
+		return conn.Backup("main", tmp)
+	}()
 	if err != nil {
 		cleanup()
 		return 0, fmt.Errorf("engine: backup: %w", err)
@@ -88,7 +94,8 @@ func (e *Engine) copyDB(ctx context.Context, src, dst string) (int64, error) {
 // to adopt. The check evaluates the file's own schema (CHECK constraints,
 // expression indexes), and an uploaded file is untrusted, so it runs on a
 // hardened user connection with the usual limits.
-func (e *Engine) checkIntegrity(ctx context.Context, path string) error {
+func (e *Engine) checkIntegrity(ctx context.Context, path string) (err error) {
+	defer sqlitex.Recover(&err)
 	c, err := sqlitex.Open(ctx, sqlitex.Options{Path: path, Limits: e.limits()})
 	if err != nil {
 		return fmt.Errorf("engine: open for integrity check: %w", err)

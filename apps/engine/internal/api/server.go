@@ -152,7 +152,7 @@ func stampRequestID(ctx huma.Context, _ string, v any) (any, error) {
 // short URL. Nothing is decided here. Whether the caller may act in that
 // workspace is checked after authentication, in act.
 func (s *Server) Handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.recoverPanics(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// X-Lumbung-Actor-Access names one level. An empty or repeated one
 		// is a caller's bug, and treating it as absent would run the request
 		// with the service token's full access, so it is refused outright.
@@ -186,7 +186,7 @@ func (s *Server) Handler() http.Handler {
 			w = &noRedirect{ResponseWriter: w}
 		}
 		s.mux.ServeHTTP(&problemFallback{ResponseWriter: w}, r)
-	})
+	}))
 }
 
 // noRedirect turns a redirect from the router into a 404 problem. It wraps
