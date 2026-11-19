@@ -42,9 +42,12 @@ async function signIn(emailValue: string, passwordValue: string) {
   await auth.api.signInEmail({ body: { email: emailValue, password: passwordValue }, headers: authHeaders(request) })
 }
 
+// Only a UserError's message reaches the page. Anything else (SQLite, Better
+// Auth) is logged on the server and shown as a generic message.
 function fail(e: unknown): never {
   if (e instanceof UserError) throw new Error(e.message)
-  throw e
+  console.error(e)
+  throw new Error("Something went wrong. Check the dashboard logs.")
 }
 
 // The service token proves the person setting up has access to the server,

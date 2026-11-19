@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/zakiego/lumbung/security/advisories/new
+    about: Report security problems privately, not as an issue.
+  - name: Documentation
+    url: https://lumbung.zakiego.com/docs/
+    about: Install, configuration and API reference.

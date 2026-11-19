@@ -204,7 +204,8 @@ func (e *Engine) stageDB(ctx context.Context, r io.Reader, staged string, limit 
 	}
 	conn, err := sqlitex.Open(ctx, sqlitex.Options{Path: staged, Limits: e.limits()})
 	if err != nil {
-		return apierr.New(apierr.InvalidImport, "the file can't be opened as a SQLite database").WithDetail(err.Error())
+		// No detail: the open error names the staged file's path on the server.
+		return apierr.New(apierr.InvalidImport, "the file can't be opened as a SQLite database")
 	}
 	defer conn.Close()
 	conn.SetInterrupt(ctx)
