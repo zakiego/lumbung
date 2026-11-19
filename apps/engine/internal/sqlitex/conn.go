@@ -52,11 +52,16 @@ type Conn struct {
 	trusted    bool
 	ignoreTx   bool
 	savepoints bool
+	maxMemory  int64 // the memory ceiling, for OutOfMemoryError
+	broken     bool  // a panic went through the connection (Guard)
 }
 
 // ErrReadOnlyCreate is returned when a read-only connection is asked to
 // create its file.
 var ErrReadOnlyCreate = errors.New("sqlitex: a read-only connection can't create its file")
+
+// defaultMaxMemory is the driver's own ceiling when none is set (64-bit).
+const defaultMaxMemory = 256 << 20
 
 // Open opens a hardened user connection.
 func Open(ctx context.Context, opts Options) (*Conn, error) {
@@ -92,8 +97,11 @@ func Open(ctx context.Context, opts Options) (*Conn, error) {
 		vfs.Unregister(vfsName)
 		return nil, fmt.Errorf("sqlitex: open %s: %w", opts.Path, err)
 	}
-	c := &Conn{Conn: raw, vfsName: vfsName, readOnly: opts.ReadOnly}
-	if err := c.harden(opts); err != nil {
+	c := &Conn{Conn: raw, vfsName: vfsName, readOnly: opts.ReadOnly, maxMemory: opts.Limits.MaxMemoryBytes}
+	if c.maxMemory <= 0 {
+		c.maxMemory = defaultMaxMemory
+	}
+	if err := c.Guard(func() error { return c.harden(opts) }); err != nil {
 		_ = c.Close()
 		return nil, err
 	}
@@ -228,8 +236,15 @@ var ErrDirty = errors.New("sqlitex: connection holds temp objects")
 // Reset returns the connection to its pooled state after a request: no open
 // transaction, no interrupt, and the engine's per-connection settings back.
 // It fails with ErrDirty if any temp object exists, as a backstop to the
-// authorizer's temp rules.
+// authorizer's temp rules, and with ErrBroken after a panic.
 func (c *Conn) Reset() error {
+	if c.broken {
+		return ErrBroken
+	}
+	return c.Guard(c.reset)
+}
+
+func (c *Conn) reset() error {
 	c.savepoints = false
 	c.SetInterrupt(context.Background())
 	if !c.GetAutocommit() {
@@ -254,9 +269,11 @@ func (c *Conn) Reset() error {
 	return c.ExecTrusted("PRAGMA foreign_keys = ON")
 }
 
-// Close closes the connection and removes its VFS.
-func (c *Conn) Close() error {
-	err := c.Conn.Close()
-	vfs.Unregister(c.vfsName)
-	return err
+// Close closes the connection and removes its VFS. It never panics: the
+// driver panics if closing reports out of memory, which a connection that
+// ran out of memory may.
+func (c *Conn) Close() (err error) {
+	defer vfs.Unregister(c.vfsName)
+	defer Recover(&err)
+	return c.Conn.Close()
 }
