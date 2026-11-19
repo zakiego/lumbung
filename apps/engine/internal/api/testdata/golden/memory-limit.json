@@ -1,0 +1,7 @@
+{
+  "code": "memory_limit",
+  "detail": "the statement needed more than the 8 MiB of memory one connection may use",
+  "status": 422,
+  "title": "statement needed too much memory",
+  "type": "about:blank"
+}
