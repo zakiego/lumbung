@@ -22,6 +22,15 @@ Every limit has a default that suits a small team on one machine, and every one 
 
 When a request hits a limit, nothing partial comes back and anything it wrote is rolled back. A statement cancelled by the timeout leaves its connection ready for the next request.
 
+A statement that hits the memory limit fails with `memory_limit`, and the connection it ran on is closed and replaced, which gives its memory back. The usual cause is sorting large values: `GROUP BY`, `ORDER BY` and `DISTINCT` hold every row they sort in memory, including big text and blob columns the query only measures. Compute the small values first in a materialized CTE and sort those instead. With a large `name` column, this groups lengths rather than whole names:
+
+```sql
+WITH t AS MATERIALIZED (
+  SELECT email LIKE '%@example.com' AS example, length(name) AS bytes FROM users
+)
+SELECT example, count(*), sum(bytes) FROM t GROUP BY 1;
+```
+
 ## Storage
 
 | Limit | Default | Setting | Error |
