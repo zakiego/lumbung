@@ -17,7 +17,7 @@
     "@lumbung/client": "workspace:*",
     "@tanstack/react-router": "1.170.46",
     "@tanstack/react-start": "1.169.5",
-    "@ui-sdk/core": "0.1.0-beta.1",
+    "@ui-sdk/core": "0.1.0-beta.6",
     "@ui-sdk/react": "0.1.0-beta.1",
     "better-auth": "1.7.22",
     "clsx": "2.1.1",
