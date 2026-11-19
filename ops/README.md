@@ -9,7 +9,7 @@ How we run Lumbung at https://lumbung.zakiego.com on the Mac mini (the `zaki-sel
 | Checkout | `~/selfhost/lumbung` (compose project `lumbung`) |
 | Compose files | `compose.yaml` + `ops/compose.selfhost.yaml` (ports, `mem_limit`, logs, public URLs, proxy header) |
 | Engine | `127.0.0.1:4805` (container 4870), 1 GB, volume `lumbung_data` |
-| Dashboard | `127.0.0.1:4806` (container 4871), 512 MB, volume `lumbung_dashboard`. Also signs in at http://127.0.0.1:4806/app and http://localhost:4806/app on the Mac mini (password only, no passkeys), for when the tunnel is down |
+| Dashboard | `127.0.0.1:4806` (container 4871), 512 MB, volume `lumbung_dashboard`. Stops when idle (Scale to zero, below). Also signs in at http://127.0.0.1:4806/app and http://localhost:4806/app on the Mac mini (password only, no passkeys), for when the tunnel is down |
 | Site | Cloudflare Pages, `SITE_ORIGIN` in `apps/edge/wrangler.jsonc` |
 | Edge Worker | `apps/edge`, route `lumbung.zakiego.com/*` |
 | Nightly backup | launchd `com.zakiego.lumbung-backup`, 03:30, log `~/selfhost/lumbung-backup.log` |
@@ -33,6 +33,28 @@ Every compose command here needs both files. The scripts set this themselves:
 cd ~/selfhost/lumbung
 export COMPOSE_FILE=compose.yaml:ops/compose.selfhost.yaml
 ```
+
+## Scale to zero
+
+The dashboard runs only while someone uses it. The engine has no label and stays on.
+
+The `zaki-selfhost` edge (Caddy with the Sablier plugin, compose project `edge` on `127.0.0.1:4811`) sits between the tunnel and the dashboard. On the first `/app` request it starts `lumbung-dashboard-1` and holds the request until the container is healthy (about 1.5 s), then proxies to `127.0.0.1:4806`. Fifteen minutes after the last request, Sablier stops the container. The dashboard opts in with the `sablier.enable` label in `ops/compose.selfhost.yaml`.
+
+Once the edge is live, the dashboard's tunnel rule points at the edge instead of at 4806. The engine rule doesn't change:
+
+```yaml
+  # Lumbung dashboard through the zaki-selfhost edge (starts it on demand), above the engine rule
+  - hostname: lumbung.zakiego.com
+    path: ^/app(/|$)
+    service: http://127.0.0.1:4811
+```
+
+What changes with the dashboard stopped:
+
+- A deploy starts it, and the edge stops it again 30 minutes later. The deploy needs nothing from the edge.
+- The nightly backup copies `dashboard.db` from its volume with a one-off container (`ops/backup.sh`), the same way `deploy-up.sh` does before a swap.
+- Signing in on the Mac mini at http://127.0.0.1:4806/app needs the container running first, since that address skips the edge: `docker start lumbung-dashboard-1`. The edge stops it 30 minutes later.
+- Rolling back: point the tunnel rule at 4806 again and restart the tunnel, stop the edge (`cd ~/selfhost/edge && docker compose stop`) so nothing stops the dashboard any more, then `docker start lumbung-dashboard-1`. Removing the label and deploying takes it out of the edge's hands for good.
 
 ## First deploy
 

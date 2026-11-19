@@ -33,6 +33,11 @@ services:
     ports: !override
       - "127.0.0.1:4806:4871"
     mem_limit: 512m
+    # Scale to zero (ops/README.md): the zaki-selfhost edge starts the
+    # dashboard on the first /app request and stops it when nobody has used
+    # it for a while. The engine has no label and stays on.
+    labels:
+      sablier.enable: "true"
     environment:
       <<: *proxy
       LUMBUNG_DASHBOARD_URL: https://lumbung.zakiego.com
