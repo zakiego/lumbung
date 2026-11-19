@@ -12,6 +12,7 @@ import (
 	"github.com/zakiego/lumbung/apps/engine/internal/auth"
 	"github.com/zakiego/lumbung/apps/engine/internal/engine"
 	"github.com/zakiego/lumbung/apps/engine/internal/meta"
+	"github.com/zakiego/lumbung/apps/engine/internal/recovery"
 )
 
 type queryBody struct {
@@ -132,6 +133,7 @@ func (s *Server) slowWorker() {
 }
 
 func (s *Server) addSlow(branchID string, q meta.SlowQuery) {
+	defer recovery.Log(s.log, "slow query log")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := s.store.AddSlowQuery(ctx, branchID, q, 50); err != nil {

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 	"github.com/zakiego/lumbung/apps/engine/internal/config"
 	"github.com/zakiego/lumbung/apps/engine/internal/engine"
 	"github.com/zakiego/lumbung/apps/engine/internal/meta"
+	"github.com/zakiego/lumbung/apps/engine/internal/recovery"
 	"github.com/zakiego/lumbung/apps/engine/internal/sqlsplit"
 	"github.com/zakiego/lumbung/apps/engine/internal/value"
 )
@@ -36,7 +38,7 @@ const (
 
 // mountLibSQL adds the /libsql routes.
 func (s *Server) mountLibSQL() {
-	s.libsql = &libsqlStreams{m: map[string]*libsqlStream{}, perToken: map[string]int{}}
+	s.libsql = &libsqlStreams{log: s.log, m: map[string]*libsqlStream{}, perToken: map[string]int{}}
 	for _, v := range []string{"v2", "v3"} {
 		s.mux.HandleFunc("GET /libsql/{db}/{branch}/"+v, libsqlVersion)
 		s.mux.Handle("POST /libsql/{db}/{branch}/"+v+"/pipeline", s.libsqlHandler(false))
@@ -659,6 +661,7 @@ func controlWords(sql string) ([]string, bool) {
 
 // libsqlStreams holds the open streams.
 type libsqlStreams struct {
+	log      *slog.Logger
 	mu       sync.Mutex
 	m        map[string]*libsqlStream
 	perToken map[string]int
@@ -778,6 +781,7 @@ func (st *libsqlStream) nextExpiry(now time.Time) time.Duration {
 // expire runs from the stream's timer. A request in flight holds mu, so this
 // waits for it, then finds the stream used again and re-arms.
 func (st *libsqlStream) expire() {
+	defer recovery.Log(st.reg.log, "libsql stream expiry")
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.closed {
