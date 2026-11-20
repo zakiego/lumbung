@@ -4,7 +4,7 @@
 # the packages it uses are installed; the engine has its own image.
 #
 #   docker build -f apps/dashboard/Dockerfile .
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /repo
