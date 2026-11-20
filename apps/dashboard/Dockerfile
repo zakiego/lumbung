@@ -41,7 +41,10 @@ COPY --from=build --chown=65532:65532 /repo/apps/dashboard/.output ./.output
 USER 65532:65532
 EXPOSE 4871
 VOLUME ["/data"]
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# Probe every second while starting (Docker's default is 5 s). A container
+# started on demand by a proxy that waits for healthy then answers its first
+# request about 4 s sooner, and a deploy's --wait finishes sooner too.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --start-interval=1s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:4871/app/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 ENTRYPOINT []
 CMD ["node", ".output/server/index.mjs"]
