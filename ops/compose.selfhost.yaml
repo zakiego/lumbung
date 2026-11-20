@@ -39,4 +39,10 @@ services:
       # Sign in on the Mac mini itself when the tunnel or Cloudflare is down.
       LUMBUNG_DASHBOARD_EXTRA_ORIGINS: http://127.0.0.1:4806,http://localhost:4806
       LUMBUNG_PUBLIC_ENGINE_URL: https://lumbung.zakiego.com
+      # Fewer glibc malloc arenas for Node's worker threads. Measured on
+      # 2026-11-20 with the dashboard image, 5 runs per setting and 5,500
+      # signed-in page loads each: docker stats after load went from a median
+      # of 96.8 MiB to 82.9 MiB, and stayed 13 MiB lower after 60 s idle.
+      # Idle memory before any traffic didn't change, and neither did speed.
+      MALLOC_ARENA_MAX: "2"
     logging: *logging
