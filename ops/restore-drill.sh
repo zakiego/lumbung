@@ -6,7 +6,8 @@
 #   ops/restore-drill.sh <folder>   one backup folder (holds manifest.json)
 #
 #   1. copy the backup into a scratch volume, owned by the engine's user
-#      (65532), with the dashboard image (the engine image has no shell)
+#      (65532), with a small alpine image (the engine and dashboard images
+#      have no shell)
 #   2. `lumbungd restore` it into a second, empty scratch volume
 #   3. start a throwaway engine on that volume on a free 127.0.0.1 port
 #   4. wait for /health 200, then with the restored service token run
@@ -23,7 +24,7 @@ set -euo pipefail
 
 BACKUPS="${BACKUP_DIR:-$HOME/selfhost/lumbung-backups}/engine"
 IMAGE="${LUMBUNG_ENGINE_IMAGE:-lumbung-engine:latest}"
-HELPER_IMAGE="${LUMBUNG_PROBE_IMAGE:-lumbung-dashboard:latest}"
+HELPER_IMAGE="${LUMBUNG_HELPER_IMAGE:-alpine:3.24.4}"
 HEALTH_TIMEOUT="${DRILL_HEALTH_TIMEOUT:-60}"
 ALLOW_EMPTY="${DRILL_ALLOW_EMPTY:-0}"
 
@@ -54,9 +55,11 @@ trap finish EXIT
 for tool in docker curl python3 lsof; do
   command -v "$tool" >/dev/null || { log "$tool not found"; exit 1; }
 done
-for image in "$IMAGE" "$HELPER_IMAGE"; do
-  docker image inspect "$image" >/dev/null 2>&1 || { log "image $image not found on this host"; exit 1; }
-done
+docker image inspect "$IMAGE" >/dev/null 2>&1 || { log "image $IMAGE not found on this host"; exit 1; }
+if ! docker image inspect "$HELPER_IMAGE" >/dev/null 2>&1; then
+  log "pulling $HELPER_IMAGE"
+  docker pull -q "$HELPER_IMAGE" >/dev/null || { log "couldn't pull $HELPER_IMAGE"; exit 1; }
+fi
 
 # --- which backup -------------------------------------------------------------
 if [ $# -ge 1 ]; then

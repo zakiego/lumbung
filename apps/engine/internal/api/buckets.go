@@ -516,9 +516,10 @@ func (s *Server) presignURL(ctx context.Context, p auth.Principal, scheme, host,
 	// The URL carries no token, only the access key, which resolves in its
 	// token's workspace. An instance token's key belongs to none, so its URL
 	// names the workspace it was signed for, by id, which a rename can't
-	// break.
+	// break. The signing token's own scope decides, not the principal's: a
+	// service token narrowed to one workspace is still an instance token.
 	base := S3Prefix
-	if !p.Bound() {
+	if rec.Scope == auth.ScopeInstance {
 		base = workspacesPrefix + p.WorkspaceID + "/s3"
 	}
 	now := time.Now().UTC().Truncate(time.Second)

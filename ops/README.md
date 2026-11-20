@@ -148,7 +148,7 @@ rm -rf ~/selfhost/lumbung-pre-rollback
 Once a fixed engine is deployed, the whole full backup can also go back into a fresh volume (Full restore, below), which drops everything written after the rollback instead. Remove the folder when you're done with it:
 
 ```bash
-docker run --rm --network none --user 65532 -v lumbung_data:/data --entrypoint rm lumbung-dashboard:latest -rf /data/backups/pre-rollback/<time>
+docker run --rm --network none --user 65532 -v lumbung_data:/data alpine:3.24.4 rm -rf /data/backups/pre-rollback/<time>
 ```
 
 ## Upgrading to workspaces
@@ -326,7 +326,7 @@ Once the upgrade has settled, remove the way back:
 
 ```bash
 docker rmi lumbung-engine:pre-workspaces lumbung-dashboard:pre-workspaces
-docker run --rm --network none --user 65532 -v lumbung_data:/data --entrypoint rm lumbung-dashboard:latest -rf /data/backups/pre-workspaces
+docker run --rm --network none --user 65532 -v lumbung_data:/data alpine:3.24.4 rm -rf /data/backups/pre-workspaces
 ```
 
 ### The rehearsal
@@ -395,8 +395,8 @@ Restoring `dashboard.db`: with the dashboard stopped, put a copy and its `.auth-
 
 ```bash
 docker compose stop dashboard
-docker run --rm --network none --user 0 --entrypoint sh \
-  -v lumbung_dashboard:/data -v ~/selfhost/lumbung-backups/dashboard:/b:ro lumbung-dashboard:latest -c '
+docker run --rm --network none --user 0 \
+  -v lumbung_dashboard:/data -v ~/selfhost/lumbung-backups/dashboard:/b:ro alpine:3.24.4 sh -c '
   set -e
   src="$1"
   [ -f "$src.db" ] || { echo "no $src.db"; exit 1; }

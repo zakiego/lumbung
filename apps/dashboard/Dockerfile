@@ -17,13 +17,26 @@ COPY tsconfig.base.json ./
 COPY packages/client ./packages/client
 COPY apps/dashboard ./apps/dashboard
 RUN pnpm --filter @lumbung/client build && pnpm --filter @lumbung/dashboard build
+# The runtime image has no shell, so /data is made here and copied over.
+RUN mkdir /empty-data
 
-FROM node:24-bookworm-slim
+# Distroless: node and its runtime libraries, no shell or package manager. The
+# server has no native modules (node:sqlite is built in), so nothing else is
+# needed. Debugging uses `docker compose exec dashboard node`, and file work
+# on the volume uses a separate image with a shell (ops/restore-drill.sh).
+FROM gcr.io/distroless/nodejs24-debian13:nonroot
 WORKDIR /app
+# Distroless keeps node at /nodejs/bin/node, off the PATH, and makes it the
+# ENTRYPOINT. Putting it on the PATH and clearing the ENTRYPOINT keeps
+# `CMD ["node", ...]`, `docker compose exec dashboard node` (ops/backup.sh)
+# and `docker run --entrypoint node` (ops/lib.sh, scripts/deploy-up.sh)
+# working as they did on the Debian node image.
+#
 # Runs as the engine image's user (65532), so it can read the engine's
 # generated service token from a shared, read-only volume.
-ENV NODE_ENV=production PORT=4871 HOST=0.0.0.0 LUMBUNG_DASHBOARD_DATA_DIR=/data
-RUN mkdir -p /data && chown 65532:65532 /data
+ENV PATH=/nodejs/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  NODE_ENV=production PORT=4871 HOST=0.0.0.0 LUMBUNG_DASHBOARD_DATA_DIR=/data
+COPY --from=build --chown=65532:65532 /empty-data /data
 COPY --from=build --chown=65532:65532 /repo/apps/dashboard/.output ./.output
 USER 65532:65532
 EXPOSE 4871
@@ -33,4 +46,5 @@ VOLUME ["/data"]
 # request about 4 s sooner, and a deploy's --wait finishes sooner too.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --start-interval=1s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:4871/app/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+ENTRYPOINT []
 CMD ["node", ".output/server/index.mjs"]

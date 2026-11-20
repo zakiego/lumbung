@@ -24,6 +24,17 @@ data/
 !.env.example
 .dev.vars
 .dev.vars.*
+secrets/
+*.pem
+*.key
+*.p12
+*.token
+*.log
+
+# Editors and local agent settings
+.idea/
+.vscode/
+.claude/settings.local.json
 
 .DS_Store
 
