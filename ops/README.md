@@ -38,7 +38,7 @@ export COMPOSE_FILE=compose.yaml:ops/compose.selfhost.yaml
 
 The dashboard runs only while someone uses it. The engine has no label and stays on.
 
-The `zaki-selfhost` edge (Caddy with the Sablier plugin, compose project `edge` on `127.0.0.1:4811`) sits between the tunnel and the dashboard. On the first `/app` request it starts `lumbung-dashboard-1` and holds the request until the container is healthy (about 1.5 s), then proxies to `127.0.0.1:4806`. Fifteen minutes after the last request, Sablier stops the container. The dashboard opts in with the `sablier.enable` label in `ops/compose.selfhost.yaml`.
+The `zaki-selfhost` edge (Caddy with the Sablier plugin, compose project `edge` on `127.0.0.1:4811`) sits between the tunnel and the dashboard. On the first `/app` request it starts `lumbung-dashboard-1` and holds the request until the container is healthy (about 4 s), then proxies to `127.0.0.1:4806`. Fifteen minutes after the last request, Sablier stops the container. The dashboard opts in with the `sablier.enable` label in `ops/compose.selfhost.yaml`.
 
 Once the edge is live, the dashboard's tunnel rule points at the edge instead of at 4806. The engine rule doesn't change:
 
