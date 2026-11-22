@@ -6,7 +6,7 @@ This file is the source of truth for scope and behavior. Read the section you're
 
 ## 1. Who it's for
 
-- Us first: one instance on the Mac mini, used by our own apps and agents.
+- Us first: one instance on our own home server, used by our own apps and agents.
 - Later, anyone who clones the repo and runs it on their own machine. So nothing in the product may depend on our hostnames, our tunnel or our accounts. Our own deployment notes live in `ops/`, everything else is generic.
 
 No public sign-up, no billing, no multi-org tenancy. One instance is one team. Workspaces (section 17) separate that team's apps and agents from each other; they aren't organizations.
@@ -28,10 +28,8 @@ Stating a compatibility fact is fine ("works with the libSQL client").
 | Site | Astro + Starlight: landing at `/`, docs at `/docs`, static on Cloudflare Pages |
 | Client API | Own REST API and own SDK first. libSQL wire protocol is a later milestone |
 | CLI | Go binary `lumbung`, same module as the engine |
-| Hosting | Engine and dashboard as Docker containers on the Mac mini. Site on Cloudflare Pages |
+| Hosting | Engine and dashboard as Docker containers on one host. Site on Cloudflare Pages |
 | Package manager | pnpm workspace for the TS apps, Go module for the engine |
-
-Use palui (a sibling project) as the reference for repo conventions: pnpm workspace file, TanStack Start app layout, Better Auth setup, Dockerfile, compose, the edge Worker, `ops/`. Copy patterns, not product code.
 
 ## 4. Layout
 
@@ -113,7 +111,7 @@ Also: defensive mode on, foreign keys on by default, WAL journal mode, a busy ti
 
 ### 6.3 Limits (all configurable, all documented)
 
-Statement timeout (default 30 s), max rows and max bytes per response, max request body, max bound parameters, max size per branch, max total size for the instance, max databases, max branches per database, idle connection close, cap on open files. Before a branch, snapshot or import is created, check free disk on the host and refuse under a threshold with HTTP 507. The Mac mini's disk is tight, so this guard matters.
+Statement timeout (default 30 s), max rows and max bytes per response, max request body, max bound parameters, max size per branch, max total size for the instance, max databases, max branches per database, idle connection close, cap on open files. Before a branch, snapshot or import is created, check free disk on the host and refuse under a threshold with HTTP 507. A small host's disk can be tight, so this guard matters.
 
 ### 6.4 Values over JSON
 
@@ -245,7 +243,7 @@ Added in milestone 11 (ADR 0005). The libSQL remote protocol over HTTP (Hrana v2
 
 ## 10. Dashboard
 
-Built with `/zaki-design-ui` on ui-sdk components (ADR 0004; this said shadcn until milestone 8). Screens:
+Built on ui-sdk components (ADR 0004; this said shadcn until milestone 8). Screens:
 
 - First-run setup (creates the owner), login, accept invite.
 - Databases: list with size, branch count, last activity. Create. Trash with restore.
@@ -282,21 +280,21 @@ Rules that keep the docs correct:
 4. `llms.txt` and per-page Markdown are served for agents.
 5. Each page answers one question, leads with the working example, and uses real values that work against the quickstart instance.
 
-The landing page goes through `/zaki-design-ui` including its Ship phase (metadata, OG image, favicon set, sitemap, robots).
+The landing page ships with metadata, an OG image, a favicon set, a sitemap and robots.
 
 ## 12. Deployment
 
 Generic (documented for everyone): one `compose.yaml` with `engine` and `dashboard` services and one data volume, both bound to localhost, healthchecks on both.
 
-Ours (in `ops/`, done with the `zaki-selfhost` skill):
+Ours (in `ops/`, a working example):
 
-- Checkout at `~/selfhost/lumbung`, two ports from `free-port.sh`, `mem_limit` on both services.
-- One public hostname, `lumbung.zakiego.com`, through an edge Worker like palui's: `/` and `/docs` to Pages, `/app` to the dashboard, `/v1`, `/mcp`, `/libsql` and `/health` to the engine.
+- One checkout on the host, two localhost ports, `mem_limit` on both services.
+- One public hostname, `lumbung.zakiego.com`, through an edge Worker: `/` and `/docs` to Pages, `/app` to the dashboard, `/v1`, `/mcp`, `/libsql` and `/health` to the engine.
 - `scripts/deploy-up.sh` backs up `meta.db` right before the swap. A nightly job copies every default branch and the meta database to a backup folder with retention. Test a restore from that backup once before calling it done.
-- Add the health URL to `m4-alerts`, the row to the Apps table in the `zaki-selfhost` skill, and the repo to the auto-deploy allowlist.
-- Docker build memory: the OrbStack VM has 3 GB. Keep the Go build and the Nitro build in separate stages and never run them in parallel.
+- Watch the health URL from an uptime monitor, and deploy on push to `main`.
+- Docker build memory: the Docker VM has 3 GB. Keep the Go build and the Nitro build in separate stages and never run them in parallel.
 
-Steps only Zaki can do (ask once, together): restart the tunnel after the ingress change.
+Steps only the operator can do: restart the tunnel after the ingress change.
 
 ## 13. Testing bar
 
@@ -321,9 +319,9 @@ Work top to bottom. Each one ends green in CI, with its docs pages written.
 | 4 | SDK and CLI | Section 9, Drizzle example, `migrate` |
 | 5 | MCP | Section 8, verified with mcporter |
 | 6 | Docs pass | Every page in section 11 exists, docs tests green |
-| 7 | Design stop | Explore variants for the dashboard's main screen and the landing hero are ready. Ask Zaki to pick both at once, and for the tunnel restart later |
-| 8 | Dashboard | Section 10, reviewed per `/zaki-design-ui` |
-| 9 | Landing | Landing page shipped per `/zaki-design-ui` Ship |
+| 7 | Design stop | Explore variants for the dashboard's main screen and the landing hero are ready. Ask the owner to pick both at once, and for the tunnel restart later |
+| 8 | Dashboard | Section 10, with a design review |
+| 9 | Landing | Landing page shipped |
 | 10 | Deploy | Section 12, live at the public hostname, backup and restore tested |
 | 11 | libSQL protocol | `@libsql/client` and Drizzle's libsql driver work unchanged against a branch, including interactive transactions |
 
@@ -331,7 +329,7 @@ Object storage continues with milestones 12 to 17 in section 16.9, workspaces wi
 
 Later, not scheduled: MCP OAuth for Claude on the web, publishing the CLI, the open-source checklist (license, security policy, contribution guide), read replicas.
 
-## 15. Open questions for Zaki
+## 15. Open questions
 
 - License for when the repo goes public. The SDK is already MIT.
 - Whether the public hostname stays `lumbung.zakiego.com` or moves to its own domain.
@@ -570,7 +568,7 @@ Migration 6, forward-only: the default workspace, `workspace_id` on `databases`,
 | 18 | Workspace core | Migration 6 with the upgrade test, workspaces in meta, engine and auth, the `workspace` scope, short and qualified URLs on every door, the workspace and instance endpoints, 17.5 limits and the token cap, per-workspace audit, the limited database view, isolation rows for REST, libSQL, S3 and MCP, generated files current, concept docs |
 | 19 | Deletion, moving | 17.6 trash, restore, purge and move, the service token's narrowed access, the new MCP tools, backup and restore drill, the rest of 17.9, fuzz tests with two workspaces |
 | 20 | SDK, CLI, docs | 17.7 SDK 0.2.0 and CLI with tests against a real engine, examples, guides and the AI agents guide, the proof script for REST, libSQL, S3 and MCP |
-| 21 | Dashboard | 17.8, reviewed per `/zaki-design-ui`, end-to-end script walks two workspaces |
+| 21 | Dashboard | 17.8, with a design review, end-to-end script walks two workspaces |
 | 22 | Upgrade notes | `ops/README.md` steps for our instance, restore drill run against a local upgraded copy |
 
 Each ends with a cold security review by a fresh subagent and every HIGH and MEDIUM finding fixed before the next starts.

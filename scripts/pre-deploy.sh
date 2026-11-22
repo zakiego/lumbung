@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run by the zaki-selfhost deploy script from the checkout, after `git pull`
+# Run by the deploy script from the checkout, after `git pull`
 # and before the build. A non-zero exit stops the deploy. Our deployment only
 # (see ops/README.md).
 #

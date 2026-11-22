@@ -1,4 +1,4 @@
-# Shared helpers for our deployment scripts (zaki-selfhost). Sourced, not run,
+# Shared helpers for the deployment scripts. Sourced, not run,
 # by scripts/pre-deploy.sh, scripts/deploy-up.sh and ops/rollback-meta.sh,
 # from the repo root with COMPOSE_FILE set. Callers define log().
 #

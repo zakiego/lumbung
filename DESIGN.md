@@ -1,6 +1,6 @@
 # Design
 
-Design calls for Lumbung only. Cross-project taste lives in the zaki-design-ui skill's `TASTE.md`.
+Design calls for Lumbung.
 
 ## Decisions
 

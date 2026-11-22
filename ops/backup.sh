@@ -1,5 +1,5 @@
 #!/bin/bash
-# Nightly backup of our Lumbung deployment (zaki-selfhost), run by launchd at
+# Nightly backup of a Lumbung deployment, run by launchd at
 # 03:30 (ops/com.zakiego.lumbung-backup.plist) or by hand.
 #
 #   1. full engine backup inside the data volume: every database's default
@@ -28,8 +28,8 @@ MIN_FREE_MB="${MIN_FREE_MB:-1024}"
 ATTEMPTS=3
 RETRY_DELAY="${RETRY_DELAY:-60}"
 
-# launchd starts with a bare PATH. OrbStack puts docker in /usr/local/bin and
-# ~/.orbstack/bin.
+# launchd starts with a bare PATH. Docker Desktop and OrbStack put docker in
+# /usr/local/bin, OrbStack also in ~/.orbstack/bin.
 export PATH="/usr/local/bin:$HOME/.orbstack/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export COMPOSE_FILE="${LUMBUNG_COMPOSE_FILE:-compose.yaml:ops/compose.selfhost.yaml}"
 umask 077

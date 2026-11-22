@@ -1,11 +1,11 @@
 #!/bin/bash
-# Build and swap our deployment (zaki-selfhost). deploy.sh runs this in place
+# Build and swap the deployment. The deploy script runs this in place
 # of its own tag, build and rollback, after scripts/pre-deploy.sh (the cheap
 # checks); it still guards the disk before and prunes images and build cache
 # after.
 #
 #   1. tag the engine and dashboard :latest images as :prev
-#   2. build the engine, then the dashboard, one after the other: the OrbStack
+#   2. build the engine, then the dashboard, one after the other: the Docker
 #      VM has 3 GB, and the Go build and the Nitro build together don't fit
 #   3. back up right before the swap, so the copies miss nothing written
 #      during the build:
