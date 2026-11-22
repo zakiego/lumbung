@@ -301,11 +301,18 @@ func (e *Engine) PromoteBranch(ctx context.Context, ws, dbRef, branchRef string)
 	}
 	// Hold the branch so a delete or reset waiting on it sees the new default
 	// when it rechecks.
+	var oldDefault string
 	err = e.withExclusive(ctx, tg, nil, func(cur target) error {
+		oldDefault = cur.db.DefaultBranchID
 		return e.meta.SetDefaultBranch(ctx, cur.db.ID, cur.branch.ID)
 	})
 	if err != nil {
 		return meta.Branch{}, err
+	}
+	// A WaitChange on the default branch was waiting on the old one. Wake
+	// it, so it resolves the default again.
+	if oldDefault != "" && oldDefault != tg.branch.ID {
+		e.gates.get(oldDefault).bump()
 	}
 	return e.meta.GetBranch(ctx, tg.db.ID, tg.branch.ID)
 }

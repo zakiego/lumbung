@@ -20,9 +20,36 @@ type gate struct {
 	writer  bool
 	waiting int // exclusive holders waiting
 	changed chan struct{}
+
+	// seq counts changes to the branch for WaitChange: commits that changed
+	// rows or the schema, and every exclusive hold (a reset, import or
+	// delete). moved is closed and replaced on each one. Neither touches the
+	// gate's own state, so a wait never blocks maintenance.
+	seq   uint64
+	moved chan struct{}
 }
 
-func newGate() *gate { return &gate{changed: make(chan struct{})} }
+func newGate() *gate { return &gate{changed: make(chan struct{}), moved: make(chan struct{})} }
+
+// bump records a change and wakes every WaitChange on the branch.
+func (g *gate) bump() {
+	g.mu.Lock()
+	g.bumpLocked()
+	g.mu.Unlock()
+}
+
+func (g *gate) bumpLocked() {
+	g.seq++
+	close(g.moved)
+	g.moved = make(chan struct{})
+}
+
+// position returns the change count and the channel the next change closes.
+func (g *gate) position() (uint64, chan struct{}) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.seq, g.moved
+}
 
 // notify wakes every waiter. Call with mu held.
 func (g *gate) notify() {
@@ -123,10 +150,13 @@ func (g *gate) tryExclusive(ctx context.Context, window time.Duration) error {
 	}
 }
 
+// release ends an exclusive hold. The holder may have replaced or removed
+// the branch's file, so it counts as a change.
 func (g *gate) release() {
 	g.mu.Lock()
 	g.writer = false
 	g.notify()
+	g.bumpLocked()
 	g.mu.Unlock()
 }
 

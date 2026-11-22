@@ -5,6 +5,7 @@ package engine
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -40,6 +41,9 @@ type Engine struct {
 	closing map[string]chan struct{} // pools being closed, closed when done
 
 	gates gates // per-branch maintenance gates
+	// boot tells this process's change cursors from an earlier one's, whose
+	// counts started over (WaitChange).
+	boot string
 
 	txMu     sync.Mutex
 	txs      map[*Tx]struct{} // open interactive transactions
@@ -101,6 +105,7 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*Engine, er
 	}()
 	e := &Engine{
 		unlock:     unlock,
+		boot:       rand.Text()[:10],
 		cfg:        cfg,
 		layout:     layout,
 		log:        log,
