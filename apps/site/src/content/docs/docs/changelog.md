@@ -5,6 +5,11 @@ description: What changed in each version of Lumbung.
 
 ## Unreleased
 
+### Waiting for changes
+
+- **`GET /v1/databases/{db}/branches/{branch}/wait`** (and `/v1/databases/{db}/wait` for the default branch) holds a request until the branch changes, for up to 60 seconds. A client that polled a table for new work can wait for writes instead. It answers with a cursor to pass to the next call. Only writes that changed rows or the schema, and resets, imports, promotions and deletes, count as changes. Read access is enough, and waits don't show up as queries in a branch's stats.
+- **SDK**: `client.wait(cursor?, { timeout, signal })`.
+
 ### MCP playbook
 
 - **`get_playbook`**: a read-only MCP tool that returns the operating rules for agents (token levels, query versus execute, branches, the trash, result caps and error codes), stamped with a version hash. The server instructions are now short and point at it with the same version.

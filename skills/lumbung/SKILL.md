@@ -89,6 +89,7 @@ curl -s "$LUMBUNG_URL/v1/databases/app/branches/pr-42/batch" \
 - Values come back typed: `{"type": "integer", "value": "1"}`. Integers are decimal strings so 64-bit values survive. Blobs are base64.
 - Lists: `GET /v1/databases`, `GET /v1/databases/{db}/branches`, `GET /v1/buckets`, `GET /v1/tokens`.
 - Send `Idempotency-Key` on creates you might retry. Quote `X-Request-Id` from the response when reporting a failure.
+- To react to writes instead of polling, use `GET /v1/databases/{db}/wait` (or `.../branches/{branch}/wait`): call it without `cursor`, then pass the `cursor` from each answer with `timeout` up to 60. It answers `{"cursor", "changed"}` as soon as a write changes rows or the schema. Waits don't count as queries.
 
 ## @lumbung/client (TypeScript SDK)
 
@@ -116,6 +117,7 @@ try {
 ```
 
 - `db.branch("pr-42")` and `db.database("other")` return bound clients.
+- `await db.wait(cursor, { timeout: 55, signal })` holds until the branch changes. Start with `db.wait()` for the first cursor.
 - Writes are never retried by the SDK. Reads retry only when `readOnly: true` or GET.
 - Management groups: `databases`, `branches`, `snapshots`, `tokens`, `audit`, `buckets`. Objects: `client.bucket("photos").put/get/list`.
 - Drizzle: `import { drizzle } from "@lumbung/client/drizzle"`, then `drizzle({ url, token, database, branch }, { schema })`. `db.transaction()` throws `unsupported`. Use `db.batch([...])`.
