@@ -30,6 +30,10 @@ type Tx struct {
 	// granted is set once applySizeLimit reserved room, which release gives
 	// back.
 	granted bool
+	// changes0 and schema0 are the writer's total changes and schema version
+	// right after BEGIN, so commit can tell whether anything changed.
+	changes0 int64
+	schema0  int64
 
 	// ctx ends when the transaction is aborted from outside (Abort), which
 	// interrupts a statement in flight.
@@ -134,7 +138,29 @@ func (tx *Tx) start(ctx context.Context) error {
 			return err
 		}
 	}
-	return conn.ExecTrusted(begin)
+	if err := conn.ExecTrusted(begin); err != nil {
+		return err
+	}
+	if tx.access == Write {
+		tx.changes0 = conn.TotalChanges()
+		tx.schema0, _ = trustedInt(conn, "PRAGMA schema_version")
+	}
+	return nil
+}
+
+// changed reports whether a write transaction changed rows or the schema
+// since BEGIN. A zero-row UPDATE or a plain read on the writer doesn't, so
+// it wakes no WaitChange. When the schema version can't be read it answers
+// true: a spurious wake costs a waiter one extra look.
+func (tx *Tx) changed() bool {
+	if tx.access != Write {
+		return false
+	}
+	if tx.conn.TotalChanges() != tx.changes0 {
+		return true
+	}
+	v, err := trustedInt(tx.conn, "PRAGMA schema_version")
+	return err != nil || v != tx.schema0
 }
 
 // guard runs f on the transaction's connection, turning a panic into an
@@ -169,9 +195,13 @@ func (tx *Tx) commit() error {
 			return tx.e.sqlErr(err, tx.grant)
 		}
 	}
+	changed := tx.changed()
 	if err := tx.conn.ExecTrusted("COMMIT"); err != nil {
 		_ = tx.conn.ExecTrusted("ROLLBACK")
 		return tx.e.sqlErr(err, tx.grant)
+	}
+	if changed {
+		tx.g.bump()
 	}
 	return nil
 }

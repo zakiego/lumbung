@@ -14,6 +14,7 @@ import type {
   SnapshotOut,
   StatsOutBody,
   TokenOut,
+  WaitOutBody,
   WireParam,
   WorkspaceOut,
 } from "./generated.ts"
@@ -287,6 +288,18 @@ export class Client {
     const body = { statements: statements.map(statementBody), read_only: opts.readOnly || undefined, migration: opts.migration || undefined }
     const r = await this.request<{ results: ResultOut[] }>("POST", `${this.#target()}/batch`, { body, safe: opts.readOnly === true, signal: opts.signal })
     return r.results.map((x) => this.#decode(x))
+  }
+
+  /**
+   * Waits for the branch to change, so you can react to writes instead of
+   * polling. Call it without a cursor to get the current one at once, then
+   * pass the cursor from each answer to the next call. It answers as soon as
+   * the branch changes after that cursor, or after `timeout` seconds (0 to
+   * 60, default 30) with `changed: false`. `changed` can be a false alarm,
+   * never a miss.
+   */
+  async wait(cursor?: string, opts: { timeout?: number; signal?: AbortSignal } = {}): Promise<WaitOutBody> {
+    return this.request<WaitOutBody>("GET", `${this.#target()}/wait`, { query: { cursor, timeout: opts.timeout }, signal: opts.signal })
   }
 
   // ---- management

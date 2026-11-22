@@ -501,6 +501,7 @@ func (s *Server) register() {
 	s.registerDatabases(s.api)
 	s.registerBranches(s.api)
 	s.registerQuery(s.api)
+	s.registerWait(s.api)
 	s.registerSnapshots(s.api)
 	s.registerTransfer(s.api)
 	s.registerTokens(s.api)

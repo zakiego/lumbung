@@ -74,6 +74,20 @@ describe("queries", () => {
     expect((await db.query("SELECT count(*) AS n FROM t")).rows[0]!.n).toBe(2)
   })
 
+  test("wait answers on a change and times out without one", async () => {
+    const db = createClient({ url, token, database: await freshDatabase() })
+    await db.query("CREATE TABLE t(x)")
+    const first = await db.wait()
+    expect(first.changed).toBe(false)
+    expect(await db.wait(first.cursor, { timeout: 0 })).toEqual({ cursor: first.cursor, changed: false })
+    const held = db.wait(first.cursor, { timeout: 30 })
+    await new Promise((r) => setTimeout(r, 100))
+    await db.query("INSERT INTO t VALUES (1)")
+    const next = await held
+    expect(next.changed).toBe(true)
+    expect(next.cursor).not.toBe(first.cursor)
+  })
+
   test("typed errors carry the API code", async () => {
     const db = createClient({ url, token, database: await freshDatabase() })
     const err = await db.query("ATTACH 'x.db' AS x").catch((e: unknown) => e)

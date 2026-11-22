@@ -553,6 +553,13 @@ export interface View {
   sql: string;
 }
 
+export interface WaitOutBody {
+  /** True when the branch changed since the cursor you passed. It can be a false alarm, never a miss. */
+  changed: boolean;
+  /** Names the branch's state now. Pass it to the next wait. */
+  cursor: string;
+}
+
 export interface WorkspaceLimitsOut {
   /** Most buckets. 0: no limit of its own. */
   max_buckets: number;

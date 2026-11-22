@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `wait(cursor?, { timeout, signal })` waits for the client's branch to change instead of polling it. Call it without a cursor first, then pass the cursor from each answer. Needs an engine with `GET .../wait`; an older one answers `not_found`.
+
 ## 0.2.0
 
 For engines with workspaces. A workspace owns databases, buckets and tokens, and a token for one can't see anything outside it.

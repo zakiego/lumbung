@@ -541,6 +541,26 @@ Response `200`:
 | `rows` (required) | value[][] | Rows as arrays in column order. |
 | `rows_affected` (required) | integer | Rows changed by an INSERT, UPDATE or DELETE, not counting triggers. |
 
+### Wait for a branch to change
+
+`GET /v1/databases/{db}/branches/{branch}/wait`
+
+Waits for the branch to change, so a client can react to writes instead of polling. Call it once without a cursor, then pass the cursor from each answer to the next call. It answers as soon as the branch changes after that cursor, or after timeout seconds with changed false. A change is a committed write that changed rows or the schema, or a reset, import, promotion or delete. A cursor from before a restart, or from another branch, answers at once with changed true. Needs read access. Waits don't count as queries in the branch's stats.
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `db` (required) | path | string |  |
+| `branch` (required) | path | string |  |
+| `cursor` | query | string | The cursor from the last answer. Leave it out to get the current cursor at once. |
+| `timeout` | query | integer | Seconds to wait for a change before answering with changed false. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `changed` (required) | boolean | True when the branch changed since the cursor you passed. It can be a false alarm, never a miss. |
+| `cursor` (required) | string | Names the branch's state now. Pass it to the next wait. |
+
 ### Run a statement on the default branch
 
 `POST /v1/databases/{db}/query`
@@ -568,6 +588,25 @@ Response `200`:
 | `last_insert_rowid` (required) | string | The rowid of the last row this statement inserted, or "0". A decimal string, since rowids can pass 2^53. |
 | `rows` (required) | value[][] | Rows as arrays in column order. |
 | `rows_affected` (required) | integer | Rows changed by an INSERT, UPDATE or DELETE, not counting triggers. |
+
+### Wait for the default branch to change
+
+`GET /v1/databases/{db}/wait`
+
+Waits for the branch to change, so a client can react to writes instead of polling. Call it once without a cursor, then pass the cursor from each answer to the next call. It answers as soon as the branch changes after that cursor, or after timeout seconds with changed false. A change is a committed write that changed rows or the schema, or a reset, import, promotion or delete. A cursor from before a restart, or from another branch, answers at once with changed true. Needs read access. Waits don't count as queries in the branch's stats.
+
+| Parameter | In | Type | Description |
+|---|---|---|---|
+| `db` (required) | path | string |  |
+| `cursor` | query | string | The cursor from the last answer. Leave it out to get the current cursor at once. |
+| `timeout` | query | integer | Seconds to wait for a change before answering with changed false. |
+
+Response `200`:
+
+| Field | Type | Description |
+|---|---|---|
+| `changed` (required) | boolean | True when the branch changed since the cursor you passed. It can be a false alarm, never a miss. |
+| `cursor` (required) | string | Names the branch's state now. Pass it to the next wait. |
 
 ## Snapshots
 

@@ -52,6 +52,7 @@ func (s *Server) mountLibSQL() {
 // before closing the engine.
 func (s *Server) Close() {
 	s.closeOnce.Do(func() {
+		s.Drain()
 		s.libsql.closeAll()
 		close(s.stop)
 	})
