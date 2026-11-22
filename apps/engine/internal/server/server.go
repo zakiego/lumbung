@@ -104,6 +104,9 @@ func (s *Server) Run(ctx context.Context) error {
 		IdleTimeout:       2 * time.Minute,
 		BaseContext:       func(net.Listener) context.Context { return context.WithoutCancel(ctx) },
 	}
+	// Held waits would keep Shutdown waiting for its full timeout; answer
+	// them as soon as it starts.
+	srv.RegisterOnShutdown(s.API.Drain)
 	ln, err := net.Listen("tcp", s.cfg.Addr)
 	if err != nil {
 		return err

@@ -62,6 +62,10 @@ type Server struct {
 	slowQ     chan slowEntry // slow-query rows for the background writer
 	stop      chan struct{}  // closed by Close
 	closeOnce sync.Once
+
+	waiters   waiters       // waits held open, by token (wait.go)
+	draining  chan struct{} // closed by Drain
+	drainOnce sync.Once
 }
 
 // Option changes a server at construction.
@@ -89,6 +93,7 @@ func New(eng *engine.Engine, log *slog.Logger, opts ...Option) *Server {
 		touched:     map[string]time.Time{},
 		slowQ:       make(chan slowEntry, 64),
 		stop:        make(chan struct{}),
+		draining:    make(chan struct{}),
 		ipHeader:    cfg.ClientIPHeader,
 	}
 	for _, o := range opts {

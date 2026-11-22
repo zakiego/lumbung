@@ -177,6 +177,8 @@ POST                 /v1/databases/{db}/branches/{branch}/query
 POST                 /v1/databases/{db}/branches/{branch}/batch
 POST                 /v1/databases/{db}/query               (default branch)
 POST                 /v1/databases/{db}/batch               (default branch)
+GET                  /v1/databases/{db}/branches/{branch}/wait?cursor=&timeout=
+GET                  /v1/databases/{db}/wait                (default branch)
 GET  POST            /v1/databases/{db}/branches/{branch}/snapshots
 POST                 /v1/databases/{db}/snapshots/{snapshot}/restore
 POST                 /v1/databases/{db}/branches/{branch}/import
@@ -201,6 +203,16 @@ Rules:
 ### 7.1 libSQL protocol
 
 Added in milestone 11 (ADR 0005). The libSQL remote protocol over HTTP (Hrana v2 and v3, JSON) at `/libsql/{db}/{branch}/`, so `@libsql/client` and `drizzle-orm/libsql` work against a branch by URL alone. Same bearer tokens, scopes, limits and isolation as REST. Streams with batons carry interactive transactions: the engine recognizes BEGIN, COMMIT and ROLLBACK itself and runs its own, and savepoints are allowed inside an open transaction. Streams have an idle timeout, transactions a lifetime, and both are capped per token and per instance.
+
+### 7.2 Waiting for changes
+
+`GET .../wait` lets a client react to writes instead of polling, for a job queue or a cache kept in a branch. The first call, without a cursor, answers at once with the branch's cursor. Each later call passes the last cursor and is held until the branch changes after it, or `timeout` seconds pass (0 to 60, default 30), and answers `{"cursor", "changed"}`.
+
+- A change is a committed transaction that changed rows or the schema, from any door (REST, libSQL, MCP, the dashboard), and every reset, import, promotion and delete. A read, a write that changed no rows, or a rolled back transaction is not one, so a client that polls a queue with `UPDATE ... RETURNING` doesn't wake its own waits.
+- `changed` can be a false alarm, never a miss. The cursor is opaque: it names the engine process, the branch and a count kept in memory. A cursor from before a restart, or from another branch (the default branch after a promotion), differs from the current one and answers at once with `changed: true`.
+- A wait holds no connection, pool or gate, so it never delays maintenance or keeps a branch's pool open. A branch deleted during a wait answers `branch_not_found`.
+- Read access is enough. Each token holds at most 16 waits at once (`rate_limited` past that). A graceful shutdown answers every held wait with `changed: false` first.
+- Waits don't count as queries in the branch's stats (6.9): a held request would only add a false 60 second latency.
 
 ## 8. MCP
 
