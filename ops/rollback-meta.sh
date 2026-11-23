@@ -1,7 +1,7 @@
 #!/bin/bash
 # Roll meta.db back to a pre-deploy backup, so an older engine serves it
-# again after a newer one migrated it (PLAN 6.10). Our deployment
-# (zaki-selfhost); scripts/deploy-up.sh runs it on a failed deploy, and it
+# again after a newer one migrated it (PLAN 6.10).
+# scripts/deploy-up.sh runs it on a failed deploy, and it
 # works by hand too (ops/README.md). Run from anywhere on the Docker host.
 #
 #   ops/rollback-meta.sh [--from /data/backups/pre-deploy/<time>-meta] [--force]

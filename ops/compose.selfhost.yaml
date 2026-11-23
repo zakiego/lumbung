@@ -1,4 +1,4 @@
-# Our deployment on the Mac mini (zaki-selfhost), layered over compose.yaml:
+# The project's own deployment, layered over compose.yaml:
 #
 #   COMPOSE_FILE=compose.yaml:ops/compose.selfhost.yaml docker compose ...
 #
@@ -13,7 +13,7 @@ x-proxy: &proxy
   LUMBUNG_CLIENT_IP_HEADER: CF-Connecting-IP
   LUMBUNG_TRUSTED_PROXIES: 127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7
 
-# Logs capped at 30 MB per container, as in the zaki-selfhost template.
+# Logs capped at 30 MB per container.
 x-logging: &logging
   driver: local
   options:
@@ -33,7 +33,7 @@ services:
     ports: !override
       - "127.0.0.1:4806:4871"
     mem_limit: 512m
-    # Scale to zero (ops/README.md): the zaki-selfhost edge starts the
+    # Scale to zero (ops/README.md): the Caddy edge starts the
     # dashboard on the first /app request and stops it when nobody has used
     # it for a while. The engine has no label and stays on.
     labels:
@@ -41,7 +41,7 @@ services:
     environment:
       <<: *proxy
       LUMBUNG_DASHBOARD_URL: https://lumbung.zakiego.com
-      # Sign in on the Mac mini itself when the tunnel or Cloudflare is down.
+      # Sign in on the host itself when the tunnel or Cloudflare is down.
       LUMBUNG_DASHBOARD_EXTRA_ORIGINS: http://127.0.0.1:4806,http://localhost:4806
       LUMBUNG_PUBLIC_ENGINE_URL: https://lumbung.zakiego.com
       # Fewer glibc malloc arenas for Node's worker threads. Measured on

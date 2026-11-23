@@ -1112,7 +1112,7 @@ func TestWorkspaceAgentMakesItsOwn(t *testing.T) {
 		}
 		return k
 	}
-	agent, other := mk("palui"), mk("someone-else")
+	agent, other := mk("agent"), mk("someone-else")
 
 	s := e.mcp(agent.Token)
 	if ws, msg := call(t, s, "list_databases", nil); msg != "" || len(ws["databases"].([]any)) != 0 {

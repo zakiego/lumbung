@@ -87,7 +87,7 @@ Limits, timeouts and quotas are in the [configuration reference](https://lumbung
 
 `compose.yaml` is the generic setup: two containers, ports on localhost only. To reach them from elsewhere, put a reverse proxy with TLS in front. The [self-hosting docs](https://lumbung.zakiego.com/docs/self-hosting/docker-compose/) cover Caddy, nginx and tunnels, hardening, backups, monitoring and upgrades.
 
-`ops/` holds the files for the instance behind lumbung.zakiego.com (a Mac mini behind a Cloudflare Tunnel, plus an edge Worker in `apps/edge`). It's a working example, not something the product depends on.
+`ops/` holds the files for the instance behind lumbung.zakiego.com (one host behind a Cloudflare Tunnel, plus an edge Worker in `apps/edge`). It's a working example, not something the product depends on.
 
 ## Development
 

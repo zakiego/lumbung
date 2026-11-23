@@ -1,6 +1,6 @@
 #!/bin/bash
 # Restore drill: prove the newest nightly backup on the host restores into a
-# working engine. Our deployment (zaki-selfhost); run on the Docker host.
+# working engine. Run on the Docker host.
 #
 #   ops/restore-drill.sh            newest backup in ~/selfhost/lumbung-backups/engine
 #   ops/restore-drill.sh <folder>   one backup folder (holds manifest.json)
@@ -77,7 +77,7 @@ fi
 src="$(cd "$src" && pwd)"
 log "backup: $src"
 
-# A free port in the zaki-selfhost range, picked from the top down so it
+# A free port in the 4800s range, picked from the top down so it
 # stays clear of the apps' ports.
 port="${DRILL_PORT:-}"
 if [ -z "$port" ]; then

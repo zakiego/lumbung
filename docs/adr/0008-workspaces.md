@@ -20,7 +20,7 @@ Every instance has one **default workspace**, made by the migration (and on a fr
 
 Files on disk don't change. They are named by database, branch, bucket and blob ids, which stay unique on the instance, so a workspace is a column in meta.db and not a folder.
 
-Considered: making a workspace a naming prefix on top of grants (a token that may create anything named `palui-*`). Rejected: names would stay global, a failed create would reveal names other tenants took, and quotas, audit and deletion would have nothing to hang on.
+Considered: making a workspace a naming prefix on top of grants (a token that may create anything named `app-*`). Rejected: names would stay global, a failed create would reveal names other tenants took, and quotas, audit and deletion would have nothing to hang on.
 
 Considered: one meta.db per workspace. It isolates further, but backups, the token lookup and the instance limits would all need a view across files, and ADR 0006 already chose one index for the same reason.
 
