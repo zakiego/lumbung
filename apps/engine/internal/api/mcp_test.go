@@ -462,3 +462,84 @@ func TestMCPFailedAuthLockout(t *testing.T) {
 		t.Fatalf("lockout content type %q", last.Header.Get("Content-Type"))
 	}
 }
+
+// /mcp serves both protocol eras: go-sdk's client probes server/discover and
+// stays on 2026-07-28, while a client pinned to 2025-11-25 (like the old TS
+// SDK in Claude Code and mcporter) goes through initialize. Both see the same
+// tools and the same results.
+func TestMCPServesBothProtocolEras(t *testing.T) {
+	e := newEnv(t, nil)
+	connect := func(opts *mcp.ClientSessionOptions) *mcp.ClientSession {
+		t.Helper()
+		client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+		transport := &mcp.StreamableClientTransport{
+			Endpoint:             e.http.URL + "/mcp",
+			HTTPClient:           &http.Client{Transport: bearer{e.admin, http.DefaultTransport}},
+			DisableStandaloneSSE: true,
+			MaxRetries:           -1,
+		}
+		s, err := client.Connect(context.Background(), transport, opts)
+		if err != nil {
+			t.Fatalf("connect: %v", err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		return s
+	}
+	modern := connect(nil)
+	legacy := connect(&mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+	if v := modern.InitializeResult().ProtocolVersion; v != "2026-07-28" {
+		t.Fatalf("modern client negotiated %q", v)
+	}
+	if v := legacy.InitializeResult().ProtocolVersion; v != "2025-11-25" {
+		t.Fatalf("legacy client negotiated %q", v)
+	}
+
+	names := func(s *mcp.ClientSession) string {
+		t.Helper()
+		res, err := s.ListTools(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, tl := range res.Tools {
+			out = append(out, tl.Name)
+		}
+		return strings.Join(out, ",")
+	}
+	if m, l := names(modern), names(legacy); m != l || !strings.Contains(m, "list_databases") {
+		t.Fatalf("tools differ:\nmodern: %s\nlegacy: %s", m, l)
+	}
+	if _, msg := call(t, modern, "create_database", map[string]any{"name": "shop"}); msg != "" {
+		t.Fatal(msg)
+	}
+	m, mErr := call(t, modern, "list_databases", nil)
+	l, lErr := call(t, legacy, "list_databases", nil)
+	mj, _ := json.Marshal(m)
+	lj, _ := json.Marshal(l)
+	if mErr != "" || lErr != "" || string(mj) != string(lj) || !strings.Contains(string(mj), "shop") {
+		t.Fatalf("list_databases differs:\nmodern: %s %s\nlegacy: %s %s", mj, mErr, lj, lErr)
+	}
+
+	// A modern request whose mirrored Mcp-Name disagrees with the body is refused.
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_databases","arguments":{},"_meta":{` +
+		`"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`
+	req, _ := http.NewRequest(http.MethodPost, e.http.URL+"/mcp", strings.NewReader(body))
+	for k, v := range map[string]string{
+		"Authorization": "Bearer " + e.admin, "Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+		"MCP-Protocol-Version": "2026-07-28", "Mcp-Method": "tools/call", "Mcp-Name": "delete_database",
+	} {
+		req.Header.Set(k, v)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var rpc struct {
+		Error struct{ Code int } `json:"error"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&rpc)
+	if res.StatusCode != http.StatusBadRequest || rpc.Error.Code != -32020 {
+		t.Fatalf("header mismatch: %d %d", res.StatusCode, rpc.Error.Code)
+	}
+}
